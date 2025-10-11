@@ -1,0 +1,200 @@
+services:
+  mongo:
+    image: mongo:6
+    container_name: mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://localhost:27017/admin", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  auth-service:
+    image: node:20-alpine
+    container_name: auth-service
+    working_dir: /usr/src/app
+    command: sh -c "npm install && node server.js"
+    volumes:
+      - ./backend/auth-service:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - .env
+    environment:
+      PORT: ${AUTH_PORT:-4000}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/food_delivery}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      NODE_ENV: development
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${AUTH_PORT:-4000}:${AUTH_PORT:-4000}"
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  restaurant-service:
+    image: node:20-alpine
+    container_name: restaurant-service
+    working_dir: /usr/src/app
+    command: sh -c "npm install && node src/server.js"
+    volumes:
+      - ./backend/restaurant-service:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - .env
+    environment:
+      PORT: ${REST_PORT:-5002}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/food_delivery}
+      NODE_ENV: development
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${REST_PORT:-5002}:${REST_PORT:-5002}"
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  order-service:
+    image: node:20-alpine
+    container_name: order-service
+    working_dir: /usr/src/app
+    command: sh -c "npm install && node index.js"
+    volumes:
+      - ./backend/order-service:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - .env
+    environment:
+      PORT: ${ORDER_PORT:-5005}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/food_delivery}
+      NODE_ENV: development
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${ORDER_PORT:-5005}:${ORDER_PORT:-5005}"
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  delivery-service:
+    image: node:20-alpine
+    container_name: delivery-service
+    working_dir: /usr/src/app
+    command: sh -c "npm install && node src/server.js"
+    volumes:
+      - ./delivery-service/backend:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - .env
+    environment:
+      PORT: ${DELIVERY_PORT:-5003}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/food_delivery}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: development
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${DELIVERY_PORT:-5003}:${DELIVERY_PORT:-5003}"
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  payment-service:
+    image: node:20-alpine
+    container_name: payment-service
+    working_dir: /usr/src/app
+    command: sh -c "npm install && node server.js"
+    volumes:
+      - ./backend/payment-service:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - .env
+    environment:
+      PORT: ${PAY_PORT:-5004}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/food_delivery}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      NODE_ENV: development
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${PAY_PORT:-5004}:${PAY_PORT:-5004}"
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  frontend:
+    image: node:20-alpine
+    container_name: frontend
+    working_dir: /usr/src/app
+    command: sh -c "npm install && npm start"
+    volumes:
+      - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - frontend/.env
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      CI: "false"
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    depends_on:
+      - auth-service
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    networks:
+      - appnet
+
+  delivery-frontend:
+    image: node:20-alpine
+    container_name: delivery-frontend
+    working_dir: /usr/src/app
+    command: sh -c "npm install && npm start"
+    volumes:
+      - ./delivery-service/frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      PORT: 3001
+      HOST: 0.0.0.0
+      CI: "false"
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    depends_on:
+      - delivery-service
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    networks:
+      - appnet
+  
+  
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    driver: local
