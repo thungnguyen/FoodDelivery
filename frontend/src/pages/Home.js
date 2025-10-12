@@ -1,5 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import "../styles/home.css";
@@ -22,24 +23,85 @@ function Home() {
 
       <main className="home-main">
         {/* Hero Section */}
-        <motion.div 
+        <motion.div
           className="hero-section"
           initial={{ opacity: 0, y: -50 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
         >
-          <h1 className="hero-title">Get Your Favorite Food Delivered Fast & Fresh</h1>
-          <p className="hero-subtitle">Delicious meals at your doorstep in minutes.</p>
-          <div className="hero-buttons">
-            <motion.a 
-              href="/menu" 
-              className="hero-button primary"
-              whileHover={{ scale: 1.1 }}
-            >
-              Order Now
-            </motion.a>
-          </div>
+          <h1 className="hero-title">Welcome to SkyDish Food Delivery</h1>
+          <p className="hero-subtitle">Choose your role to get started</p>
         </motion.div>
+
+        {/* Role Selection Section */}
+        <section className="role-selection">
+          <h2>Select Your Role</h2>
+          <div className="role-cards">
+            <Link to="/customer" className="role-card-link">
+              <motion.div
+                className="role-card customer-card"
+                whileHover={{ scale: 1.05, y: -10 }}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4 }}
+              >
+                <div className="role-card-icon">🍔</div>
+                <h3>Customer</h3>
+                <p>Order delicious food from your favorite restaurants</p>
+                <div className="role-card-arrow">→</div>
+              </motion.div>
+            </Link>
+
+            <Link to="/restaurant" className="role-card-link">
+              <motion.div
+                className="role-card restaurant-card"
+                whileHover={{ scale: 1.05, y: -10 }}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: 0.1 }}
+              >
+                <div className="role-card-icon">🍽️</div>
+                <h3>Restaurant</h3>
+                <p>Manage your menu and grow your business</p>
+                <div className="role-card-arrow">→</div>
+              </motion.div>
+            </Link>
+
+            <Link to="/admin" className="role-card-link">
+              <motion.div
+                className="role-card admin-card"
+                whileHover={{ scale: 1.05, y: -10 }}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: 0.2 }}
+              >
+                <div className="role-card-icon">👨‍💼</div>
+                <h3>Admin</h3>
+                <p>Manage and oversee the platform</p>
+                <div className="role-card-arrow">→</div>
+              </motion.div>
+            </Link>
+
+            <Link to="/driver" className="role-card-link">
+              <motion.div
+                className="role-card driver-card"
+                whileHover={{ scale: 1.05, y: -10 }}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: 0.3 }}
+              >
+                <div className="role-card-icon">🚗</div>
+                <h3>Delivery Driver</h3>
+                <p>Join our team and earn money delivering</p>
+                <div className="role-card-arrow">→</div>
+              </motion.div>
+            </Link>
+          </div>
+        </section>
 
         {/* Featured Categories */}
         <section className="featured-categories">

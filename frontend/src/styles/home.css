@@ -233,3 +233,133 @@
   object-fit: cover;
   margin-bottom: 10px;
 }
+
+/* Role Selection Section Styles */
+.role-selection {
+  padding: 60px 20px;
+  background-color: #fff;
+  text-align: center;
+}
+
+.role-selection h2 {
+  font-size: 2.5rem;
+  color: #333;
+  margin-bottom: 50px;
+  font-weight: 700;
+}
+
+.role-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.role-card-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.role-card {
+  background: white;
+  border-radius: 20px;
+  padding: 40px 30px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.role-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 5px;
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+
+.role-card:hover::before {
+  transform: scaleX(1);
+}
+
+.role-card:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+}
+
+.customer-card {
+  border-top: 4px solid #ff8c00;
+}
+
+.restaurant-card {
+  border-top: 4px solid #2e7d32;
+}
+
+.admin-card {
+  border-top: 4px solid #1976d2;
+}
+
+.driver-card {
+  border-top: 4px solid #9c27b0;
+}
+
+.role-card-icon {
+  font-size: 70px;
+  margin-bottom: 20px;
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+
+.role-card:hover .role-card-icon {
+  transform: scale(1.1) rotate(5deg);
+}
+
+.role-card h3 {
+  font-size: 1.8rem;
+  color: #333;
+  margin-bottom: 15px;
+  font-weight: 600;
+}
+
+.role-card p {
+  font-size: 1rem;
+  color: #666;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.role-card-arrow {
+  font-size: 2rem;
+  color: #667eea;
+  font-weight: bold;
+  opacity: 0;
+  transform: translateX(-20px);
+  transition: all 0.3s ease;
+}
+
+.role-card:hover .role-card-arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Responsive Design for Role Cards */
+@media (max-width: 768px) {
+  .role-cards {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .role-selection h2 {
+    font-size: 2rem;
+  }
+
+  .role-card {
+    padding: 30px 20px;
+  }
+}

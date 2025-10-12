@@ -1,0 +1,240 @@
+/* Driver Portal Home Page Styles */
+
+/* Driver Hero Section */
+.driver-hero {
+  background: linear-gradient(135deg, #9c27b0 0%, #6a1b9a 100%) !important;
+  padding: 80px 20px !important;
+}
+
+.driver-icon-large {
+  font-size: 100px;
+  margin-bottom: 20px;
+  animation: drive 2s ease-in-out infinite;
+}
+
+@keyframes drive {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(20px); }
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.hero-button {
+  padding: 15px 40px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 30px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+}
+
+.hero-button.primary {
+  background: white;
+  color: #9c27b0;
+}
+
+.hero-button.secondary {
+  background: transparent;
+  color: white;
+  border: 2px solid white;
+}
+
+/* Driver Benefits Section */
+.driver-benefits {
+  padding: 80px 20px;
+  background: #f5f5f5;
+  text-align: center;
+}
+
+.driver-benefits h2 {
+  font-size: 2.5rem;
+  color: #333;
+  margin-bottom: 50px;
+}
+
+.benefits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.benefit-card {
+  background: white;
+  padding: 40px 30px;
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.benefit-card:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.benefit-icon {
+  font-size: 60px;
+  margin-bottom: 20px;
+}
+
+.benefit-card h3 {
+  font-size: 1.5rem;
+  color: #333;
+  margin-bottom: 15px;
+}
+
+.benefit-card p {
+  font-size: 1rem;
+  color: #666;
+  line-height: 1.6;
+}
+
+/* Driver How It Works */
+.driver-how {
+  padding: 80px 20px;
+  background: white;
+}
+
+.driver-how h2 {
+  font-size: 2.5rem;
+  color: #333;
+  margin-bottom: 50px;
+  text-align: center;
+}
+
+.driver-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.driver-step {
+  background: #f9f9f9;
+  padding: 30px;
+  border-radius: 15px;
+  border-left: 5px solid #9c27b0;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.driver-step:hover {
+  transform: translateX(10px);
+  box-shadow: 0 4px 15px rgba(156, 39, 176, 0.2);
+}
+
+.step-number {
+  position: absolute;
+  top: -15px;
+  left: 20px;
+  width: 40px;
+  height: 40px;
+  background: #9c27b0;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.step-icon-big {
+  font-size: 50px;
+  margin: 20px 0;
+}
+
+.driver-step h3 {
+  font-size: 1.3rem;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.driver-step p {
+  font-size: 1rem;
+  color: #666;
+  line-height: 1.6;
+}
+
+/* CTA Section */
+.driver-cta {
+  padding: 100px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  text-align: center;
+}
+
+.cta-content h2 {
+  font-size: 2.5rem;
+  color: white;
+  margin-bottom: 20px;
+}
+
+.cta-content p {
+  font-size: 1.2rem;
+  color: white;
+  margin-bottom: 40px;
+  opacity: 0.9;
+}
+
+.cta-button {
+  padding: 18px 50px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  background: white;
+  color: #667eea;
+  border: none;
+  border-radius: 40px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.cta-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .driver-hero {
+    padding: 60px 20px !important;
+  }
+
+  .driver-icon-large {
+    font-size: 70px;
+  }
+
+  .hero-title {
+    font-size: 2rem !important;
+  }
+
+  .driver-benefits h2,
+  .driver-how h2,
+  .cta-content h2 {
+    font-size: 2rem;
+  }
+
+  .benefits-grid,
+  .driver-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .hero-button {
+    width: 100%;
+    max-width: 300px;
+  }
+}

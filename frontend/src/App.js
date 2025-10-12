@@ -42,6 +42,12 @@ import RestaurantLogin from './pages/restaurant/components/RestaurantLogin';
 import RestaurantDashboard from './pages/restaurant/pages/RestaurantDashboard';
 import IndexPage from './pages/restaurant/components/IndexPage';
 
+// landing pages
+import CustomerLanding from './pages/landing/CustomerLanding';
+import RestaurantLanding from './pages/landing/RestaurantLanding';
+import AdminLanding from './pages/landing/AdminLanding';
+import DriverLanding from './pages/landing/DriverLanding';
+
 // delivery management
 
 function App() {
@@ -60,6 +66,12 @@ function App() {
           <Route path="/about" element={<About />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/contact" element={<ContactAndFeedback />} />
+
+          {/* landing pages */}
+          <Route path="/customer" element={<CustomerLanding />} />
+          <Route path="/restaurant" element={<RestaurantLanding />} />
+          <Route path="/admin" element={<AdminLanding />} />
+          <Route path="/driver" element={<DriverLanding />} />
 
           {/* auth routes */}
           <Route path="/auth/login" element={<AuthLogin />} />
@@ -80,7 +92,7 @@ function App() {
           <Route path="/customer/home" element={<CustomerHome />} />
           <Route path="/customer/restaurant/:id" element={<RestaurentDetails />} />
           <Route path="/customer/restaurant/:restaurantId/foods" element={<FoodItemList />} />
-          <Route path="customer/cart" element={<AddToCartPage />} />
+          <Route path="/customer/cart" element={<AddToCartPage />} />
 
           {/* restaurant management */}
           <Route path="/superadmin/register" element={<SuperAdminRegister />} />

@@ -1,19 +1,10 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import "../styles/home.css";
-
-// Import images
-import burgerImage from "../assets/burgers.jpg";
-import pizzaImage from "../assets/pizzas.png";
-import sushiImage from "../assets/sushi.jpg";
-import dessertImage from "../assets/desserts.png";
-import step1Icon from "../assets/menu.png";
-import step2Icon from "../assets/order.png";
-import step3Icon from "../assets/track.png";
-import step4Icon from "../assets/meal.png";
-import user1Image from "../assets/sushi.jpg";
+import "../styles/driver-home.css";
 
 function Home() {
   return (
@@ -21,91 +12,139 @@ function Home() {
       <Header />
 
       <main className="home-main">
-        {/* Hero Section */}
-        <motion.div 
-          className="hero-section"
+        {/* Hero Section for Drivers */}
+        <motion.div
+          className="hero-section driver-hero"
           initial={{ opacity: 0, y: -50 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
         >
-          <h1 className="hero-title">Get Your Favorite Food Delivered Fast & Fresh</h1>
-          <p className="hero-subtitle">Delicious meals at your doorstep in minutes.</p>
+          <div className="driver-icon-large">🚗</div>
+          <h1 className="hero-title">Welcome to Driver Portal</h1>
+          <p className="hero-subtitle">Join our delivery team and start earning today</p>
           <div className="hero-buttons">
-            <motion.a 
-              href="/menu" 
-              className="hero-button primary"
-              whileHover={{ scale: 1.1 }}
-            >
-              Order Now
-            </motion.a>
+            <Link to="/login">
+              <motion.button
+                className="hero-button primary"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Login as Driver
+              </motion.button>
+            </Link>
+            <Link to="/register">
+              <motion.button
+                className="hero-button secondary"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Register Now
+              </motion.button>
+            </Link>
           </div>
         </motion.div>
 
-        {/* Featured Categories */}
-        <section className="featured-categories">
-          <h2>Popular Categories</h2>
-          <div className="categories-grid">
-            {[{ name: 'Burgers', image: burgerImage }, { name: 'Pizzas', image: pizzaImage }, { name: 'Sushi', image: sushiImage }, { name: 'Desserts', image: dessertImage }].map((category, index) => (
-              <motion.div 
-                key={index} 
-                className="category-card"
-                whileHover={{ scale: 1.05 }}
-                initial={{ opacity: 0, y: 50 }}
-                whileInView={{ opacity: 1, y: 0 }}
+        {/* Driver Benefits Section */}
+        <section className="driver-benefits">
+          <h2>Why Join Our Driver Team?</h2>
+          <div className="benefits-grid">
+            <motion.div
+              className="benefit-card"
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5 }}
+            >
+              <div className="benefit-icon">💵</div>
+              <h3>Earn Good Money</h3>
+              <p>Flexible hours with competitive pay. Earn more during peak hours</p>
+            </motion.div>
+
+            <motion.div
+              className="benefit-card"
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+            >
+              <div className="benefit-icon">⏰</div>
+              <h3>Flexible Schedule</h3>
+              <p>Work when you want. Be your own boss and set your hours</p>
+            </motion.div>
+
+            <motion.div
+              className="benefit-card"
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+            >
+              <div className="benefit-icon">📱</div>
+              <h3>Easy-to-Use App</h3>
+              <p>Simple interface with GPS navigation and real-time updates</p>
+            </motion.div>
+
+            <motion.div
+              className="benefit-card"
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+            >
+              <div className="benefit-icon">🎯</div>
+              <h3>Track Your Earnings</h3>
+              <p>Monitor your deliveries and income in real-time</p>
+            </motion.div>
+          </div>
+        </section>
+
+        {/* How It Works for Drivers */}
+        <section className="how-it-works driver-how">
+          <h2>How Delivery Works</h2>
+          <div className="driver-steps">
+            {[
+              { title: 'Get Online', desc: 'Open the app and start accepting delivery requests', icon: '📱' },
+              { title: 'Pick Up Order', desc: 'Navigate to restaurant and collect the order', icon: '🏪' },
+              { title: 'Deliver', desc: 'Use GPS to deliver to customer location', icon: '🚗' },
+              { title: 'Get Paid', desc: 'Earn money instantly after each delivery', icon: '💰' }
+            ].map((step, index) => (
+              <motion.div
+                key={index}
+                className="driver-step"
+                initial={{ opacity: 0, x: -30 }}
+                whileInView={{ opacity: 1, x: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: index * 0.2 }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
               >
-                <img src={category.image} alt={category.name} />
-                <h3>{category.name}</h3>
+                <div className="step-number">{index + 1}</div>
+                <div className="step-icon-big">{step.icon}</div>
+                <h3>{step.title}</h3>
+                <p>{step.desc}</p>
               </motion.div>
             ))}
           </div>
         </section>
 
-        {/* How It Works Section */}
-        <section className="how-it-works">
-          <h2>How It Works</h2>
-          <div className="steps">
-            {[{ step: 'Browse Menu', icon: step1Icon }, { step: 'Order', icon: step2Icon }, { step: 'Track', icon: step3Icon }, { step: 'Enjoy!', icon: step4Icon }].map((item, index, array) => (
-              <React.Fragment key={index}>
-                <motion.div
-                  className="step redesigned-step"
-                  data-step={index + 1} /* Added data-step attribute for step numbers */
-                  initial={{ opacity: 0, y: 50 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: index * 0.2 }}
-                >
-                  <div className="step-icon redesigned-step-icon">
-                    <img src={item.icon} alt={item.step} />
-                  </div>
-                  <h3 className="step-title">{item.step}</h3>
-                  <p className="step-description">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin vel nisi id odio tincidunt facilisis.</p>
-                </motion.div>
-                {index < array.length - 1 && (
-                  <div className="arrow" /> /* Render arrow between steps */
-                )}
-              </React.Fragment>
-            ))}
-          </div>
-        </section>
-
-        {/* Testimonials Section */}
-        <section className="testimonials">
-          <h2>What Our Customers Say</h2>
-          <motion.div 
-            className="testimonials-slider"
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
+        {/* CTA Section */}
+        <section className="driver-cta">
+          <motion.div
+            className="cta-content"
+            initial={{ opacity: 0, scale: 0.9 }}
+            whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
+            transition={{ duration: 0.6 }}
           >
-            {/* Example testimonial */}
-            <div className="testimonial">
-              <img src={user1Image} alt="User 1" />
-              <p>"Amazing service and delicious food! Highly recommend."</p>
-              <div className="stars">★★★★★</div>
-            </div>
+            <h2>Ready to Start Earning?</h2>
+            <p>Join thousands of drivers already making money with us</p>
+            <Link to="/register">
+              <motion.button
+                className="cta-button"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Sign Up Now - It's Free!
+              </motion.button>
+            </Link>
           </motion.div>
         </section>
       </main>
