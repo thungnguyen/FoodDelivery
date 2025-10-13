@@ -17,7 +17,7 @@ import AuthRegister from "./pages/auth/AuthRegister";
 import CustomerProfile from "./pages/auth/CustomerProfile";
 
 // payment management
-import Checkout from "./pages/payment/Checkout";
+import Checkout from "./pages/payment/CheckoutNew";
 
 // order management
 import OrderHome from "./pages/orderManagement/OrderHome";
@@ -93,6 +93,7 @@ function App() {
           <Route path="/customer/restaurant/:id" element={<RestaurentDetails />} />
           <Route path="/customer/restaurant/:restaurantId/foods" element={<FoodItemList />} />
           <Route path="/customer/cart" element={<AddToCartPage />} />
+          <Route path="/customer/orders" element={<Orders />} />
 
           {/* restaurant management */}
           <Route path="/superadmin/register" element={<SuperAdminRegister />} />

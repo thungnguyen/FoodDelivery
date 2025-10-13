@@ -18,8 +18,8 @@ app.use(express.json());
 
 
 // Routes
-app.use('/api/restaurant', restaurantRoutes);
-app.use('/api/superAdmin', superAdminRoutes);
+app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/food-items', foodItemRoutes);
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 

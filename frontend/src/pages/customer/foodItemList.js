@@ -31,17 +31,12 @@ function FoodItemList() {
     const fetchRestaurantDetails = async () => {
       try {
         const res = await axios.get(
-          `${RESTAURANT_SERVICE_URL}/api/superadmin/restaurant/${restaurantId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          }
+          `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`
         );
         setRestaurantName(res.data.name);
       } catch (err) {
         console.error(err);
-        setRestaurantName("PAAN PAAN");
+        setRestaurantName("Restaurant");
       }
     };
 

@@ -15,12 +15,7 @@ function CustomerHome() {
   useEffect(() => {
     const fetchRestaurants = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/superadmin/restaurants`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
+        const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/all`);
 
         const data = await res.json();
         if (res.ok) {

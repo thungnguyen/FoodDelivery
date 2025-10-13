@@ -128,4 +128,29 @@ router.put('/availability', authMiddleware, async (req, res) => {
   }
 });
 
+// Get all restaurants (Public - for customers to browse)
+router.get('/all', async (req, res) => {
+  try {
+    const restaurants = await Restaurant.find({ availability: true }).select('-admin.password');
+    res.status(200).json(restaurants);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+// Get restaurant by ID (Public - for customers)
+router.get('/:id', async (req, res) => {
+  try {
+    const restaurant = await Restaurant.findById(req.params.id).select('-admin.password');
+    if (!restaurant) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+    res.status(200).json(restaurant);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
 export default router;

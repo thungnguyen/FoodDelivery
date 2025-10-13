@@ -22,7 +22,8 @@ export default function AuthLogin() {
     try {
       const res = await axios.post(`${AUTH_SERVICE_URL}/api/auth/login`, credentials);
       localStorage.setItem("token", res.data.token);
-      navigate("/customer/profile");
+      localStorage.setItem("userRole", "customer");
+      navigate("/customer/home");
     } catch (err) {
       setError(err.response?.data?.message || "Login failed");
     }
