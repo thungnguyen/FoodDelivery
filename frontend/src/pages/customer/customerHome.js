@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useContext, useCallback } from "re
 import { useNavigate } from "react-router-dom";
 import { RESTAURANT_SERVICE_URL, AUTH_SERVICE_URL } from "../../utils/serviceUrls";
 import { CartContext } from "../contexts/CartContext";
-import { FaRegUserCircle, FaClipboardList, FaShoppingCart, FaSignOutAlt } from "react-icons/fa";
+import { FaRegUserCircle, FaClipboardList, FaShoppingCart, FaSignOutAlt, FaUtensils, FaMapMarkerAlt, FaClock } from "react-icons/fa";
 
 function CustomerHome() {
   const [restaurants, setRestaurants] = useState([]);
@@ -15,6 +15,49 @@ function CustomerHome() {
   const cartItemCount = useMemo(
     () => cartItems.reduce((count, item) => count + (item.quantity || 1), 0),
     [cartItems]
+  );
+  const totalRestaurants = restaurants.length;
+
+  const lastProfileUpdate = useMemo(() => {
+    if (!customer?.updatedAt) return null;
+    try {
+      return new Date(customer.updatedAt);
+    } catch (err) {
+      return null;
+    }
+  }, [customer]);
+
+  const stats = useMemo(
+    () => [
+      {
+        label: "Nhà hàng đối tác",
+        value: totalRestaurants,
+        icon: <FaMapMarkerAlt size={18} color="#2563eb" />,
+      },
+      {
+        label: "Món trong giỏ",
+        value: cartItemCount,
+        icon: <FaShoppingCart size={18} color="#16a34a" />,
+      },
+      {
+        label: "Cập nhật hồ sơ",
+        value: lastProfileUpdate ? lastProfileUpdate.toLocaleDateString("vi-VN") : "Chưa cập nhật",
+        icon: <FaClock size={18} color="#f59e0b" />,
+      },
+    ],
+    [totalRestaurants, cartItemCount, lastProfileUpdate]
+  );
+
+  const categories = useMemo(
+    () => [
+      "Món Việt",
+      "Mì & Phở",
+      "Cà phê & Trà sữa",
+      "Đồ ăn nhanh",
+      "Tráng miệng",
+      "Ăn sáng nhanh",
+    ],
+    []
   );
 
   const filteredRestaurants = restaurants.filter(r =>
@@ -87,14 +130,16 @@ function CustomerHome() {
       description: "Cập nhật thông tin cá nhân và địa chỉ giao hàng của bạn.",
       icon: <FaRegUserCircle size={28} color="#ff914d" />,
       onClick: () => navigate("/customer/profile"),
-      accent: "#fff0e6",
+      background: "linear-gradient(135deg, rgba(255,239,229,1) 0%, rgba(255,217,189,1) 100%)",
+      textColor: "#9a3412",
     },
     {
       title: "Đơn hàng hiện tại",
       description: "Theo dõi tình trạng và chi tiết đơn hàng của bạn.",
       icon: <FaClipboardList size={28} color="#4d96ff" />,
       onClick: () => navigate("/customer/orders"),
-      accent: "#e6f0ff",
+      background: "linear-gradient(135deg, rgba(230,240,255,1) 0%, rgba(209,229,255,1) 100%)",
+      textColor: "#1d4ed8",
     },
     {
       title: "Giỏ hàng",
@@ -103,7 +148,8 @@ function CustomerHome() {
         : "Giỏ hàng của bạn đang trống, cùng chọn món nhé!",
       icon: <FaShoppingCart size={28} color="#44c767" />,
       onClick: () => navigate("/customer/cart"),
-      accent: "#e8f8ef",
+      background: "linear-gradient(135deg, rgba(232,248,239,1) 0%, rgba(210,241,222,1) 100%)",
+      textColor: "#047857",
       badge: cartItemCount,
     },
     {
@@ -111,7 +157,8 @@ function CustomerHome() {
       description: "Đăng xuất tài khoản và quay lại trang chủ.",
       icon: <FaSignOutAlt size={28} color="#ff6b6b" />,
       onClick: handleLogout,
-      accent: "#ffecec",
+      background: "linear-gradient(135deg, rgba(255,236,236,1) 0%, rgba(255,214,214,1) 100%)",
+      textColor: "#b91c1c",
     },
   ];
 
@@ -119,31 +166,150 @@ function CustomerHome() {
     <div style={{ padding: "30px", backgroundColor: "#f8f9ff", minHeight: "100vh" }}>
       <div
         style={{
-          background: "linear-gradient(135deg, #ffecd9 0%, #ffe0f7 100%)",
-          borderRadius: "20px",
-          padding: "32px",
-          marginBottom: "32px",
-          boxShadow: "0 18px 40px rgba(0,0,0,0.08)",
+          position: "relative",
+          borderRadius: "28px",
+          padding: "48px 40px",
+          marginBottom: "40px",
+          overflow: "hidden",
+          background: "linear-gradient(125deg, #ffb36b 0%, #ff5f8f 50%, #6a5bff 100%)",
+          color: "#fff",
+          boxShadow: "0 25px 55px rgba(88, 81, 219, 0.32)",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-          <div>
-            <p style={{ margin: 0, color: "#7a7a7a", fontSize: "16px" }}>Chào mừng bạn trở lại,</p>
-            <h2
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "radial-gradient(circle at top left, rgba(255,255,255,0.25), transparent 45%), radial-gradient(circle at bottom right, rgba(255,255,255,0.18), transparent 40%)",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "36px",
+          }}
+        >
+          <div style={{ flex: "1 1 320px", minWidth: "260px" }}>
+            <p style={{ margin: 0, opacity: 0.85, fontSize: "16px", letterSpacing: "0.5px" }}>
+              Chào mừng bạn trở lại
+            </p>
+            <h1
               style={{
-                fontSize: "34px",
-                fontWeight: "700",
-                color: "#ff6b00",
-                margin: 0,
-                textShadow: "0 12px 24px rgba(255,107,0,0.25)",
+                margin: "14px 0 18px",
+                fontSize: "36px",
+                lineHeight: 1.2,
+                fontWeight: 700,
               }}
             >
-              {customer ? `${customer.firstName} ${customer.lastName}` : "Khách hàng thân thiết"} 👋
-            </h2>
+              {customer ? `${customer.firstName} ${customer.lastName}` : "Khách hàng thân thiết"} 👋<br />
+              Sẵn sàng cho bữa ăn hôm nay?
+            </h1>
+            <p style={{ margin: "0 0 26px", maxWidth: "520px", fontSize: "17px", lineHeight: 1.6, opacity: 0.9 }}>
+              Khám phá thực đơn hấp dẫn, theo dõi đơn hàng và cá nhân hóa trải nghiệm giao đồ ăn của riêng bạn chỉ với vài thao tác.
+            </p>
+            <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+              <button
+                onClick={() => navigate("/customer/profile")}
+                style={{
+                  padding: "12px 28px",
+                  borderRadius: "999px",
+                  border: "none",
+                  backgroundColor: "rgba(255,255,255,0.92)",
+                  color: "#ff5f8f",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: "0 14px 26px rgba(255,255,255,0.25)",
+                }}
+              >
+                Quản lý thông tin
+              </button>
+              <button
+                onClick={() => {
+                  if (cartItemCount > 0) {
+                    navigate("/customer/cart");
+                  } else if (restaurants[0]) {
+                    handleCardClick(restaurants[0]._id);
+                  }
+                }}
+                style={{
+                  padding: "12px 24px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255,255,255,0.55)",
+                  backgroundColor: "transparent",
+                  color: "#fff",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  backdropFilter: "blur(4px)",
+                }}
+              >
+                Xem giỏ hàng
+              </button>
+            </div>
           </div>
-          <p style={{ margin: 0, maxWidth: "520px", color: "#555", fontSize: "16px", lineHeight: "1.5" }}>
-            Hãy khám phá những món ăn hấp dẫn, quản lý đơn hàng của bạn và thưởng thức trải nghiệm giao đồ ăn nhanh chóng cùng chúng tôi.
-          </p>
+          <div style={{ flex: "1 1 260px", minWidth: "240px" }}>
+            <div
+              style={{
+                backgroundColor: "rgba(255,255,255,0.18)",
+                borderRadius: "22px",
+                padding: "22px",
+                backdropFilter: "blur(8px)",
+                display: "grid",
+                gap: "18px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div
+                  style={{
+                    width: "48px",
+                    height: "48px",
+                    borderRadius: "16px",
+                    backgroundColor: "rgba(255,255,255,0.22)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <FaUtensils size={22} color="#fff" />
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: "14px", opacity: 0.8 }}>Nhà hàng khả dụng</p>
+                  <h3 style={{ margin: "4px 0 0", fontSize: "26px" }}>{totalRestaurants}</h3>
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: "12px" }}>
+                {categories.slice(0, 3).map((category) => (
+                  <span
+                    key={category}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "8px 14px",
+                      borderRadius: "999px",
+                      backgroundColor: "rgba(255,255,255,0.22)",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "6px",
+                        height: "6px",
+                        borderRadius: "50%",
+                        backgroundColor: "rgba(255,255,255,0.7)",
+                      }}
+                    />
+                    {category}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -164,7 +330,7 @@ function CustomerHome() {
               borderRadius: "18px",
               padding: "22px",
               textAlign: "left",
-              backgroundColor: action.accent,
+              background: action.background,
               cursor: "pointer",
               boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
               display: "flex",
@@ -183,11 +349,11 @@ function CustomerHome() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
               <span>{action.icon}</span>
-              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: "#333" }}>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: action.textColor || "#1f2937" }}>
                 {action.title}
               </h3>
             </div>
-            <p style={{ margin: 0, color: "#555", fontSize: "14px", lineHeight: "1.5" }}>
+            <p style={{ margin: 0, color: action.textColor || "#374151", fontSize: "14px", lineHeight: "1.5" }}>
               {action.description}
             </p>
             {typeof action.badge === "number" && action.badge > 0 && (
@@ -207,6 +373,77 @@ function CustomerHome() {
             )}
           </button>
         ))}
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "18px",
+          marginBottom: "36px",
+        }}
+      >
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            style={{
+              backgroundColor: "white",
+              borderRadius: "18px",
+              padding: "18px 22px",
+              boxShadow: "0 12px 26px rgba(15,23,42,0.08)",
+              display: "flex",
+              alignItems: "center",
+              gap: "14px",
+            }}
+          >
+            <div
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "16px",
+                backgroundColor: "rgba(99,102,241,0.12)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {stat.icon}
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>{stat.label}</p>
+              <h4 style={{ margin: "4px 0 0", fontSize: "20px", color: "#0f172a" }}>{stat.value}</h4>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: "22px",
+          padding: "26px 30px",
+          boxShadow: "0 18px 32px rgba(15,23,42,0.08)",
+          marginBottom: "36px",
+        }}
+      >
+        <h3 style={{ margin: "0 0 18px", fontSize: "22px", color: "#1e293b" }}>Khám phá nhanh</h3>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+          {categories.map((category) => (
+            <span
+              key={category}
+              style={{
+                padding: "10px 18px",
+                borderRadius: "999px",
+                backgroundColor: "rgba(59,130,246,0.12)",
+                color: "#1d4ed8",
+                fontWeight: 600,
+                fontSize: "13px",
+              }}
+            >
+              #{category}
+            </span>
+          ))}
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
@@ -276,7 +513,22 @@ function CustomerHome() {
             Không tìm thấy nhà hàng phù hợp. Hãy thử từ khóa khác nhé!
           </p>
         ) : (
-          filteredRestaurants.map((rest) => (
+          filteredRestaurants.map((rest) => {
+            const resolveImage = () => {
+              const picture = rest.profilePicture || rest.imageURL;
+              if (!picture) {
+                return "https://via.placeholder.com/300x200?text=Restaurant+Image";
+              }
+              if (/^https?:\/\//i.test(picture)) {
+                return picture;
+              }
+              const normalizedPath = picture.startsWith("/")
+                ? picture
+                : `/${picture}`;
+              return `${RESTAURANT_SERVICE_URL}${normalizedPath}`;
+            };
+
+            return (
             <div
               key={rest._id}
               onClick={() => handleCardClick(rest._id)}
@@ -298,7 +550,7 @@ function CustomerHome() {
               }}
             >
               <img
-                src={rest.imageURL || "https://via.placeholder.com/300x200?text=Restaurant+Image"}
+                src={resolveImage()}
                 alt={rest.name}
                 style={{
                   width: "100%",
@@ -321,7 +573,8 @@ function CustomerHome() {
                 </p>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
