@@ -4,20 +4,65 @@ import Order from "../models/orderModel.js";
 // @route POST /api/orders
 export const createOrder = async (req, res) => {
     try {
-        const { customerId, restaurantId, items, deliveryAddress } = req.body;
-        
+        const {
+            customerId,
+            customerName,
+            customerEmail,
+            customerPhone,
+            restaurantId,
+            restaurantName,
+            items = [],
+            deliveryAddress,
+            paymentMethod,
+            paymentStatus,
+            status
+        } = req.body;
+
+        if (!items.length) {
+            return res.status(400).json({ message: "Order must contain at least one item." });
+        }
+
+        const normalizedItems = items
+            .map(item => ({
+                foodId: item.foodId,
+                foodName: item.foodName,
+                quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 0,
+                price: Number.isFinite(Number(item.price)) ? Number(item.price) : 0
+            }))
+            .filter(item => item.foodId && item.quantity > 0);
+
+        if (!normalizedItems.length) {
+            return res.status(400).json({ message: "Order items are invalid." });
+        }
+
         // Calculate totalPrice based on items (quantity * price)
-        let totalPrice = 0;
-        items.forEach(item => {
-            totalPrice += item.quantity * item.price;
-        });
-        
+        const totalPrice = normalizedItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
+
+        const allowedPaymentStatuses = ["Pending", "Paid", "Failed"];
+        const normalizedPaymentStatus = allowedPaymentStatuses.find(
+            (value) => value.toLowerCase() === (paymentStatus || "").toLowerCase()
+        ) || "Pending";
+
+        const allowedStatuses = ["Pending", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Canceled"];
+        const normalizedStatus = allowedStatuses.find(
+            (value) => value.toLowerCase() === (status || "").toLowerCase()
+        ) || "Pending";
+
+        const normalizedPaymentMethod = (paymentMethod || "cash").toLowerCase() === "card" ? "card" : "cash";
+
         const order = new Order({
             customerId,  // Manually inputted customerId
+            customerName,
+            customerEmail,
+            customerPhone,
             restaurantId,  // Manually inputted restaurantId
-            items,
+            restaurantName,
+            items: normalizedItems,
             totalPrice,
-            deliveryAddress
+            deliveryAddress,
+            paymentMethod: normalizedPaymentMethod,
+            paymentStatus: normalizedPaymentStatus,
+            status: normalizedStatus
         });
 
         await order.save();
@@ -63,19 +108,51 @@ export const updateOrderDetails = async (req, res) => {
         }
 
         // Update order details
-        const { items, deliveryAddress } = req.body;
+        const { items, deliveryAddress, paymentStatus, status, paymentMethod } = req.body;
         
         // Update only provided fields
         if (items) {
-            order.items = items;
+            const normalizedItems = items
+                .map(item => ({
+                    foodId: item.foodId,
+                    foodName: item.foodName,
+                    quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 0,
+                    price: Number.isFinite(Number(item.price)) ? Number(item.price) : 0
+                }))
+                .filter(item => item.foodId && item.quantity > 0);
 
-            // Recalculate totalPrice based on the new items
-            order.totalPrice = 0;
-            items.forEach(item => {
-                order.totalPrice += item.quantity * item.price;
-            });
+            if (!normalizedItems.length) {
+                return res.status(400).json({ message: "Updated items are invalid." });
+            }
+
+            order.items = normalizedItems;
+            order.totalPrice = normalizedItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
         }
         if (deliveryAddress) order.deliveryAddress = deliveryAddress;
+
+        if (paymentStatus) {
+            const allowedPaymentStatuses = ["Pending", "Paid", "Failed"];
+            const normalizedPaymentStatus = allowedPaymentStatuses.find(
+                (value) => value.toLowerCase() === paymentStatus.toLowerCase()
+            );
+            if (normalizedPaymentStatus) {
+                order.paymentStatus = normalizedPaymentStatus;
+            }
+        }
+
+        if (status) {
+            const allowedStatuses = ["Pending", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Canceled"];
+            const normalizedStatus = allowedStatuses.find(
+                (value) => value.toLowerCase() === status.toLowerCase()
+            );
+            if (normalizedStatus) {
+                order.status = normalizedStatus;
+            }
+        }
+
+        if (paymentMethod) {
+            order.paymentMethod = paymentMethod.toLowerCase() === "card" ? "card" : "cash";
+        }
 
         await order.save();
 
@@ -91,7 +168,20 @@ export const updateOrderDetails = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
     try {
         const { status } = req.body;
-        const order = await Order.findByIdAndUpdate(req.params.id, { status }, { new: true });
+        const allowedStatuses = ["Pending", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Canceled"];
+        const normalizedStatus = allowedStatuses.find(
+            (value) => value.toLowerCase() === (status || "").toLowerCase()
+        );
+
+        if (!normalizedStatus) {
+            return res.status(400).json({ message: "Invalid status value" });
+        }
+
+        const order = await Order.findByIdAndUpdate(
+            req.params.id,
+            { status: normalizedStatus },
+            { new: true }
+        );
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 

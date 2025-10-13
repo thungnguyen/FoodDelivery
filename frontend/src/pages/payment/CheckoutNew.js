@@ -125,15 +125,26 @@ const CheckoutFormInner = () => {
 
       // Create order in backend
       const token = localStorage.getItem("token");
+      const calculatedTotal = orderData.items.reduce(
+        (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+        0
+      );
+
+      const paymentStatusValue = paymentMethod === "card" ? "Paid" : "Pending";
+
       const orderPayload = {
         customerId: orderData.customerId,
+        customerName: orderData.customerName,
+        customerEmail: orderData.customerEmail,
+        customerPhone: orderData.customerPhone,
         restaurantId: orderData.restaurantId,
+        restaurantName: orderData.restaurantName,
         items: orderData.items,
-        totalPrice: orderData.totalPrice,
+        totalPrice: calculatedTotal,
         deliveryAddress: orderData.deliveryAddress,
         paymentMethod: paymentMethod,
-        paymentStatus: paymentMethod === "card" ? "paid" : "pending",
-        status: "pending", // Initial order status
+        paymentStatus: paymentStatusValue,
+        status: "Pending", // Initial order status
       };
 
       const response = await axios.post(`${ORDER_SERVICE_URL}/api/orders`, orderPayload, {
@@ -174,6 +185,11 @@ const CheckoutFormInner = () => {
     );
   }
 
+  const displayTotal = orderData.items.reduce(
+    (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+    0
+  );
+
   return (
     <div className="container" style={{ padding: "20px", backgroundColor: "#f0f4f8", minHeight: "100vh" }}>
       {/* Back Button */}
@@ -193,14 +209,16 @@ const CheckoutFormInner = () => {
           <h5 style={{ marginBottom: "15px", color: "#555" }}>📦 Order Summary</h5>
           {orderData.items.map((item, index) => (
             <div key={index} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}>
-              <span>{item.foodName}</span>
-              <span>Rs. {item.price}</span>
+              <span>
+                {item.foodName} <span style={{ color: "#666", fontSize: "0.9rem" }}>x {item.quantity || 1}</span>
+              </span>
+              <span>Rs. {(item.price || 0) * (item.quantity || 1)}</span>
             </div>
           ))}
           <hr />
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "18px" }}>
             <span>Total:</span>
-            <span>Rs. {orderData.totalPrice}</span>
+            <span>Rs. {displayTotal}</span>
           </div>
         </div>
 

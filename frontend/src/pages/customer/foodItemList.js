@@ -52,7 +52,11 @@ function FoodItemList() {
   };
 
   const handleAddToCart = (food) => {
-    addToCart(food);
+    addToCart({
+      ...food,
+      restaurantName,
+      restaurant: food.restaurant || restaurantId,
+    });
     navigate("/customer/cart");
   };
 

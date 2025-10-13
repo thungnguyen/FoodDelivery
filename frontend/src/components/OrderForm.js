@@ -48,8 +48,11 @@ function OrderForm({ addOrder }) {
     }
   }, [cartItems, navigate]);
 
-  // Calculate total price
-  const totalPrice = cartItems.reduce((total, item) => total + (item.price || 0), 0);
+  // Calculate total price with quantities
+  const totalPrice = cartItems.reduce(
+    (total, item) => total + (item.price || 0) * (item.quantity || 1),
+    0
+  );
 
   const validateDeliveryAddress = (value) => {
     if (!value.trim()) {
@@ -75,6 +78,7 @@ function OrderForm({ addOrder }) {
 
     // Get restaurant ID from first cart item (assuming all items from same restaurant)
     const restaurantId = cartItems[0]?.restaurant;
+    const restaurantName = cartItems[0]?.restaurantName || "";
 
     // Save order data to localStorage for checkout page
     const orderData = {
@@ -83,11 +87,12 @@ function OrderForm({ addOrder }) {
       items: cartItems.map(item => ({
         foodId: item._id,
         foodName: item.name,
-        quantity: 1,
+        quantity: item.quantity || 1,
         price: item.price
       })),
       totalPrice: totalPrice,
       deliveryAddress: deliveryAddress,
+      restaurantName,
       customerName: `${customerInfo.firstName} ${customerInfo.lastName}`,
       customerEmail: customerInfo.email,
       customerPhone: customerInfo.phone,
@@ -177,9 +182,13 @@ function OrderForm({ addOrder }) {
               <div>
                 <strong>{item.name}</strong>
                 <p style={{ margin: "5px 0", fontSize: "14px", color: "#666" }}>{item.description}</p>
+                <p style={{ margin: "2px 0", fontSize: "14px", color: "#555" }}>Quantity: {item.quantity || 1}</p>
               </div>
               <div style={{ textAlign: "right" }}>
-                <strong>Rs. {item.price}</strong>
+                <strong>Rs. {(item.price || 0) * (item.quantity || 1)}</strong>
+                <div style={{ fontSize: "12px", color: "#888" }}>
+                  ({item.quantity || 1} x Rs. {item.price})
+                </div>
               </div>
             </div>
           ))}
