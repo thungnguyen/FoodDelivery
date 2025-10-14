@@ -1,6 +1,56 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import '../styles/rdashboard.css';
-import { RESTAURANT_SERVICE_URL } from '../../../utils/serviceUrls';
+import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL } from '../../../utils/serviceUrls';
+import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
+
+const ORDER_STATUS_LABELS = {
+  'Pending Confirmation': 'Chờ xác nhận',
+  Confirmed: 'Đã xác nhận',
+  Preparing: 'Đang chuẩn bị',
+  'Awaiting Driver': 'Chờ tài xế',
+  'Out for Delivery': 'Đang giao hàng',
+  Delivered: 'Đã giao hàng',
+  Completed: 'Đã hoàn thành',
+  Cancelled: 'Đã hủy',
+  Failed: 'Thất bại / Không giao được',
+  Refunded: 'Đã hoàn tiền',
+  // Backward compatibility
+  Pending: 'Chờ xác nhận',
+  Canceled: 'Đã hủy',
+  'Ready for Delivery': 'Chờ tài xế',
+};
+
+const ORDER_STATUS_ACTIONS = {
+  'Pending Confirmation': { nextStatus: 'Confirmed', label: 'Xác nhận đơn' },
+  Confirmed: { nextStatus: 'Preparing', label: 'Bắt đầu chuẩn bị' },
+  Preparing: { nextStatus: 'Awaiting Driver', label: 'Hoàn tất chế biến' },
+  Pending: { nextStatus: 'Confirmed', label: 'Xác nhận đơn' },
+};
+
+const ORDER_CANCELABLE_STATUSES = new Set([
+  'Pending Confirmation',
+  'Confirmed',
+  'Preparing',
+  'Awaiting Driver',
+  'Pending', // backward compatibility
+]);
+
+const ORDER_STATUS_CLASSES = {
+  'Pending Confirmation': 'status-pending',
+  Confirmed: 'status-confirmed',
+  Preparing: 'status-preparing',
+  'Awaiting Driver': 'status-ready',
+  'Out for Delivery': 'status-out',
+  Delivered: 'status-delivered',
+  Completed: 'status-completed',
+  Cancelled: 'status-canceled',
+  Failed: 'status-failed',
+  Refunded: 'status-refunded',
+  // Backward compatibility
+  Pending: 'status-pending',
+  'Ready for Delivery': 'status-ready',
+  Canceled: 'status-canceled',
+};
 
 function RestaurantDashboard() {
   const [activeTab, setActiveTab] = useState('profile');
@@ -19,22 +69,26 @@ function RestaurantDashboard() {
   const [editProfile, setEditProfile] = useState(false); // For editing profile
   const [editableProfile, setEditableProfile] = useState(null); // For editable profile data
   const API_BASE = RESTAURANT_SERVICE_URL;
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
+  const ORDER_API_BASE = ORDER_SERVICE_URL;
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    clearAuthToken(AUTH_ROLES.RESTAURANT);
     window.location.href = '/restaurant/homes';
   };
 
-  const handleUnauthorizedError = () => {
+  const handleUnauthorizedError = useCallback(() => {
     alert('Your session has expired. Please log in again.');
-    localStorage.removeItem('token');
+    clearAuthToken(AUTH_ROLES.RESTAURANT);
     window.location.href = '/restaurant/login';
-  };
+  }, []);
 
   const fetchRestaurantProfile = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE}/api/restaurant/profile`, {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(`${API_BASE}/api/restaurants/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
@@ -51,25 +105,127 @@ function RestaurantDashboard() {
     } catch (err) {
       alert('Error fetching profile');
     }
-  }, []);
+  }, [API_BASE, handleUnauthorizedError]);
 
   const fetchFoodItems = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const res = await fetch(`${API_BASE}/api/food-items/`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
       const data = await res.json();
-      if (res.ok) setFoodItems(data);
+      if (res.ok) {
+        setFoodItems(data);
+      } else {
+        alert(data.message || 'Failed to fetch food items');
+      }
     } catch (err) {
       console.error('Error fetching food items:', err);
     }
-  }, []);
+  }, [API_BASE, handleUnauthorizedError]);
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      setOrdersLoading(true);
+      setOrdersError('');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(`${ORDER_API_BASE}/api/orders`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
+      const data = await res.json();
+      if (res.ok) {
+        const sortedOrders = Array.isArray(data)
+          ? [...data].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+          : [];
+        setOrders(sortedOrders);
+      } else {
+        setOrdersError(data.message || 'Không thể tải danh sách đơn hàng.');
+      }
+    } catch (err) {
+      setOrdersError('Có lỗi khi tải danh sách đơn hàng.');
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [ORDER_API_BASE, handleUnauthorizedError]);
+
+  const updateOrderStatus = async (orderId, status, successMessage) => {
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(`${ORDER_API_BASE}/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
+      const data = await res.json();
+      if (res.ok) {
+        setOrders((prev) =>
+          prev.map((order) => (order._id === data._id ? data : order))
+        );
+        if (successMessage) {
+          alert(successMessage);
+        }
+      } else {
+        alert(data.message || 'Không thể cập nhật trạng thái đơn hàng.');
+      }
+    } catch (err) {
+      alert('Có lỗi khi cập nhật trạng thái đơn hàng.');
+    }
+  };
+
+  const handleAdvanceOrderStatus = (order) => {
+    const action = ORDER_STATUS_ACTIONS[order.status];
+    if (!action) {
+      return;
+    }
+    const nextLabel = ORDER_STATUS_LABELS[action.nextStatus] || action.nextStatus;
+    updateOrderStatus(order._id, action.nextStatus, `Đã chuyển trạng thái sang ${nextLabel}.`);
+  };
+
+  const handleCancelOrder = (order) => {
+    if (!ORDER_CANCELABLE_STATUSES.has(order.status)) {
+      return;
+    }
+    const confirmCancel = window.confirm('Bạn có chắc chắn muốn hủy đơn hàng này?');
+    if (!confirmCancel) {
+      return;
+    }
+    updateOrderStatus(order._id, 'Cancelled', 'Đơn hàng đã được hủy.');
+  };
+
+  const formatCurrency = (value) => {
+    const amount = typeof value === 'number' ? value : Number(value);
+    if (Number.isNaN(amount)) {
+      return value;
+    }
+    return amount.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' });
+  };
 
   useEffect(() => {
     fetchRestaurantProfile();
     fetchFoodItems();
-  }, [fetchRestaurantProfile, fetchFoodItems]);
+    fetchOrders();
+  }, [fetchRestaurantProfile, fetchFoodItems, fetchOrders]);
+
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      fetchOrders();
+    }
+  }, [activeTab, fetchOrders]);
 
   const handleAddFoodItem = async () => {
     if (!newFoodItem.name || !newFoodItem.description || !newFoodItem.price || !newFoodItem.category || !newFoodItem.imageFile) {
@@ -78,7 +234,7 @@ function RestaurantDashboard() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const formData = new FormData();
       formData.append('name', newFoodItem.name);
       formData.append('description', newFoodItem.description);
@@ -113,7 +269,7 @@ function RestaurantDashboard() {
     }
   
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const res = await fetch(`${API_BASE}/api/food-items/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
@@ -137,7 +293,7 @@ function RestaurantDashboard() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const formData = new FormData();
       formData.append('name', editFoodItem.name);
       formData.append('description', editFoodItem.description);
@@ -179,7 +335,7 @@ function RestaurantDashboard() {
 
   const handleEditProfile = async (updatedProfile) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const formData = new FormData();
   
       // Append fields to FormData
@@ -193,7 +349,7 @@ function RestaurantDashboard() {
         formData.append('profilePicture', updatedProfile.profilePictureFile);
       }
   
-      const res = await fetch(`${API_BASE}/api/restaurant/update`, {
+      const res = await fetch(`${API_BASE}/api/restaurants/update`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -215,8 +371,8 @@ function RestaurantDashboard() {
   };
   const toggleAvailability = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE}/api/restaurant/availability`, {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(`${API_BASE}/api/restaurants/availability`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -244,9 +400,10 @@ function RestaurantDashboard() {
 
       {/* Sidebar */}
       <div className="dashboard-sidebar">
-        <button onClick={() => setActiveTab('profile')}>Profile</button>
-        <button onClick={() => setActiveTab('foodItems')}>Food Items</button>
-        <button onClick={() => setActiveTab('availability')}>Availability</button>
+        <button className={activeTab === 'profile' ? 'active' : ''} onClick={() => setActiveTab('profile')}>Profile</button>
+        <button className={activeTab === 'foodItems' ? 'active' : ''} onClick={() => setActiveTab('foodItems')}>Food Items</button>
+        <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>Orders</button>
+        <button className={activeTab === 'availability' ? 'active' : ''} onClick={() => setActiveTab('availability')}>Availability</button>
       </div>
 
       {/* Main Content */}
@@ -446,6 +603,77 @@ function RestaurantDashboard() {
     Add Food Item
   </button>
 </form>
+          </div>
+        )}
+
+        {activeTab === 'orders' && (
+          <div>
+            <div className="orders-header">
+              <h2>Quản lý đơn hàng</h2>
+              <button type="button" className="order-refresh-btn" onClick={fetchOrders} disabled={ordersLoading}>
+                {ordersLoading ? 'Đang tải...' : 'Tải lại'}
+              </button>
+            </div>
+            {ordersLoading && <p>Đang tải đơn hàng...</p>}
+            {!ordersLoading && ordersError && <p className="error-text">{ordersError}</p>}
+            {!ordersLoading && !ordersError && orders.length === 0 && (
+              <p>Hiện chưa có đơn hàng nào từ khách hàng.</p>
+            )}
+            {!ordersLoading && !ordersError && orders.length > 0 && (
+              <div className="orders-list">
+                {orders.map((order) => (
+                  <div className="order-card" key={order._id}>
+                    <div className="order-card-header">
+                      <div>
+                        <h3>Đơn #{order._id.slice(-6).toUpperCase()}</h3>
+                        <p className="order-meta">
+                          Đặt lúc: {new Date(order.createdAt || Date.now()).toLocaleString('vi-VN')}
+                        </p>
+                      </div>
+                      <span className={`status-badge ${ORDER_STATUS_CLASSES[order.status] || ''}`}>
+                        {ORDER_STATUS_LABELS[order.status] || order.status}
+                      </span>
+                    </div>
+                    <div className="order-details">
+                      <p><strong>Khách hàng:</strong> {order.customerName || 'Ẩn danh'}</p>
+                      <p><strong>Số điện thoại:</strong> {order.customerPhone || 'Không có'}</p>
+                      <p><strong>Địa chỉ giao:</strong> {order.deliveryAddress}</p>
+                      <p>
+                        <strong>Thanh toán:</strong> {order.paymentMethod === 'card' ? 'Thẻ' : 'Tiền mặt'} •{' '}
+                        {order.paymentStatus || 'Pending'}
+                      </p>
+                    </div>
+                    <div className="order-items">
+                      <h4>Món đã đặt</h4>
+                      <ul>
+                        {order.items?.map((item) => (
+                          <li key={`${order._id}_${item.foodId}`}>
+                            <span>{item.foodName || 'Món'}</span>
+                            <span>x{item.quantity}</span>
+                            <span>{formatCurrency((item.price || 0) * (item.quantity || 0))}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="order-footer">
+                      <p><strong>Tổng tiền:</strong> {formatCurrency(order.totalPrice)}</p>
+                      <div className="order-actions">
+                        {ORDER_CANCELABLE_STATUSES.has(order.status) && (
+                          <button className="order-secondary-btn" onClick={() => handleCancelOrder(order)}>
+                            Hủy đơn
+                          </button>
+                        )}
+                        {ORDER_STATUS_ACTIONS[order.status] && (
+                          <button className="order-primary-btn" onClick={() => handleAdvanceOrderStatus(order)}>
+                            {ORDER_STATUS_ACTIONS[order.status].label}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

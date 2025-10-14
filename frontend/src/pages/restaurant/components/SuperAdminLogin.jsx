@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import '../styles/login.css';
 import { useNavigate } from 'react-router-dom';
 import { RESTAURANT_SERVICE_URL } from '../../../utils/serviceUrls';
+import { setAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
 function SuperAdminLogin() {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -54,7 +55,7 @@ function SuperAdminLogin() {
 
       if (res.ok) {
         const { token, name } = data; // Ensure 'name' comes from backend!
-        localStorage.setItem('token', token);
+        setAuthToken(AUTH_ROLES.SUPER_ADMIN, token);
         localStorage.setItem('superAdminName', name);
         setMessage('✅ Login Successful!');
         navigate('/super-admin/dashboard');

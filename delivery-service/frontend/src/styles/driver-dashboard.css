@@ -1,0 +1,352 @@
+.driver-dashboard {
+  padding: 32px;
+  background: #f5f7fb;
+  min-height: 100vh;
+  color: #111827;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.driver-dashboard__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  background: #ffffff;
+  padding: 28px 32px;
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.driver-dashboard__header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.driver-dashboard__header p {
+  margin: 0;
+  color: #4b5563;
+}
+
+.driver-dashboard__header-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.driver-button {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.driver-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.driver-button--primary {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: white;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.25);
+}
+
+.driver-button--success {
+  background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+  color: white;
+  box-shadow: 0 12px 24px rgba(22, 163, 74, 0.25);
+}
+
+.driver-button--danger {
+  background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+  color: white;
+  box-shadow: 0 12px 24px rgba(239, 68, 68, 0.25);
+}
+
+.driver-button--ghost {
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+}
+
+.driver-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.driver-metric-card {
+  background: #ffffff;
+  padding: 20px 24px;
+  border-radius: 18px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.driver-metric-card__label {
+  font-size: 14px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.driver-metric-card strong {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.driver-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.driver-available-jobs {
+  background: #ffffff;
+  padding: 24px;
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.driver-job-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.driver-job-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, #ffffff 100%);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
+}
+
+.driver-job-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.driver-job-card__header h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.driver-job-card__body p {
+  margin: 4px 0;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.driver-job-card__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.driver-tabs {
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.driver-tabs__nav {
+  display: flex;
+  gap: 12px;
+  padding: 18px 24px 0;
+  flex-wrap: wrap;
+}
+
+.driver-tabs__button {
+  border: none;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.driver-tabs__button.is-active {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: white;
+}
+
+.driver-tabs__content {
+  padding: 24px;
+}
+
+.driver-delivery-list {
+  display: grid;
+  gap: 18px;
+}
+
+.driver-delivery-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 20px 22px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.driver-delivery-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.driver-delivery-card__header h3 {
+  margin: 0;
+}
+
+.driver-delivery-card__subtitle {
+  margin: 4px 0 0;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.driver-delivery-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.driver-delivery-card__grid h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  text-transform: uppercase;
+  color: #6b7280;
+  letter-spacing: 0.04em;
+}
+
+.driver-delivery-card__grid p {
+  margin: 0;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.driver-delivery-card__meta {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.driver-delivery-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.driver-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.driver-tag--pending {
+  background: rgba(234, 179, 8, 0.15);
+  color: #b45309;
+}
+
+.driver-tag--assigned,
+.driver-tag--accepted {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1d4ed8;
+}
+
+.driver-tag--picked_up,
+.driver-tag--out_for_delivery {
+  background: rgba(14, 165, 233, 0.15);
+  color: #0369a1;
+}
+
+.driver-tag--delivered {
+  background: rgba(34, 197, 94, 0.15);
+  color: #047857;
+}
+
+.driver-tag--failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+
+.driver-tag--cancelled {
+  background: rgba(148, 163, 184, 0.15);
+  color: #475569;
+}
+
+.driver-alert {
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.driver-alert--error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.driver-alert--warning {
+  background: rgba(250, 204, 21, 0.12);
+  color: #b45309;
+}
+
+.driver-empty {
+  padding: 24px;
+  text-align: center;
+  color: #6b7280;
+  border: 1px dashed rgba(148, 163, 184, 0.6);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+@media (max-width: 768px) {
+  .driver-dashboard {
+    padding: 20px;
+  }
+
+  .driver-dashboard__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .driver-dashboard__header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .driver-delivery-card__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-job-grid {
+    grid-template-columns: 1fr;
+  }
+}

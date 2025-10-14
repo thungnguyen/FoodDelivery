@@ -3,6 +3,7 @@ import axios from "axios";
 import { ORDER_SERVICE_URL, RESTAURANT_SERVICE_URL, AUTH_SERVICE_URL } from "../../utils/serviceUrls";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Spinner, Badge } from "react-bootstrap";
+import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 
 const formatCurrency = (value) => {
   if (typeof value !== "number") return "0 VND";
@@ -21,7 +22,7 @@ function Orders() {
   // Fetch orders from the backend when the component mounts
   useEffect(() => {
     const fetchOrders = async () => {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken(AUTH_ROLES.CUSTOMER);
       if (!token) {
         setError("Please log in to view your orders.");
         setLoading(false);
@@ -53,7 +54,7 @@ function Orders() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
     if (!token) return;
 
     const fetchProfile = async () => {
@@ -81,7 +82,7 @@ function Orders() {
     const uniqueIds = Array.from(new Set(missingIds));
     if (!uniqueIds.length) return;
 
-    const token = localStorage.getItem("token");
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
 
     const fetchNames = async () => {
       try {
@@ -167,7 +168,7 @@ function Orders() {
 
   // Handle delete order
   const handleDelete = (id) => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
     if (!token) {
       setError("Please log in to manage your orders.");
       return;

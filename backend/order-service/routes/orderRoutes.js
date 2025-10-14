@@ -15,17 +15,17 @@ const router = express.Router();
 // Only customers can place orders
 router.post("/", protect, authorizeRoles("customer"), createOrder);
 
-// Only restaurant admins & customers can view orders
-router.get("/", protect, authorizeRoles("customer", "restaurant"), getOrders);
-router.get("/:id", protect, authorizeRoles("customer", "restaurant"), getOrderById);
+// Customers, restaurants, drivers and admins can view orders (scoped in controller)
+router.get("/", protect, authorizeRoles("customer", "restaurant", "driver", "admin"), getOrders);
+router.get("/:id", protect, authorizeRoles("customer", "restaurant", "driver", "admin"), getOrderById);
 
-// Only authenticated customers can update their own orders
-router.patch("/:id", protect, updateOrderDetails);
+// Customers can adjust their order details before confirmation, admins/restaurants may also edit via same endpoint
+router.patch("/:id", protect, authorizeRoles("customer", "restaurant", "admin"), updateOrderDetails);
 
-// Only restaurant admins can update order status
-router.patch("/:id", protect, authorizeRoles("restaurant"), updateOrderStatus);
+// Restaurant, driver and admin-specific status transitions
+router.patch("/:id/status", protect, authorizeRoles("restaurant", "driver", "admin"), updateOrderStatus);
 
-// Only customers can cancel orders
-router.delete("/:id", protect, authorizeRoles("customer"), cancelOrder);
+// Customers, restaurants and admins can cancel subject to status checks
+router.delete("/:id", protect, authorizeRoles("customer", "restaurant", "admin"), cancelOrder);
 
 export default router;

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { RESTAURANT_SERVICE_URL, AUTH_SERVICE_URL } from "../../utils/serviceUrls";
 import { CartContext } from "../contexts/CartContext";
 import { FaRegUserCircle, FaClipboardList, FaShoppingCart, FaSignOutAlt, FaUtensils, FaMapMarkerAlt, FaClock } from "react-icons/fa";
+import { getAuthToken, clearAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 
 function CustomerHome() {
   const [restaurants, setRestaurants] = useState([]);
@@ -65,7 +66,7 @@ function CustomerHome() {
   );
 
   const handleLogout = useCallback(() => {
-    localStorage.removeItem("token");
+    clearAuthToken(AUTH_ROLES.CUSTOMER);
     localStorage.removeItem("pendingOrder");
     navigate("/");
   }, [navigate]);
@@ -88,7 +89,7 @@ function CustomerHome() {
       }
     };
 
-    const token = localStorage.getItem("token");
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
     if (!token) {
       navigate("/auth/login");
       return;

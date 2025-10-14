@@ -2,9 +2,11 @@ import { Link, useNavigate } from "react-router-dom";
 import React from "react";
 import { motion } from "framer-motion";
 import "../styles/sidebar.css";
+import { getStoredDriverProfile } from "../utils/driverSession";
 
 function Sidebar({ isOpen, onClose, isLoggedIn, onLogout }) {
   const navigate = useNavigate();
+  const profile = getStoredDriverProfile();
 
   const closeSidebar = (e) => {
     if (e.target.className === "sidebar-overlay") {
@@ -13,6 +15,13 @@ function Sidebar({ isOpen, onClose, isLoggedIn, onLogout }) {
   };
 
   if (!isOpen) return null;
+
+  const initials = (profile?.name || "TX")
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 
   return (
     <div className="sidebar-overlay" onClick={closeSidebar}>
@@ -26,26 +35,38 @@ function Sidebar({ isOpen, onClose, isLoggedIn, onLogout }) {
         {isLoggedIn ? (
           <>
             <div className="sidebar-profile">
-              <img
-                src="/path/to/profile-image.jpg"
-                alt="Profile"
-                className="profile-image"
-              />
-              <p className="profile-name">John Doe</p>
-              <Link to="/customer/profile" className="profile-link" onClick={onClose}>
-                Dashboard
-              </Link>
+              <div className="profile-avatar">{initials}</div>
+              <p className="profile-name">{profile?.name || "Tài xế"}</p>
+              <button
+                className="profile-link"
+                onClick={() => {
+                  navigate("/dashboard");
+                  onClose();
+                }}
+              >
+                Bảng điều khiển
+              </button>
             </div>
 
             <div className="sidebar-links">
-              <Link to="/orders" onClick={onClose}>Orders</Link>
-              <Link to="/wallet" onClick={onClose}>Wallet</Link>
-              <Link to="/restaurants" onClick={onClose}>Restaurants</Link>
+              <Link to="/dashboard" onClick={onClose}>
+                Đơn đang giao
+              </Link>
+              <Link to="/driver-simulator" onClick={onClose}>
+                Mô phỏng hành trình
+              </Link>
+              <Link to="/map-track/demo" onClick={onClose}>
+                Theo dõi tuyến đường
+              </Link>
             </div>
 
             <div className="sidebar-actions">
-              <Link to="/add-restaurant" onClick={onClose}>Partner with Us</Link>
-              <Link to="/signup-delivery" onClick={onClose}>Join as Delivery Partner</Link> {/* Updated */}
+              <Link to="/driver-socket" onClick={onClose}>
+                Trung tâm real-time
+              </Link>
+              <Link to="/delivery" onClick={onClose}>
+                Tạo giao nhận thủ công
+              </Link>
             </div>
 
             <button
@@ -55,26 +76,23 @@ function Sidebar({ isOpen, onClose, isLoggedIn, onLogout }) {
                 onClose();
               }}
             >
-              Sign Out
+              Đăng xuất
             </button>
           </>
         ) : (
           <div className="sidebar-actions">
-            <Link to="/auth/login">
+            <Link to="/login">
               <button className="side_bar-login-button" onClick={onClose}>
-                Login
+                Đăng nhập
               </button>
             </Link>
-            <Link to="/auth/register">
+            <Link to="/register">
               <button className="side_bar-signup-button" onClick={onClose}>
-                Signup
+                Đăng ký
               </button>
             </Link>
-            <Link to="/add-restaurant" onClick={onClose}>
-              Partner with Us
-            </Link>
-            <Link to="/signup-delivery" onClick={onClose}> {/* Updated */}
-              Join as Delivery Partner
+            <Link to="/driver-simulator" onClick={onClose}>
+              Trải nghiệm thử
             </Link>
           </div>
         )}

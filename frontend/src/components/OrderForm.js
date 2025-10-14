@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, Form, Spinner } from "react-bootstrap";
 import { BsArrowLeftCircle } from "react-icons/bs";
 import { CartContext } from "../pages/contexts/CartContext";
+import { getAuthToken, AUTH_ROLES } from "../utils/authTokens";
 
 function OrderForm({ addOrder }) {
   const { cartItems, clearCart } = useContext(CartContext);
@@ -14,7 +15,7 @@ function OrderForm({ addOrder }) {
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const token = localStorage.getItem("token");
+  const token = getAuthToken(AUTH_ROLES.CUSTOMER);
 
   // Fetch customer profile on mount
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./CreateDelivery.css"; 
+import { getDriverToken } from "../utils/driverSession";
 
 export default function CreateDelivery() {
   const navigate = useNavigate();
@@ -37,7 +38,7 @@ export default function CreateDelivery() {
     if (!validateForm()) return;
 
     try {
-      const token = localStorage.getItem("driverToken");
+      const token = getDriverToken();
       const res = await axios.post("http://localhost:5003/api/delivery/create", form, {
         headers: { Authorization: token }
       });

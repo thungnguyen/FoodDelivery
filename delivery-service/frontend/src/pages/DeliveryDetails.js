@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import "./DeliveryDetails.css";
+import { getDriverToken } from "../utils/driverSession";
 
 export default function DeliveryDetails() {
   const { id } = useParams();
@@ -10,13 +11,9 @@ export default function DeliveryDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchDelivery();
-  }, [id]);
-
-  const fetchDelivery = async () => {
+  const fetchDelivery = useCallback(async () => {
     try {
-      const token = localStorage.getItem("driverToken");
+      const token = getDriverToken();
       const res = await axios.get(`http://localhost:5003/api/delivery/${id}`, {
         headers: { Authorization: token }
       });
@@ -26,18 +23,42 @@ export default function DeliveryDetails() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchDelivery();
+  }, [fetchDelivery]);
 
   const handleUpdateStatus = async (newStatus) => {
     try {
-      const token = localStorage.getItem("driverToken");
+      const token = getDriverToken();
+      const payload = { status: newStatus };
+
+      if (newStatus === "delivered") {
+        const tipInput = window.prompt("Nhập tiền tip (VND) nếu có:", "0");
+        const tipAmount = Number(tipInput);
+        if (!Number.isNaN(tipAmount) && tipAmount >= 0) {
+          payload.tipAmount = tipAmount;
+        }
+      }
+
+      if (newStatus === "failed") {
+        const reason =
+          window.prompt("Nhập lý do không giao được đơn:", "") || "";
+        if (!reason.trim()) {
+          alert("Vui lòng nhập lý do hợp lệ.");
+          return;
+        }
+        payload.failureReason = reason.trim();
+      }
+
       const res = await axios.put(
         `http://localhost:5003/api/delivery/${id}/status`,
-        { status: newStatus },
+        payload,
         { headers: { Authorization: token } }
       );
       alert(res.data.message);
-      fetchDelivery(); // Refresh after update
+      fetchDelivery();
     } catch (err) {
       alert(err.response?.data?.message || "Failed to update status");
     }
@@ -66,21 +87,47 @@ export default function DeliveryDetails() {
 
       <div className="buttons">
         {delivery.status === "assigned" && (
-          <button className="accept-btn" onClick={() => handleUpdateStatus("To be delivered")}>
-            📥 Accept Delivery
+          <button
+            className="accept-btn"
+            onClick={() => handleUpdateStatus("accepted")}
+          >
+            📥 Nhận đơn
           </button>
         )}
 
-        {delivery.status === "To be delivered" && (
-          <button className="picked-up-btn" onClick={() => handleUpdateStatus("Picked-up")}>
-            🚚 Mark as Picked-Up
+        {delivery.status === "accepted" && (
+          <button
+            className="picked-up-btn"
+            onClick={() => handleUpdateStatus("picked_up")}
+          >
+            🚚 Đã lấy món
           </button>
         )}
 
-        {delivery.status === "Picked-up" && (
-          <button className="delivered-btn" onClick={() => handleUpdateStatus("Delivered")}>
-            ✅ Mark as Delivered
+        {delivery.status === "picked_up" && (
+          <button
+            className="picked-up-btn"
+            onClick={() => handleUpdateStatus("out_for_delivery")}
+          >
+            🛵 Bắt đầu giao
           </button>
+        )}
+
+        {delivery.status === "out_for_delivery" && (
+          <>
+            <button
+              className="delivered-btn"
+              onClick={() => handleUpdateStatus("delivered")}
+            >
+              ✅ Giao thành công
+            </button>
+            <button
+              className="failed-btn"
+              onClick={() => handleUpdateStatus("failed")}
+            >
+              ⚠️ Không giao được
+            </button>
+          </>
         )}
       </div>
 

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { AUTH_SERVICE_URL } from "../../utils/serviceUrls";
+import { setAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import "../../styles/auth.css";
@@ -25,7 +26,7 @@ export default function AuthRegister() {
     setError("");
     try {
       const res = await axios.post(`${AUTH_SERVICE_URL}/api/auth/register/customer`, form);
-      localStorage.setItem("token", res.data.token);
+      setAuthToken(AUTH_ROLES.CUSTOMER, res.data.token);
       navigate("/customer/profile");
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed");

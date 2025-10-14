@@ -21,8 +21,23 @@ const orderSchema = new mongoose.Schema(
         paymentStatus: { type: String, enum: ["Pending", "Paid", "Failed"], default: "Pending" },
         status: {
             type: String,
-            enum: ["Pending", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Canceled"],
-            default: "Pending"
+            enum: [
+                "Pending Confirmation",
+                "Pending",
+                "Confirmed",
+                "Preparing",
+                "Awaiting Driver",
+                "Ready for Delivery",
+                "Out for Delivery",
+                "Delivered",
+                "Completed",
+                "Cancelled",
+                "Canceled",
+                "Failed",
+                "Failed/Undeliverable",
+                "Refunded"
+            ],
+            default: "Pending Confirmation"
         },
         deliveryAddress: { type: String, required: true }
     },

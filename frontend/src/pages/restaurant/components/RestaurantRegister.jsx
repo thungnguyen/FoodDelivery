@@ -118,7 +118,7 @@ function RestaurantRegister() {
       formData.append('email', form.email);
       formData.append('password', form.password);
 
-      const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurant/register`, {
+      const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/register`, {
         method: 'POST',
         body: formData,
       });

@@ -35,11 +35,19 @@
   margin-bottom: 20px;
 }
 
-.profile-image {
-  width: 80px;
-  height: 80px;
+.profile-avatar {
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   margin-bottom: 10px;
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 24px;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.25);
 }
 
 .profile-name {
@@ -49,8 +57,15 @@
 }
 
 .profile-link {
-  color: #007bff;
+  color: #1d4ed8;
   text-decoration: none;
+  font-weight: 600;
+  background: rgba(37, 99, 235, 0.12);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s ease;
 }
 
 .sidebar-links, .sidebar-actions {
@@ -66,7 +81,7 @@
   display: block;
   color: var(--color-black);
   text-decoration: none;
-  margin: 10px 0;
+  margin: 6px 0;
   font-size: 16px;
 }
 

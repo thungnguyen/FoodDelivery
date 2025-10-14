@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import '../styles/dashboard.css';
 import { RESTAURANT_SERVICE_URL } from '../../../utils/serviceUrls';
+import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
 function SuperAdminDashboard() {
   const [restaurants, setRestaurants] = useState([]);
@@ -10,7 +11,7 @@ function SuperAdminDashboard() {
 
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    clearAuthToken(AUTH_ROLES.SUPER_ADMIN);
     localStorage.removeItem('superAdminName');
     window.location.href = '/restaurant/home'; // redirect to login page
   };
@@ -33,7 +34,7 @@ function SuperAdminDashboard() {
   useEffect(() => {
     const fetchRestaurants = async () => {
       try {
-        const token = localStorage.getItem('token');
+        const token = getAuthToken(AUTH_ROLES.SUPER_ADMIN);
         const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/superadmin/restaurants`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -81,7 +82,7 @@ function SuperAdminDashboard() {
   // Handle the Save button click
   const handleSaveEdit = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.SUPER_ADMIN);
       const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/superadmin/restaurant/${editing}`, {
         method: 'PUT',
         headers: {
@@ -115,7 +116,7 @@ function SuperAdminDashboard() {
     if (!confirm) return;
 
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken(AUTH_ROLES.SUPER_ADMIN);
       const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/superadmin/restaurant/${id}`, {
         method: 'DELETE',
         headers: {

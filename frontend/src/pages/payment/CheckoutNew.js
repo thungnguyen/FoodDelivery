@@ -8,6 +8,7 @@ import { BsArrowLeftCircle, BsCreditCard, BsCash } from "react-icons/bs";
 import "../../styles/checkout.css";
 import { PAYMENT_SERVICE_URL, ORDER_SERVICE_URL } from "../../utils/serviceUrls";
 import { CartContext } from "../contexts/CartContext";
+import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
@@ -124,7 +125,7 @@ const CheckoutFormInner = () => {
       }
 
       // Create order in backend
-      const token = localStorage.getItem("token");
+      const token = getAuthToken(AUTH_ROLES.CUSTOMER);
       const calculatedTotal = orderData.items.reduce(
         (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
         0

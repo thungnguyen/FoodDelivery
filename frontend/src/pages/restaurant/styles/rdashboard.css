@@ -35,9 +35,13 @@ body {
     transition: background-color 0.3s ease, transform 0.2s ease;
   }
   
-  .dashboard-sidebar button:hover {
+.dashboard-sidebar button:hover {
     background-color: #1abc9c;
     transform: scale(1.05);
+  }
+  
+  .dashboard-sidebar button.active {
+    background-color: #1abc9c;
   }
   
   /* Header */
@@ -338,4 +342,213 @@ body {
   .fdelete-btn:hover {
     background-color: #c0392b !important;
     transform: scale(1.05) !important;
+  }
+
+  /* Orders Section */
+  .orders-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .orders-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .order-card {
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+  }
+
+  .order-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+
+  .order-card-header h3 {
+    margin: 0;
+    font-size: 20px;
+    color: #2c3e50;
+  }
+
+  .order-meta {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: #7f8c8d;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .status-pending {
+    background: #fef3c7;
+    color: #b45309;
+  }
+
+  .status-confirmed {
+    background: #d1fae5;
+    color: #047857;
+  }
+
+  .status-preparing {
+    background: #bfdbfe;
+    color: #1e40af;
+  }
+
+  .status-ready {
+    background: #ede9fe;
+    color: #6d28d9;
+  }
+
+  .status-out {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  .status-delivered {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .status-canceled {
+    background: #fcd6d6;
+    color: #8b1c1c;
+  }
+
+  .status-completed {
+    background: #e0f2fe;
+    color: #1d4ed8;
+  }
+
+  .status-failed {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+
+  .status-refunded {
+    background: #fef9c3;
+    color: #92400e;
+  }
+
+  .order-details p {
+    margin: 8px 0;
+    font-size: 15px;
+    color: #34495e;
+  }
+
+  .order-items {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #ecf0f1;
+  }
+
+  .order-items h4 {
+    margin: 0 0 10px;
+    color: #2c3e50;
+  }
+
+  .order-items ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .order-items li {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 10px;
+    font-size: 14px;
+    color: #2c3e50;
+  }
+
+  .order-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .order-footer p {
+    margin: 0;
+    font-weight: 600;
+    color: #2c3e50;
+  }
+
+  .order-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .order-primary-btn,
+  .order-secondary-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 0.2s ease, filter 0.2s ease;
+  }
+
+  .order-primary-btn {
+    background: #1abc9c;
+    color: #ffffff;
+  }
+
+  .order-secondary-btn {
+    background: #e74c3c;
+    color: #ffffff;
+  }
+
+  .order-primary-btn:hover,
+  .order-secondary-btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+  }
+
+  .order-refresh-btn {
+    background: #3498db;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 0.2s ease, filter 0.2s ease;
+  }
+
+  .order-refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .order-refresh-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+  }
+
+  .error-text {
+    color: #e74c3c;
+    font-weight: 600;
   }

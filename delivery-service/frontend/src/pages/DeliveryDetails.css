@@ -40,11 +40,17 @@
     font-size: larger;
   }
   
-  .delivered-btn {
-    background-color: #3fef45;
-    color: rgb(0, 0, 0);
-    font-size: larger;
-  }
+.delivered-btn {
+  background-color: #3fef45;
+  color: rgb(0, 0, 0);
+  font-size: larger;
+}
+
+.failed-btn {
+  background-color: #f97316;
+  color: #fff;
+  font-size: larger;
+}
   
   .back-btn {
     background-color: #2081d0;
@@ -62,11 +68,26 @@
     font-weight: bold;
   }
   
-  .status.delivered {
-    color: #4CAF50;
-    font-weight: bold;
-  }
-  
+.status.delivered {
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+.status.picked_up {
+  color: #f97316;
+  font-weight: bold;
+}
+
+.status.out_for_delivery {
+  color: #0ea5e9;
+  font-weight: bold;
+}
+
+.status.failed {
+  color: #dc2626;
+  font-weight: bold;
+}
+
   /* Loader & Error */
   .loading {
     padding: 2rem;

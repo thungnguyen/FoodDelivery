@@ -5,6 +5,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { FaUserCircle } from "react-icons/fa";      // profile icon
 import "../styles/header.css";
 import Sidebar from "./Sidebar";
+import {
+  getDriverToken,
+  clearDriverSession,
+} from "../utils/driverSession";
 
 function Header() {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
@@ -15,7 +19,7 @@ function Header() {
 
   // On mount, check token presence
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = getDriverToken();
     setLoggedIn(!!token);
   }, []);
 
@@ -33,10 +37,10 @@ function Header() {
   const toggleSidebar = () => setSidebarOpen(open => !open);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
+    clearDriverSession();
     setLoggedIn(false);
     setShowDropdown(false);
-    navigate("/");  // redirect home
+    navigate("/login");
   };
 
   return (
@@ -55,12 +59,12 @@ function Header() {
         <div className="header-right">
           {!isLoggedIn ? (
             <>
-              <Link to="/auth/login">
+              <Link to="/login">
                 <motion.button className="login-button" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                   Login
                 </motion.button>
               </Link>
-              <Link to="/auth/register">
+              <Link to="/register">
                 <motion.button className="signup-button" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                   Signup
                 </motion.button>
@@ -83,8 +87,8 @@ function Header() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.15 }}
                 >
-                  <Link to="/customer/profile" className="dropdown-item" onClick={() => setShowDropdown(false)}>
-                    My Profile
+                  <Link to="/dashboard" className="dropdown-item" onClick={() => setShowDropdown(false)}>
+                    Dashboard
                   </Link>
                   <div className="dropdown-item logout" onClick={handleLogout}>
                     Logout

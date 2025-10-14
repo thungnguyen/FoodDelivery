@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { AUTH_SERVICE_URL } from "../../utils/serviceUrls";
+import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 const pageWrapperStyle = {
   minHeight: "100vh",
   background: "linear-gradient(140deg, #f6f8ff 0%, #fef9f2 100%)",
@@ -47,7 +48,7 @@ export default function CustomerProfile() {
     const fetchProfile = async () => {
       setError("");
       try {
-        const token = localStorage.getItem("token");
+        const token = getAuthToken(AUTH_ROLES.CUSTOMER);
         if (!token) {
           setError("Bạn cần đăng nhập để xem thông tin.");
           setLoading(false);
@@ -101,7 +102,7 @@ export default function CustomerProfile() {
     setSuccess("");
 
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken(AUTH_ROLES.CUSTOMER);
       await axios.patch(
         `${AUTH_SERVICE_URL}/api/auth/customer/profile`,
         {

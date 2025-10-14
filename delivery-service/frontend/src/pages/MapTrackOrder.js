@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Polyline } from "react-leaflet";
 import L from "leaflet";
 import axios from "axios";
 import "leaflet/dist/leaflet.css";
+import { getDriverToken } from "../utils/driverSession";
 
 const pickupIcon = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/1483/1483336.png",
@@ -25,7 +26,7 @@ export default function MapTrackOrder() {
   useEffect(() => {
     const fetchDelivery = async () => {
       try {
-        const token = localStorage.getItem("driverToken");
+        const token = getDriverToken();
         const res = await axios.get(`http://localhost:5003/api/delivery/order/${orderId}`, {
           headers: { Authorization: token }
         });

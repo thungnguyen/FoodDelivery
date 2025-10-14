@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import "./Register.css"; // 
+import { setDriverSession } from "../utils/driverSession";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -24,8 +25,7 @@ export default function Login() {
 
       if (res.data?.success) {
         const { token, data } = res.data;
-        localStorage.setItem("driverToken", token);
-        localStorage.setItem("driverId", data.id);
+        setDriverSession({ token, driver: data });
 
         alert("✅ Login successful! Redirecting to dashboard...");
         navigate("/dashboard");

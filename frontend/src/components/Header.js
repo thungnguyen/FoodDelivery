@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { FaUserCircle } from "react-icons/fa";      // profile icon
 import "../styles/header.css";
 import Sidebar from "./Sidebar";
+import { getAuthToken, clearAuthToken, AUTH_ROLES, AUTH_TOKEN_KEYS } from "../utils/authTokens";
 
 function Header() {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
@@ -15,8 +16,20 @@ function Header() {
 
   // On mount, check token presence
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    setLoggedIn(!!token);
+    const updateLoginState = () => {
+      setLoggedIn(!!getAuthToken(AUTH_ROLES.CUSTOMER));
+    };
+
+    updateLoginState();
+
+    const handleStorage = (event) => {
+      if (!event.key || event.key === AUTH_TOKEN_KEYS[AUTH_ROLES.CUSTOMER] || event.key === "token") {
+        updateLoginState();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   // Close dropdown if click outside
@@ -33,7 +46,8 @@ function Header() {
   const toggleSidebar = () => setSidebarOpen(open => !open);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
+    clearAuthToken(AUTH_ROLES.CUSTOMER);
+    localStorage.removeItem("pendingOrder");
     setLoggedIn(false);
     setShowDropdown(false);
     navigate("/");  // redirect home

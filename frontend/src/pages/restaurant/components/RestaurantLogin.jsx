@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/restaurantLogin.css'; // You can style it separately
 import { RESTAURANT_SERVICE_URL } from '../../../utils/serviceUrls';
+import { setAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
 function RestaurantLogin() {
   const navigate = useNavigate();
@@ -59,7 +60,7 @@ function RestaurantLogin() {
     }
 
     try {
-      const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurant/login`, {
+      const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -67,7 +68,7 @@ function RestaurantLogin() {
 
       const data = await res.json();
       if (res.ok) {
-        localStorage.setItem('token', data.token);
+        setAuthToken(AUTH_ROLES.RESTAURANT, data.token);
         setMessage('Login successful!');
         setTimeout(() => {
           navigate('/restaurant/dashboard'); // Redirect to the dashboard after successful login

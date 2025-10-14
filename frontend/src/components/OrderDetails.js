@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { ORDER_SERVICE_URL, RESTAURANT_SERVICE_URL, AUTH_SERVICE_URL } from "../utils/serviceUrls";
+import { getAuthToken, AUTH_ROLES } from "../utils/authTokens";
 import { BsFilePdf } from "react-icons/bs";
 import { jsPDF } from "jspdf";
 import { ensurePdfFonts } from "../utils/pdfFonts";
@@ -34,7 +35,7 @@ function OrderDetails() {
     const fetchOrder = async () => {
       setLoading(true);
       setError("");
-      const token = localStorage.getItem("token");
+      const token = getAuthToken(AUTH_ROLES.CUSTOMER);
 
       if (!token) {
         setError("Bạn cần đăng nhập để xem chi tiết đơn hàng.");
@@ -93,7 +94,7 @@ function OrderDetails() {
         return;
       }
 
-      const token = localStorage.getItem("token");
+      const token = getAuthToken(AUTH_ROLES.CUSTOMER);
       if (!token) return;
 
       try {
