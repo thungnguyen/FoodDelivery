@@ -6,7 +6,23 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import SuperAdmin from '../models/SuperAdmin.js';
-import { getAllRestaurants, getRestaurantById, deleteRestaurant, updateRestaurant } from '../controllers/superAdminController.js'; // Named imports
+import {
+  getAllRestaurants,
+  getRestaurantById,
+  deleteRestaurant,
+  updateRestaurant,
+  approveRestaurant,
+  rejectRestaurant,
+} from '../controllers/superAdminController.js'; // Named imports
+import {
+  proxyListCustomers,
+  proxyUpdateCustomerStatus,
+  proxyListDrivers,
+  proxyUpdateDriverStatus,
+  proxyUpdateDriverActivity,
+  proxyListOrders,
+  proxyUpdateOrderStatus,
+} from '../controllers/adminProxyController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 
 // Super Admin Registration
@@ -60,5 +76,16 @@ router.get('/restaurants', authMiddleware, getAllRestaurants);
 router.get('/restaurant/:id', authMiddleware, getRestaurantById);
 router.delete('/restaurant/:id', authMiddleware, deleteRestaurant);
 router.put('/restaurant/:id', authMiddleware, updateRestaurant);
+router.patch('/restaurant/:id/approve', authMiddleware, approveRestaurant);
+router.patch('/restaurant/:id/reject', authMiddleware, rejectRestaurant);
+
+// Aggregated admin routes
+router.get('/customers', authMiddleware, proxyListCustomers);
+router.patch('/customers/:id/status', authMiddleware, proxyUpdateCustomerStatus);
+router.get('/drivers', authMiddleware, proxyListDrivers);
+router.patch('/drivers/:id/status', authMiddleware, proxyUpdateDriverStatus);
+router.patch('/drivers/:id/activity', authMiddleware, proxyUpdateDriverActivity);
+router.get('/orders', authMiddleware, proxyListOrders);
+router.patch('/orders/:id/status', authMiddleware, proxyUpdateOrderStatus);
 
 export default router;

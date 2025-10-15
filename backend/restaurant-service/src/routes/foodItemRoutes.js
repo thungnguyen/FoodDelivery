@@ -7,8 +7,8 @@ import upload from '../middleware/uploadMiddleware.js';
 const router = express.Router();
 
 // Create a new food item (Restaurant Admin only)
-router.post('/create', authMiddleware,upload.single('image'), async (req, res) => {
-  const { name, description, price, category } = req.body;
+router.post('/create', authMiddleware, upload.single('image'), async (req, res) => {
+  const { name, description, price, category, imageUrl } = req.body;
 
   try {
     const restaurant = await Restaurant.findById(req.user.id);
@@ -16,12 +16,19 @@ router.post('/create', authMiddleware,upload.single('image'), async (req, res) =
       return res.status(404).json({ message: 'Restaurant not found' });
     }
 
+    const hasFile = !!req.file;
+    const cleanedUrl = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+
+    if (!hasFile && !cleanedUrl) {
+      return res.status(400).json({ message: 'Please provide either an image file or an image URL.' });
+    }
+
     const newFoodItem = new FoodItem({
       restaurant: restaurant._id,
       name,
       description,
       price,
-      image: `/uploads/${req.file.filename}`,
+      image: hasFile ? `/uploads/${req.file.filename}` : cleanedUrl,
       category,
     });
 

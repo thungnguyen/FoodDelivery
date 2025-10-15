@@ -3,9 +3,12 @@ const router = express.Router();
 
 import jwt from 'jsonwebtoken';
 import Restaurant from '../models/Restaurant.js';
+import SuperAdmin from '../models/SuperAdmin.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import upload from '../middleware/uploadMiddleware.js';
+import { sendEmail } from '../utils/emailService.js';
 
+const DEFAULT_ADMIN_RECIPIENTS = ['thanhhungnguyen8204@gmail.com', 'thanhhunggpt@gmail.com'];
 
 // Register a new restaurant (with admin email and password)
 router.post('/register', upload.single('profilePicture'), async (req, res) => {
@@ -30,7 +33,77 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
     });
 
     await newRestaurant.save();
-    res.status(201).json({ message: 'Restaurant and Admin registered successfully' });
+
+    const manualRecipients = (process.env.ADMIN_NOTIFICATION_EMAILS || DEFAULT_ADMIN_RECIPIENTS.join(','))
+      .split(',')
+      .map((addr) => addr.trim())
+      .filter(Boolean);
+
+    const adminRecords = await SuperAdmin.find().select('email').lean();
+    const adminEmails = adminRecords.map((record) => record.email);
+    const recipients = Array.from(new Set([...manualRecipients, ...adminEmails]));
+
+    if (recipients.length) {
+      const subject = `Yêu cầu duyệt nhà hàng mới: ${name}`;
+      const reviewUrl = `${process.env.SUPER_ADMIN_PORTAL_URL || 'http://localhost:3000/super-admin/dashboard'}`;
+      const html = `
+        <h2>Nhà hàng mới vừa đăng ký</h2>
+        <p><strong>Tên nhà hàng:</strong> ${name}</p>
+        <p><strong>Chủ sở hữu:</strong> ${ownerName}</p>
+        <p><strong>Địa điểm:</strong> ${location}</p>
+        <p><strong>Email quản trị:</strong> ${email}</p>
+        <p><strong>Số liên hệ:</strong> ${contactNumber}</p>
+        <p>Vui lòng đăng nhập trang Super Admin để duyệt: <a href="${reviewUrl}">${reviewUrl}</a></p>
+      `;
+      const text = [
+        `Nhà hàng mới vừa nộp hồ sơ:`,
+        `- Tên: ${name}`,
+        `- Chủ sở hữu: ${ownerName}`,
+        `- Địa điểm: ${location}`,
+        `- Email quản trị: ${email}`,
+        `- Số liên hệ: ${contactNumber}`,
+        `Đăng nhập trang Super Admin để duyệt: ${reviewUrl}`,
+      ].join('\n');
+
+      await sendEmail({
+        to: recipients,
+        subject,
+        html,
+        text,
+      }).catch((err) => {
+        console.error('Failed to dispatch restaurant registration email:', err.message);
+      });
+    }
+
+    if (email) {
+      const html = `
+        <h2>Xin chào ${ownerName},</h2>
+        <p>Chúng tôi đã nhận được hồ sơ đăng ký của nhà hàng <strong>${name}</strong>.</p>
+        <p>Đội ngũ Super Admin sẽ xem xét và phản hồi qua email trong thời gian sớm nhất.</p>
+        <p>Trân trọng!</p>
+      `;
+      const text = [
+        `Xin chào ${ownerName},`,
+        `Chúng tôi đã nhận hồ sơ đăng ký nhà hàng ${name}.`,
+        'Super Admin sẽ duyệt và phản hồi qua email trong thời gian sớm nhất.',
+        'Trân trọng!',
+      ].join('\n');
+
+      await sendEmail({
+        to: email,
+        subject: 'Hồ sơ đăng ký nhà hàng đã được tiếp nhận',
+        html,
+        text,
+      }).catch((err) => console.error('Failed to send restaurant acknowledgement email:', err.message));
+    }
+
+    res.status(201).json({
+      message: 'Đăng ký thành công. Hồ sơ của bạn đang chờ Super Admin phê duyệt.',
+      restaurant: {
+        id: newRestaurant._id,
+        approvalStatus: newRestaurant.approvalStatus,
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server Error' });
@@ -86,7 +159,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
 // Update restaurant details
 router.put('/update', authMiddleware, upload.single('profilePicture'), async (req, res) => {
-  const { name, ownerName, location, contactNumber } = req.body;
+  const { name, ownerName, location, contactNumber, profilePictureUrl } = req.body;
 
   try {
     const restaurant = await Restaurant.findById(req.user.id);
@@ -103,6 +176,8 @@ router.put('/update', authMiddleware, upload.single('profilePicture'), async (re
     // Update profile picture if a file is uploaded
     if (req.file) {
       restaurant.profilePicture = `/uploads/${req.file.filename}`;
+    } else if (typeof profilePictureUrl === 'string') {
+      restaurant.profilePicture = profilePictureUrl.trim();
     }
 
     await restaurant.save();

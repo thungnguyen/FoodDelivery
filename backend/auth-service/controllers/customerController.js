@@ -2,6 +2,21 @@
 
 const jwt        = require("jsonwebtoken");
 const Customer   = require("../models/Customer");
+const { sendEmail } = require("../utils/emailService");
+
+const ALLOWED_ACCOUNT_STATUSES = ["active", "locked"];
+
+const formatCustomer = (customer) => ({
+  id: customer._id,
+  firstName: customer.firstName,
+  lastName: customer.lastName,
+  email: customer.email,
+  phone: customer.phone,
+  location: customer.location,
+  accountStatus: customer.accountStatus,
+  createdAt: customer.createdAt,
+  updatedAt: customer.updatedAt,
+});
 
 // Helper to sign a JWT for a given user ID (and role)
 const signToken = (userId) => {
@@ -43,6 +58,26 @@ exports.register = async (req, res, next) => {
     // 4) Sign JWT
     const token = signToken(newCustomer._id);
 
+    if (email) {
+      const html = `
+        <h2>Chào mừng ${firstName}!</h2>
+        <p>Tài khoản khách hàng của bạn đã được tạo thành công.</p>
+        <p>Bạn có thể đăng nhập ứng dụng để đặt món và theo dõi đơn hàng ngay bây giờ.</p>
+      `;
+      const text = [
+        `Chào mừng ${firstName}!`,
+        'Tài khoản khách hàng của bạn đã được đăng ký thành công.',
+        'Đăng nhập để bắt đầu đặt món và theo dõi đơn hàng.',
+      ].join('\n');
+
+      sendEmail({
+        to: email,
+        subject: 'Đăng ký tài khoản khách hàng thành công',
+        html,
+        text,
+      }).catch((err) => console.error('Failed to send welcome email to customer:', err.message));
+    }
+
     // 5) Respond
     res.status(201).json({
       status: "success",
@@ -55,6 +90,7 @@ exports.register = async (req, res, next) => {
           email: newCustomer.email,
           phone: newCustomer.phone,
           location: newCustomer.location,
+          accountStatus: newCustomer.accountStatus,
         },
       },
     });
@@ -81,6 +117,12 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
+    if (customer.accountStatus === "locked") {
+      return res.status(403).json({
+        message: "Tài khoản của bạn đang bị khóa. Vui lòng liên hệ bộ phận hỗ trợ.",
+      });
+    }
+
     // 3) Check password
     const valid = await customer.comparePassword(password);
     if (!valid) {
@@ -102,6 +144,7 @@ exports.login = async (req, res, next) => {
           email: customer.email,
           phone: customer.phone,
           location: customer.location,
+          accountStatus: customer.accountStatus,
         },
       },
     });
@@ -173,6 +216,47 @@ exports.updateProfile = async (req, res, next) => {
           location: customer.location,
         },
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Admin endpoints
+exports.adminListCustomers = async (_req, res, next) => {
+  try {
+    const customers = await Customer.find().sort({ createdAt: -1 });
+    res.json({
+      status: "success",
+      customers: customers.map(formatCustomer),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.adminUpdateCustomerStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!ALLOWED_ACCOUNT_STATUSES.includes(status)) {
+      return res.status(400).json({ message: "Trạng thái không hợp lệ." });
+    }
+
+    const customer = await Customer.findById(id);
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
+
+    customer.accountStatus = status;
+    customer.lockedAt = status === "locked" ? new Date() : null;
+    await customer.save();
+
+    res.json({
+      status: "success",
+      message: "Cập nhật trạng thái khách hàng thành công.",
+      customer: formatCustomer(customer),
     });
   } catch (err) {
     next(err);

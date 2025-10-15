@@ -1,7 +1,19 @@
 import jwt from "jsonwebtoken";
 
-// Middleware to protect routes by verifying JWT
+const serviceKey = process.env.SERVICE_INTERNAL_KEY || "super-admin-internal-key";
+
+// Middleware to protect routes by verifying JWT or internal service key
 const protect = (req, res, next) => {
+    const providedKey = req.header("x-service-key");
+    if (serviceKey && providedKey && providedKey === serviceKey) {
+        req.user = {
+            id: "internal-service",
+            role: "admin",
+            service: true,
+        };
+        return next();
+    }
+
     const token = req.header("Authorization")?.split(" ")[1]; // Extract token after "Bearer"
 
     if (!token) {
@@ -39,3 +51,4 @@ const authorizeRoles = (...roles) => {
 };
 
 export { protect, authorizeRoles };
+

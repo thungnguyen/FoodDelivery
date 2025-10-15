@@ -21,8 +21,29 @@ const restaurantSchema = new mongoose.Schema(
       required: true,
     },
     profilePicture: {
-      type: String, 
-      required: true,
+      type: String,
+      default: '',
+    },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    approvalNotes: {
+      type: String,
+    },
+    approvedAt: {
+      type: Date,
+    },
+    rejectedAt: {
+      type: Date,
+    },
+    lastReviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SuperAdmin',
+    },
+    onboardingEmailSentAt: {
+      type: Date,
     },
     admin: {
       email: {
@@ -37,7 +58,7 @@ const restaurantSchema = new mongoose.Schema(
     },
     availability: {
       type: Boolean,
-      default: true,
+      default: false,
     },
   },
   { timestamps: true }

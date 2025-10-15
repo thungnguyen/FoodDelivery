@@ -16,16 +16,16 @@ const router = express.Router();
 router.post("/", protect, authorizeRoles("customer"), createOrder);
 
 // Customers, restaurants, drivers and admins can view orders (scoped in controller)
-router.get("/", protect, authorizeRoles("customer", "restaurant", "driver", "admin"), getOrders);
-router.get("/:id", protect, authorizeRoles("customer", "restaurant", "driver", "admin"), getOrderById);
+router.get("/", protect, authorizeRoles("customer", "restaurant", "driver", "admin", "superAdmin"), getOrders);
+router.get("/:id", protect, authorizeRoles("customer", "restaurant", "driver", "admin", "superAdmin"), getOrderById);
 
 // Customers can adjust their order details before confirmation, admins/restaurants may also edit via same endpoint
-router.patch("/:id", protect, authorizeRoles("customer", "restaurant", "admin"), updateOrderDetails);
+router.patch("/:id", protect, authorizeRoles("customer", "restaurant", "admin", "superAdmin"), updateOrderDetails);
 
 // Restaurant, driver and admin-specific status transitions
-router.patch("/:id/status", protect, authorizeRoles("restaurant", "driver", "admin"), updateOrderStatus);
+router.patch("/:id/status", protect, authorizeRoles("restaurant", "driver", "admin", "superAdmin"), updateOrderStatus);
 
 // Customers, restaurants and admins can cancel subject to status checks
-router.delete("/:id", protect, authorizeRoles("customer", "restaurant", "admin"), cancelOrder);
+router.delete("/:id", protect, authorizeRoles("customer", "restaurant", "admin", "superAdmin"), cancelOrder);
 
 export default router;

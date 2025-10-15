@@ -2,7 +2,8 @@
 const mongoose = require("mongoose");
 const bcrypt   = require("bcryptjs");
 
-const customerSchema = new mongoose.Schema({
+const customerSchema = new mongoose.Schema(
+{
   firstName: {
     type: String,
     required: true,
@@ -36,7 +37,16 @@ const customerSchema = new mongoose.Schema({
     trim: true,
     // You could store as { type: "Point", coordinates: [lng, lat] } for geo-queries
   },
-});
+  accountStatus: {
+    type: String,
+    enum: ["active", "locked"],
+    default: "active",
+  },
+  lockedAt: {
+    type: Date,
+  },
+},
+{ timestamps: true });
 
 // Hash password before saving
 customerSchema.pre("save", async function (next) {

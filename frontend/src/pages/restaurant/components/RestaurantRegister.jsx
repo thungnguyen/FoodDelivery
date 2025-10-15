@@ -1,13 +1,10 @@
 // src/components/RestaurantRegister.jsx
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import '../styles/restaurantRegister.css';
 import { RESTAURANT_SERVICE_URL } from '../../../utils/serviceUrls';
 
 function RestaurantRegister() {
-  const navigate = useNavigate("/");
-
   const [form, setForm] = useState({
     name: '',
     ownerName: '',
@@ -125,10 +122,16 @@ function RestaurantRegister() {
 
       const data = await res.json();
       if (res.ok) {
-        setMessage('Restaurant registered successfully!');
-       setTimeout(() => {
-          navigate('/restaurant/home');
-        }, 2000);
+        setMessage(data.message || 'Đăng ký thành công! Hồ sơ của bạn đang chờ Super Admin duyệt.');
+        setForm({
+          name: '',
+          ownerName: '',
+          location: '',
+          contactNumber: '',
+          profilePicture: null,
+          email: '',
+          password: '',
+        });
       } else {
         setMessage(data.message || 'Registration failed');
       }

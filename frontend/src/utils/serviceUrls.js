@@ -1,5 +1,14 @@
 // Centralized service endpoints so the UI can switch environments without touching component code
-const fallback = (value, def) => (value && value.trim().length ? value : def);
+const fallback = (...values) => {
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (typeof value === 'string' && value.trim().length) {
+      return value.trim();
+    }
+  }
+  const last = values[values.length - 1];
+  return typeof last === 'string' ? last : '';
+};
 
 export const AUTH_SERVICE_URL = fallback(
   process.env.REACT_APP_AUTH_URL || process.env.REACT_APP_BACKEND_URL,
@@ -7,6 +16,12 @@ export const AUTH_SERVICE_URL = fallback(
 );
 
 export const RESTAURANT_SERVICE_URL = fallback(
+  process.env.REACT_APP_RESTAURANT_URL,
+  "http://localhost:5002"
+);
+
+export const SUPER_ADMIN_API_URL = fallback(
+  process.env.REACT_APP_SUPER_ADMIN_URL,
   process.env.REACT_APP_RESTAURANT_URL,
   "http://localhost:5002"
 );
@@ -25,4 +40,3 @@ export const DELIVERY_SERVICE_URL = fallback(
   process.env.REACT_APP_DELIVERY_URL,
   "http://localhost:5003"
 );
-
