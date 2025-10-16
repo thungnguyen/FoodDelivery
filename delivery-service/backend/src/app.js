@@ -5,6 +5,7 @@ import connectDB from "./config/db.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import deliveryRoutes from "./routes/deliveryRoutes.js";
+import adminDriverRoutes from "./routes/adminDriverRoutes.js";
 
 dotenv.config();
 connectDB();
@@ -16,5 +17,6 @@ app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/delivery", deliveryRoutes);
+app.use("/api/admin/drivers", adminDriverRoutes);
 
 export default app;

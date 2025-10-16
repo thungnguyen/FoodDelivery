@@ -21,6 +21,58 @@ const TABS = [
 const createOptions = (entries) => entries.map(([value, label]) => ({ value, label }));
 const createLookup = (entries) => Object.fromEntries(entries);
 
+const arrayFromPayload = (payload, preferredKeys = [], seen = new Set()) => {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  if (seen.has(payload)) {
+    return [];
+  }
+
+  seen.add(payload);
+
+  for (const key of preferredKeys) {
+    const candidate = payload[key];
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+    if (candidate && typeof candidate === 'object') {
+      const nested = arrayFromPayload(candidate, preferredKeys, seen);
+      if (nested.length) {
+        return nested;
+      }
+    }
+  }
+
+  const fallbackKeys = ['data', 'items', 'results', 'docs', 'list', 'rows', 'content', 'records'];
+  for (const key of fallbackKeys) {
+    const candidate = payload[key];
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+    if (candidate && typeof candidate === 'object') {
+      const nested = arrayFromPayload(candidate, preferredKeys, seen);
+      if (nested.length) {
+        return nested;
+      }
+    }
+  }
+
+  const objectValues = Object.values(payload).filter(
+    (value) => value && typeof value === 'object' && !Array.isArray(value)
+  );
+  if (objectValues.length) {
+    return objectValues;
+  }
+
+  return [];
+};
+
 const CUSTOMER_STATUS_ENTRIES = [
   ['all', 'Tất cả'],
   ['active', 'Đang hoạt động'],
@@ -258,19 +310,91 @@ const formatDateTime = (value) => {
   }
 };
 
+const formatOrderCode = (value, fallback = 'Đơn') => {
+  if (!value) return `${fallback} —`;
+  const compact = String(value).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!compact) {
+    return `${fallback} —`;
+  }
+  const suffix = compact.slice(-6).padStart(6, '0');
+  return `${fallback} #${suffix}`;
+};
+
+const formatPaymentMethod = (value) => {
+  const method = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  switch (method) {
+    case 'cod':
+    case 'cash':
+      return 'Tiền mặt';
+    case 'card':
+      return 'Thẻ';
+    case 'momo':
+      return 'MoMo';
+    case 'zalopay':
+      return 'ZaloPay';
+    case 'bank_transfer':
+      return 'Chuyển khoản';
+    case 'online':
+      return 'Online';
+    default:
+      return method ? method.toUpperCase() : 'COD';
+  }
+};
+
+const formatPaymentStatus = (value) => {
+  const status = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  switch (status) {
+    case 'paid':
+      return 'Đã thanh toán';
+    case 'pending':
+      return 'Chờ thanh toán';
+    case 'failed':
+      return 'Thanh toán lỗi';
+    case 'refunded':
+      return 'Đã hoàn tiền';
+    default:
+      return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Chờ thanh toán';
+  }
+};
+
+const formatDriverStatus = (value) => {
+  const status = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  switch (status) {
+    case 'online':
+      return 'Đang online';
+    case 'offline':
+      return 'Ngoại tuyến';
+    case 'busy':
+      return 'Đang giao';
+    case 'available':
+      return 'Sẵn sàng';
+    case 'on-delivery':
+      return 'Đang giao';
+    case 'pending':
+      return 'Chờ duyệt';
+    case 'approved':
+      return 'Đã duyệt';
+    case 'rejected':
+      return 'Bị từ chối';
+    default:
+      return status ? status.charAt(0).toUpperCase() + status.slice(1) : '';
+  }
+};
+
 const joinName = (firstName, lastName, fallback = 'Chưa cập nhật') => {
   const name = `${firstName || ''} ${lastName || ''}`.trim();
   return name || fallback;
 };
 
-const normalizeCustomers = (list = []) =>
-  list
+const normalizeCustomers = (raw = []) => {
+  const list = arrayFromPayload(raw, ['customers']);
+  return list
     .filter(Boolean)
     .map((item) => {
       const id = item._id || item.id;
       return {
         id,
-        name: item.name || joinName(item.firstName, item.lastName),
+        name: item.name || item.fullName || joinName(item.firstName, item.lastName),
         email: item.email || '—',
         phone: item.phone || item.contact || '—',
         status:
@@ -283,9 +407,11 @@ const normalizeCustomers = (list = []) =>
         addresses: item.addresses || item.savedAddresses || [],
       };
     });
+};
 
-const normalizeRestaurants = (list = []) =>
-  list
+const normalizeRestaurants = (raw = []) => {
+  const list = arrayFromPayload(raw, ['restaurants']);
+  return list
     .filter(Boolean)
     .map((item) => {
       const id = item._id || item.id;
@@ -311,15 +437,17 @@ const normalizeRestaurants = (list = []) =>
         preparationTime: item.preparationTime || item.avgPreparationTime || 0,
       };
     });
+};
 
-const normalizeDrivers = (list = []) =>
-  list
+const normalizeDrivers = (raw = []) => {
+  const list = arrayFromPayload(raw, ['drivers']);
+  return list
     .filter(Boolean)
     .map((item) => {
       const id = item._id || item.id;
       return {
         id,
-        name: item.name || joinName(item.firstName, item.lastName),
+        name: item.name || item.fullName || joinName(item.firstName, item.lastName),
         email: item.email || '—',
         phone: item.phone || item.phoneNumber || '—',
         status: item.status || item.activityStatus || 'offline',
@@ -334,24 +462,118 @@ const normalizeDrivers = (list = []) =>
         createdAt: item.createdAt,
       };
     });
+};
 
-const normalizeOrders = (list = []) =>
-  list
+const normalizeOrders = (raw = []) => {
+  const list = arrayFromPayload(raw, ['orders']);
+  return list
     .filter(Boolean)
     .map((item) => {
       const id = item._id || item.id;
+      const customerRef =
+        item.customer ||
+        item.customerInfo ||
+        item.customerDetails ||
+        item.customerProfile ||
+        {};
+      const restaurantRef =
+        item.restaurant ||
+        item.restaurantInfo ||
+        item.restaurantDetails ||
+        item.restaurantProfile ||
+        {};
+      const driverRef =
+        item.driver ||
+        item.driverInfo ||
+        item.assignedDriver ||
+        item.driverDetails ||
+        {};
+
+      const customerId =
+        item.customerId ||
+        customerRef._id ||
+        customerRef.id ||
+        customerRef.customerId ||
+        null;
+      const restaurantId =
+        item.restaurantId ||
+        restaurantRef._id ||
+        restaurantRef.id ||
+        restaurantRef.restaurantId ||
+        null;
+      const driverId =
+        item.driverId ||
+        item.assignedDriverId ||
+        driverRef._id ||
+        driverRef.id ||
+        driverRef.driverId ||
+        null;
+
+      const rawCode = item.code || item.orderCode || item.reference || id;
+      const status =
+        item.status ||
+        item.orderStatus ||
+        item.currentStatus ||
+        'Pending Confirmation';
+
+      const paymentMethod =
+        item.paymentMethod ||
+        item.payment?.method ||
+        item.paymentInfo?.method ||
+        'COD';
+
+      const paymentStatus =
+        item.paymentStatus ||
+        item.payment?.status ||
+        item.paymentInfo?.status ||
+        'Pending';
+
       return {
         id,
-        code: item.code || item.orderCode || id,
-        customerName: item.customerName || item.customer?.name || '—',
-        restaurantName: item.restaurantName || item.restaurant?.name || '—',
-        driverName: item.driverName || item.driver?.name || '—',
-        status: item.status || 'Pending Confirmation',
-        total: item.total || item.grandTotal || 0,
-        paymentMethod: item.paymentMethod || item.payment?.method || 'COD',
-        createdAt: item.createdAt || item.placedAt,
+        rawCode,
+        code: rawCode,
+        customerId: customerId ? String(customerId) : null,
+        customerName:
+          item.customerName ||
+          customerRef.name ||
+          customerRef.fullName ||
+          customerRef.displayName ||
+          '—',
+        customerPhone:
+          item.customerPhone ||
+          customerRef.phone ||
+          customerRef.contactNumber ||
+          customerRef.mobile ||
+          '',
+        restaurantId: restaurantId ? String(restaurantId) : null,
+        restaurantName:
+          item.restaurantName ||
+          restaurantRef.name ||
+          restaurantRef.displayName ||
+          restaurantRef.brand ||
+          '—',
+        restaurantLocation:
+          restaurantRef.location ||
+          restaurantRef.address ||
+          restaurantRef.area ||
+          '',
+        driverId: driverId ? String(driverId) : null,
+        driverName:
+          item.driverName ||
+          driverRef.name ||
+          driverRef.fullName ||
+          driverRef.displayName ||
+          '',
+        driverStatus: driverRef.status || item.driverStatus || '',
+        status,
+        total: item.total || item.grandTotal || item.totalPrice || item.amount || 0,
+        paymentMethod,
+        paymentStatus,
+        createdAt: item.createdAt || item.placedAt || item.created || null,
+        updatedAt: item.updatedAt || item.modifiedAt || null,
       };
     });
+};
 
 function SuperAdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -559,7 +781,7 @@ function SuperAdminDashboard() {
       try {
         const data = await fetchJSON(`${SUPER_ADMIN_API_URL}/api/superadmin/customers`);
         if (!ignore) {
-          const normalized = normalizeCustomers(data.customers || data);
+          const normalized = normalizeCustomers(data);
           setCustomers(normalized);
           setCustomerAlert(
             normalized.length
@@ -568,12 +790,14 @@ function SuperAdminDashboard() {
           );
         }
       } catch (error) {
+        console.error('Failed to load customers:', error);
         if (!ignore) {
           setCustomers(normalizeCustomers(FALLBACK_CUSTOMERS));
           setCustomerAlert({
             type: 'warning',
-            message:
-              'Không thể tải dữ liệu khách hàng thực tế, hệ thống đang hiển thị dữ liệu mẫu để bạn tham khảo.',
+            message: `Không thể tải dữ liệu khách hàng thực tế${
+              error?.message ? ` (${error.message})` : ''
+            }, hệ thống đang hiển thị dữ liệu mẫu để bạn tham khảo.`,
           });
         }
       } finally {
@@ -605,12 +829,14 @@ function SuperAdminDashboard() {
           );
         }
       } catch (error) {
+        console.error('Failed to load restaurants:', error);
         if (!ignore) {
           setRestaurants(normalizeRestaurants(FALLBACK_RESTAURANTS));
           setRestaurantAlert({
             type: 'warning',
-            message:
-              'Không thể tải dữ liệu nhà hàng thực tế, đang hiển thị danh sách mẫu để dễ dàng đánh giá giao diện.',
+            message: `Không thể tải dữ liệu nhà hàng thực tế${
+              error?.message ? ` (${error.message})` : ''
+            }, đang hiển thị danh sách mẫu để dễ dàng đánh giá giao diện.`,
           });
         }
       } finally {
@@ -623,7 +849,7 @@ function SuperAdminDashboard() {
     return () => {
       ignore = true;
     };
-  }, [fetchJSON, driversRefreshTick]);
+  }, [fetchJSON]);
 
   useEffect(() => {
     let ignore = false;
@@ -633,7 +859,7 @@ function SuperAdminDashboard() {
       try {
         const data = await fetchJSON(`${SUPER_ADMIN_API_URL}/api/superadmin/drivers`);
         if (!ignore) {
-          const normalized = normalizeDrivers(data.drivers || data);
+          const normalized = normalizeDrivers(data);
           setDrivers(normalized);
           setDriverAlert(
             normalized.length
@@ -642,12 +868,14 @@ function SuperAdminDashboard() {
           );
         }
       } catch (error) {
+        console.error('Failed to load drivers:', error);
         if (!ignore) {
           setDrivers(normalizeDrivers(FALLBACK_DRIVERS));
           setDriverAlert({
             type: 'warning',
-            message:
-              'Dịch vụ tài xế chưa phản hồi, dữ liệu mô phỏng đang được sử dụng để bạn tiếp tục tinh chỉnh giao diện.',
+            message: `Dịch vụ tài xế chưa phản hồi${
+              error?.message ? ` (${error.message})` : ''
+            }, dữ liệu mô phỏng đang được sử dụng để bạn tiếp tục tinh chỉnh giao diện.`,
           });
         }
       } finally {
@@ -660,7 +888,7 @@ function SuperAdminDashboard() {
     return () => {
       ignore = true;
     };
-  }, [fetchJSON, ordersRefreshTick]);
+  }, [fetchJSON, driversRefreshTick]);
 
   useEffect(() => {
     let ignore = false;
@@ -670,7 +898,7 @@ function SuperAdminDashboard() {
       try {
         const data = await fetchJSON(`${SUPER_ADMIN_API_URL}/api/superadmin/orders?scope=all`);
         if (!ignore) {
-          const normalized = normalizeOrders(data.orders || data);
+          const normalized = normalizeOrders(data);
           setOrders(normalized);
           setOrderAlert(
             normalized.length
@@ -679,12 +907,14 @@ function SuperAdminDashboard() {
           );
         }
       } catch (error) {
+        console.error('Failed to load orders:', error);
         if (!ignore) {
           setOrders(normalizeOrders(FALLBACK_ORDERS));
           setOrderAlert({
             type: 'warning',
-            message:
-              'Dịch vụ đơn hàng chưa phản hồi, bảng này đang sử dụng dữ liệu mô phỏng để bạn kiểm tra luồng thao tác.',
+            message: `Dịch vụ đơn hàng chưa phản hồi${
+              error?.message ? ` (${error.message})` : ''
+            }, bảng này đang sử dụng dữ liệu mô phỏng để bạn kiểm tra luồng thao tác.`,
           });
         }
       } finally {
@@ -697,13 +927,105 @@ function SuperAdminDashboard() {
     return () => {
       ignore = true;
     };
-  }, [fetchJSON]);
+  }, [fetchJSON, ordersRefreshTick]);
 
   const handleLogout = () => {
     clearAuthToken(AUTH_ROLES.SUPER_ADMIN);
     localStorage.removeItem('superAdminName');
     window.location.href = '/restaurant/home';
   };
+
+  const customerLookup = useMemo(() => {
+    const map = new Map();
+    customers.forEach((customer) => {
+      const key = customer?.id || customer?._id;
+      if (key) {
+        map.set(String(key), customer);
+      }
+    });
+    return map;
+  }, [customers]);
+
+  const restaurantLookup = useMemo(() => {
+    const map = new Map();
+    restaurants.forEach((restaurant) => {
+      const key = restaurant?.id || restaurant?._id;
+      if (key) {
+        map.set(String(key), restaurant);
+      }
+    });
+    return map;
+  }, [restaurants]);
+
+  const driverLookup = useMemo(() => {
+    const map = new Map();
+    drivers.forEach((driver) => {
+      const key = driver?.id || driver?._id;
+      if (key) {
+        map.set(String(key), driver);
+      }
+    });
+    return map;
+  }, [drivers]);
+
+  const ordersHydrated = useMemo(() => {
+    if (!orders.length) return [];
+    const resolveName = (existing, ...candidates) => {
+      const trimmed = typeof existing === 'string' ? existing.trim() : existing;
+      const value = trimmed && trimmed !== '—' ? trimmed : null;
+      if (value) return value;
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate.trim();
+        }
+      }
+      return '—';
+    };
+    return orders.map((order) => {
+      const customer = order.customerId ? customerLookup.get(String(order.customerId)) : null;
+      const restaurant = order.restaurantId ? restaurantLookup.get(String(order.restaurantId)) : null;
+      const driver = order.driverId ? driverLookup.get(String(order.driverId)) : null;
+      const rawCode = order.rawCode || order.code || order.id;
+      const displayCode = formatOrderCode(rawCode || order.id);
+      const paymentLabel = `${formatPaymentMethod(order.paymentMethod)} • ${formatPaymentStatus(
+        order.paymentStatus
+      )}`;
+      const driverStatusLabel = formatDriverStatus(order.driverStatus || driver?.status || '');
+      return {
+        ...order,
+        rawCode,
+        displayCode,
+        paymentLabel,
+        customerName: resolveName(
+          order.customerName,
+          customer?.name,
+          customer?.fullName,
+          customer?.email
+        ),
+        customerPhone: resolveName(
+          order.customerPhone,
+          customer?.phone,
+          customer?.contact,
+          customer?.mobile
+        ),
+        restaurantName: resolveName(
+          order.restaurantName,
+          restaurant?.name,
+          restaurant?.brand,
+          restaurant?.ownerName
+        ),
+        restaurantLocation:
+          order.restaurantLocation ||
+          restaurant?.location ||
+          restaurant?.address ||
+          restaurant?.area ||
+          '',
+        driverName: resolveName(order.driverName, driver?.name, driver?.fullName, driver?.email),
+        driverStatus: order.driverStatus || driver?.status || '',
+        driverStatusLabel,
+      };
+    });
+  }, [orders, customerLookup, restaurantLookup, driverLookup]);
 
   const filteredCustomers = useMemo(() => {
     const query = customerSearch.trim().toLowerCase();
@@ -747,9 +1069,9 @@ function SuperAdminDashboard() {
   }, [drivers, driverFilter]);
 
   const filteredOrders = useMemo(() => {
-    if (orderStatusFilter === 'all') return orders;
-    return orders.filter((order) => order.status === orderStatusFilter);
-  }, [orders, orderStatusFilter]);
+    if (orderStatusFilter === 'all') return ordersHydrated;
+    return ordersHydrated.filter((order) => order.status === orderStatusFilter);
+  }, [ordersHydrated, orderStatusFilter]);
 
   const overviewMetrics = useMemo(() => {
     const activeCustomers = customers.filter((customer) => customer.status === 'active').length;
@@ -760,15 +1082,15 @@ function SuperAdminDashboard() {
       (restaurant) => restaurant.approvalStatus === 'approved'
     ).length;
     const onlineDrivers = drivers.filter((driver) => driver.status === 'online').length;
-    const openOrders = orders.filter(
+    const openOrders = ordersHydrated.filter(
       (order) => !['Delivered', 'Cancelled', 'Failed'].includes(order.status)
     ).length;
-    const deliveredOrders = orders.filter((order) => order.status === 'Delivered');
+    const deliveredOrders = ordersHydrated.filter((order) => order.status === 'Delivered');
     const totalRevenue = deliveredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
     const cancellationRate =
-      orders.length === 0
+      ordersHydrated.length === 0
         ? 0
-        : orders.filter((order) => order.status === 'Cancelled').length / orders.length;
+        : ordersHydrated.filter((order) => order.status === 'Cancelled').length / ordersHydrated.length;
 
     return {
       totalCustomers: customers.length,
@@ -782,7 +1104,7 @@ function SuperAdminDashboard() {
       totalRevenue,
       cancellationRate,
     };
-  }, [customers, restaurants, drivers, orders]);
+  }, [customers, restaurants, drivers, ordersHydrated]);
 
   const serviceHealth = useMemo(() => {
     const mapAlertToTone = (alert) => {
@@ -817,7 +1139,7 @@ function SuperAdminDashboard() {
       {
         id: 'orders',
         label: 'Đơn hàng',
-        count: orders.length,
+        count: ordersHydrated.length,
         loading: ordersLoading,
         alert: orderAlert,
       },
@@ -842,7 +1164,7 @@ function SuperAdminDashboard() {
     drivers.length,
     driverAlert,
     driversLoading,
-    orders.length,
+    ordersHydrated.length,
     orderAlert,
     ordersLoading,
   ]);
@@ -888,7 +1210,7 @@ function SuperAdminDashboard() {
   }, [drivers]);
 
   const orderSummary = useMemo(() => {
-    if (orders.length === 0) {
+    if (ordersHydrated.length === 0) {
       return {
         total: 0,
         inProgress: 0,
@@ -901,11 +1223,11 @@ function SuperAdminDashboard() {
       };
     }
 
-    const deliveredOrders = orders.filter((order) => order.status === 'Delivered');
-    const cancelled = orders.filter((order) => order.status === 'Cancelled').length;
-    const failed = orders.filter((order) => order.status === 'Failed').length;
-    const awaitingDriver = orders.filter((order) => order.status === 'Awaiting Driver').length;
-    const inProgress = orders.filter((order) =>
+    const deliveredOrders = ordersHydrated.filter((order) => order.status === 'Delivered');
+    const cancelled = ordersHydrated.filter((order) => order.status === 'Cancelled').length;
+    const failed = ordersHydrated.filter((order) => order.status === 'Failed').length;
+    const awaitingDriver = ordersHydrated.filter((order) => order.status === 'Awaiting Driver').length;
+    const inProgress = ordersHydrated.filter((order) =>
       ['Pending Confirmation', 'Confirmed', 'Preparing', 'Awaiting Driver', 'Out for Delivery'].includes(
         order.status
       )
@@ -914,7 +1236,7 @@ function SuperAdminDashboard() {
     const avgTicket = deliveredOrders.length ? revenue / deliveredOrders.length : 0;
 
     return {
-      total: orders.length,
+      total: ordersHydrated.length,
       inProgress,
       delivered: deliveredOrders.length,
       cancelled,
@@ -923,7 +1245,7 @@ function SuperAdminDashboard() {
       avgTicket,
       awaitingDriver,
     };
-  }, [orders]);
+  }, [ordersHydrated]);
 
   const customerSummary = useMemo(() => {
     if (customers.length === 0) {
@@ -1393,13 +1715,13 @@ function SuperAdminDashboard() {
   };
 
   const financialSummary = useMemo(() => {
-    const delivered = orders.filter((order) => order.status === 'Delivered');
+    const delivered = ordersHydrated.filter((order) => order.status === 'Delivered');
     const grossRevenue = delivered.reduce((sum, order) => sum + (order.total || 0), 0);
     const restaurantShare = grossRevenue * 0.8;
     const driverShare = grossRevenue * 0.15;
     const platformCommission = grossRevenue * 0.05;
     return { grossRevenue, restaurantShare, driverShare, platformCommission };
-  }, [orders]);
+  }, [ordersHydrated]);
 
   const renderAlert = (alert) =>
     alert ? (
@@ -2093,7 +2415,7 @@ function SuperAdminDashboard() {
       .map((status) => ({
         status,
         label: ORDER_STATUS_LABELS[status] || status,
-        count: orders.filter((order) => order.status === status).length,
+        count: ordersHydrated.filter((order) => order.status === status).length,
       }))
       .filter((item) => item.count > 0);
 
@@ -2186,14 +2508,42 @@ function SuperAdminDashboard() {
               <tbody>
                 {filteredOrders.map((order) => (
                   <tr key={order.id}>
-                    <td className="sa-mono">{order.code}</td>
-                    <td>{order.customerName}</td>
-                    <td>{order.restaurantName}</td>
-                    <td>{order.driverName || 'Đang phân công'}</td>
+                    <td className="sa-mono">
+                      <div className="sa-stack">
+                        <strong>{order.displayCode}</strong>
+                        {order.rawCode && order.rawCode !== order.displayCode && (
+                          <span className="sa-meta">{order.rawCode}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="sa-stack">
+                        <strong>{order.customerName}</strong>
+                        {order.customerPhone && order.customerPhone !== '—' && (
+                          <span className="sa-meta">{order.customerPhone}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="sa-stack">
+                        <strong>{order.restaurantName}</strong>
+                        {order.restaurantLocation && (
+                          <span className="sa-meta">{order.restaurantLocation}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="sa-stack">
+                        <strong>{order.driverName || 'Đang phân công'}</strong>
+                        {order.driverStatusLabel && (
+                          <span className="sa-meta">{`Trạng thái: ${order.driverStatusLabel}`}</span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <div className="sa-stack">
                         <strong>{formatCurrency(order.total)}</strong>
-                        <span className="sa-meta">{order.paymentMethod}</span>
+                        <span className="sa-meta">{order.paymentLabel}</span>
                       </div>
                     </td>
                     <td>
@@ -2387,8 +2737,8 @@ function SuperAdminDashboard() {
       .slice(0, 5);
     const statusStats = ORDER_STATUS_OPTIONS.filter((option) => option.value !== 'all').map(
       (option) => {
-        const count = orders.filter((order) => order.status === option.value).length;
-        const ratio = orders.length ? Math.round((count / orders.length) * 100) : 0;
+        const count = ordersHydrated.filter((order) => order.status === option.value).length;
+        const ratio = ordersHydrated.length ? Math.round((count / ordersHydrated.length) * 100) : 0;
         return { label: option.label, ratio };
       }
     );

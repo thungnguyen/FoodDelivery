@@ -1,9 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { ORDER_SERVICE_URL, RESTAURANT_SERVICE_URL, AUTH_SERVICE_URL } from "../../utils/serviceUrls";
+import {
+  ORDER_SERVICE_URL,
+  RESTAURANT_SERVICE_URL,
+  AUTH_SERVICE_URL,
+  REALTIME_SERVICE_URL,
+} from "../../utils/serviceUrls";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Spinner, Badge } from "react-bootstrap";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
+import { io } from "socket.io-client";
 
 const formatCurrency = (value) => {
   if (typeof value !== "number") return "0 VND";
@@ -18,19 +24,35 @@ function Orders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const socketRef = useRef(null);
+  const subscribedOrdersRef = useRef(new Set());
+  const isMountedRef = useRef(false);
 
-  // Fetch orders from the backend when the component mounts
   useEffect(() => {
-    const fetchOrders = async () => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const fetchOrders = useCallback(
+    async ({ silent = false } = {}) => {
       const token = getAuthToken(AUTH_ROLES.CUSTOMER);
       if (!token) {
-        setError("Please log in to view your orders.");
-        setLoading(false);
+        if (isMountedRef.current) {
+          setError("Please log in to view your orders.");
+          if (!silent) {
+            setLoading(false);
+          }
+        }
         return;
       }
 
+      if (!silent && isMountedRef.current) {
+        setLoading(true);
+      }
+
       try {
-        setError("");
         const response = await axios.get(`${ORDER_SERVICE_URL}/api/orders`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -41,17 +63,27 @@ function Orders() {
               return timeB - timeA;
             })
           : [];
-        setOrders(sorted);
+        if (isMountedRef.current) {
+          setError("");
+          setOrders(sorted);
+        }
       } catch (err) {
         console.error("Error fetching orders:", err);
-        setError(err.response?.data?.message || "Unable to load orders. Please try again.");
+        if (isMountedRef.current) {
+          setError(err.response?.data?.message || "Unable to load orders. Please try again.");
+        }
       } finally {
-        setLoading(false);
+        if (!silent && isMountedRef.current) {
+          setLoading(false);
+        }
       }
-    };
+    },
+    []
+  );
 
+  useEffect(() => {
     fetchOrders();
-  }, []);
+  }, [fetchOrders]);
 
   useEffect(() => {
     const token = getAuthToken(AUTH_ROLES.CUSTOMER);
@@ -73,6 +105,125 @@ function Orders() {
 
     fetchProfile();
   }, []);
+
+  const ordersRef = useRef([]);
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  const handleRealtimeEvent = useCallback(
+    (message) => {
+      if (!message || typeof message !== "object") return;
+      const { event, payload } = message;
+      if (!event) return;
+      if (!isMountedRef.current) return;
+
+      switch (event) {
+        case "order.status.changed": {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              status: payload?.status || next[index].status,
+              updatedAt: payload?.updatedAt || next[index].updatedAt,
+            };
+            return next;
+          });
+          fetchOrders({ silent: true });
+          break;
+        }
+        case "order.created": {
+          fetchOrders({ silent: true });
+          break;
+        }
+        case "order.cancelled": {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              status: payload?.status || "Cancelled",
+            };
+            return next;
+          });
+          fetchOrders({ silent: true });
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [fetchOrders]
+  );
+
+  useEffect(() => {
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+    if (!token) return;
+
+    const socket = io(REALTIME_SERVICE_URL, {
+      transports: ["websocket"],
+      auth: { token },
+    });
+
+    socketRef.current = socket;
+    socket.on("realtime:event", handleRealtimeEvent);
+    socket.on("connect_error", (connError) => {
+      console.error("Realtime connection error:", connError.message);
+    });
+
+    socket.on("connect", () => {
+      const currentOrders = ordersRef.current || [];
+      currentOrders.forEach((order) => {
+        const orderId = order?._id || order?.id;
+        if (orderId) {
+          socket.emit("realtime:subscribe", `order:${orderId}`);
+          subscribedOrdersRef.current.add(String(orderId));
+        }
+      });
+    });
+
+    return () => {
+      socket.off("realtime:event", handleRealtimeEvent);
+      socket.disconnect();
+      socketRef.current = null;
+      subscribedOrdersRef.current.clear();
+    };
+  }, [handleRealtimeEvent]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    const currentIds = new Set();
+    orders.forEach((order) => {
+      const orderId = order?._id || order?.id;
+      if (!orderId) return;
+      const id = String(orderId);
+      currentIds.add(id);
+      if (!subscribedOrdersRef.current.has(id)) {
+        socket.emit("realtime:subscribe", `order:${id}`);
+        subscribedOrdersRef.current.add(id);
+      }
+    });
+
+    Array.from(subscribedOrdersRef.current).forEach((id) => {
+      if (!currentIds.has(id)) {
+        socket.emit("realtime:unsubscribe", `order:${id}`);
+        subscribedOrdersRef.current.delete(id);
+      }
+    });
+  }, [orders]);
 
   useEffect(() => {
     const missingIds = orders

@@ -40,3 +40,8 @@ export const DELIVERY_SERVICE_URL = fallback(
   process.env.REACT_APP_DELIVERY_URL,
   "http://localhost:5003"
 );
+
+export const REALTIME_SERVICE_URL = fallback(
+  process.env.REACT_APP_REALTIME_URL,
+  "http://localhost:5050"
+);

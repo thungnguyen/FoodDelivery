@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import '../styles/rdashboard.css';
-import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL } from '../../../utils/serviceUrls';
+import { io } from 'socket.io-client';
+import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL, REALTIME_SERVICE_URL } from '../../../utils/serviceUrls';
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
 const ORDER_STATUS_LABELS = {
@@ -73,6 +74,23 @@ function RestaurantDashboard() {
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
   const ORDER_API_BASE = ORDER_SERVICE_URL;
+  const socketRef = useRef(null);
+  const subscribedOrdersRef = useRef(new Set());
+  const restaurantRoomRef = useRef(null);
+  const restaurantIdRef = useRef(null);
+  const ordersRef = useRef([]);
+  const isMountedRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
 
   const handleLogout = () => {
     clearAuthToken(AUTH_ROLES.RESTAURANT);
@@ -128,33 +146,206 @@ function RestaurantDashboard() {
     }
   }, [API_BASE, handleUnauthorizedError]);
 
-  const fetchOrders = useCallback(async () => {
-    try {
-      setOrdersLoading(true);
-      setOrdersError('');
-      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
-      const res = await fetch(`${ORDER_API_BASE}/api/orders`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) {
-        handleUnauthorizedError();
+  const fetchOrders = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        if (!silent) {
+          setOrdersLoading(true);
+        }
+        setOrdersError('');
+        const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+        const res = await fetch(`${ORDER_API_BASE}/api/orders`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          handleUnauthorizedError();
+          return;
+        }
+        const data = await res.json();
+        if (!isMountedRef.current) {
+          return;
+        }
+        if (res.ok) {
+          const sortedOrders = Array.isArray(data)
+            ? [...data].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+            : [];
+          setOrders(sortedOrders);
+        } else {
+          setOrdersError(data.message || 'Không thể tải danh sách đơn hàng.');
+        }
+      } catch (err) {
+        if (isMountedRef.current) {
+          setOrdersError('Có lỗi khi tải danh sách đơn hàng.');
+        }
+      } finally {
+        if (!silent && isMountedRef.current) {
+          setOrdersLoading(false);
+        }
+      }
+    },
+    [ORDER_API_BASE, handleUnauthorizedError]
+  );
+
+  const handleRealtimeEvent = useCallback(
+    (message) => {
+      if (!message || typeof message !== 'object') return;
+      const { event, payload } = message;
+      if (!event || !isMountedRef.current) return;
+
+      const currentRestaurantId = restaurantIdRef.current
+        ? String(restaurantIdRef.current)
+        : null;
+      const payloadRestaurantId = payload?.restaurantId
+        ? String(payload.restaurantId)
+        : null;
+      const isRelevantRestaurant =
+        !currentRestaurantId ||
+        !payloadRestaurantId ||
+        payloadRestaurantId === currentRestaurantId;
+
+      if (!isRelevantRestaurant) {
         return;
       }
-      const data = await res.json();
-      if (res.ok) {
-        const sortedOrders = Array.isArray(data)
-          ? [...data].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-          : [];
-        setOrders(sortedOrders);
-      } else {
-        setOrdersError(data.message || 'Không thể tải danh sách đơn hàng.');
+
+      switch (event) {
+        case 'order.status.changed': {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              status: payload?.status || next[index].status,
+              updatedAt: payload?.updatedAt || next[index].updatedAt,
+            };
+            return next;
+          });
+          fetchOrders({ silent: true });
+          break;
+        }
+        case 'order.created': {
+          fetchOrders({ silent: true });
+          break;
+        }
+        case 'order.cancelled': {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              status: payload?.status || 'Cancelled',
+            };
+            return next;
+          });
+          fetchOrders({ silent: true });
+          break;
+        }
+        default:
+          break;
       }
-    } catch (err) {
-      setOrdersError('Có lỗi khi tải danh sách đơn hàng.');
-    } finally {
-      setOrdersLoading(false);
+    },
+    [fetchOrders]
+  );
+
+  useEffect(() => {
+    const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+    if (!token) return;
+
+    const socket = io(REALTIME_SERVICE_URL, {
+      transports: ['websocket'],
+      auth: { token },
+    });
+
+    socketRef.current = socket;
+    socket.on('realtime:event', handleRealtimeEvent);
+    socket.on('connect_error', (err) => {
+      console.error('Realtime (restaurant) connection error:', err.message);
+    });
+
+    socket.on('connect', () => {
+      const currentOrders = ordersRef.current || [];
+      currentOrders.forEach((order) => {
+        const orderId = order?._id || order?.id;
+        if (!orderId) return;
+        const id = String(orderId);
+        socket.emit('realtime:subscribe', `order:${id}`);
+        subscribedOrdersRef.current.add(id);
+      });
+      if (restaurantRoomRef.current) {
+        socket.emit('realtime:subscribe', restaurantRoomRef.current);
+      }
+    });
+
+    return () => {
+      socket.off('realtime:event', handleRealtimeEvent);
+      if (restaurantRoomRef.current) {
+        socket.emit('realtime:unsubscribe', restaurantRoomRef.current);
+      }
+      socket.disconnect();
+      socketRef.current = null;
+      subscribedOrdersRef.current.clear();
+      restaurantRoomRef.current = null;
+    };
+  }, [handleRealtimeEvent]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    const rawId =
+      restaurant?._id ||
+      restaurant?.id ||
+      restaurant?.restaurantId ||
+      (restaurant?.data && restaurant.data._id);
+    const normalizedId = rawId ? String(rawId) : null;
+    restaurantIdRef.current = normalizedId;
+
+    const nextRoom = normalizedId ? `restaurant:${normalizedId}` : null;
+    const previousRoom = restaurantRoomRef.current;
+
+    if (previousRoom && previousRoom !== nextRoom) {
+      socket.emit('realtime:unsubscribe', previousRoom);
+      restaurantRoomRef.current = null;
     }
-  }, [ORDER_API_BASE, handleUnauthorizedError]);
+
+    if (nextRoom && nextRoom !== previousRoom) {
+      socket.emit('realtime:subscribe', nextRoom);
+      restaurantRoomRef.current = nextRoom;
+    }
+  }, [restaurant]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    const currentIds = new Set();
+    orders.forEach((order) => {
+      const orderId = order?._id || order?.id;
+      if (!orderId) return;
+      const id = String(orderId);
+      currentIds.add(id);
+      if (!subscribedOrdersRef.current.has(id)) {
+        socket.emit('realtime:subscribe', `order:${id}`);
+        subscribedOrdersRef.current.add(id);
+      }
+    });
+
+    Array.from(subscribedOrdersRef.current).forEach((id) => {
+      if (!currentIds.has(id)) {
+        socket.emit('realtime:unsubscribe', `order:${id}`);
+        subscribedOrdersRef.current.delete(id);
+      }
+    });
+  }, [orders]);
 
   const updateOrderStatus = async (orderId, status, successMessage) => {
     try {
@@ -425,7 +616,7 @@ function RestaurantDashboard() {
 
   useEffect(() => {
     if (activeTab === 'orders' || activeTab === 'finance') {
-      fetchOrders();
+      fetchOrders({ silent: true });
     }
   }, [activeTab, fetchOrders]);
 
@@ -954,7 +1145,12 @@ function RestaurantDashboard() {
           <div>
             <div className="orders-header">
               <h2>Quản lý đơn hàng</h2>
-              <button type="button" className="order-refresh-btn" onClick={fetchOrders} disabled={ordersLoading}>
+              <button
+                type="button"
+                className="order-refresh-btn"
+                onClick={() => fetchOrders()}
+                disabled={ordersLoading}
+              >
                 {ordersLoading ? 'Đang tải...' : 'Tải lại'}
               </button>
             </div>

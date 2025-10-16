@@ -7,17 +7,18 @@ export const assignNearestDriver = async (pickupLat, pickupLng) => {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [pickupLng, pickupLat] // (lng, lat)
+            coordinates: [pickupLng, pickupLat], // (lng, lat)
           },
-          $maxDistance: 10000 // 10km range
-        }
+          $maxDistance: 10000, // 10km range
+        },
       },
-      status: "available"
+      status: { $in: ["online", "available"] },
+      approvalStatus: "approved",
     });
 
     if (nearestDriver) {
-      // Mark driver as on-delivery
-      nearestDriver.status = "on-delivery";
+      // Mark driver as busy / on delivery
+      nearestDriver.status = "busy";
       await nearestDriver.save();
     }
 

@@ -81,6 +81,37 @@ const normalizeOrderStatusInPlace = (orderDoc) => {
     return canonicalStatus || orderDoc.status;
 };
 
+const toRoomId = (prefix, rawValue) => {
+    if (!rawValue) {
+        return null;
+    }
+    try {
+        const value = typeof rawValue === "string" ? rawValue : rawValue.toString();
+        if (!value || value === "[object Object]") {
+            return null;
+        }
+        return `${prefix}${value}`;
+    } catch (err) {
+        return null;
+    }
+};
+
+const buildOrderRooms = ({ orderId, customerId, restaurantId }) => {
+    const rooms = new Set();
+    const orderRoom = toRoomId("order:", orderId);
+    if (orderRoom) rooms.add(orderRoom);
+    rooms.add("role:superAdmin");
+    const customerRoom = toRoomId("customer:", customerId);
+    if (customerRoom) rooms.add(customerRoom);
+    const customerUserRoom = toRoomId("user:", customerId);
+    if (customerUserRoom) rooms.add(customerUserRoom);
+    const restaurantRoom = toRoomId("restaurant:", restaurantId);
+    if (restaurantRoom) rooms.add(restaurantRoom);
+    const restaurantUserRoom = toRoomId("user:", restaurantId);
+    if (restaurantUserRoom) rooms.add(restaurantUserRoom);
+    return Array.from(rooms);
+};
+
 // @desc Create new order
 // @route POST /api/orders
 export const createOrder = async (req, res) => {
@@ -151,12 +182,11 @@ export const createOrder = async (req, res) => {
                 restaurantId,
                 customerId
             },
-            rooms: [
-                `order:${order._id}`,
-                "role:superAdmin",
-                restaurantId ? `restaurant:${restaurantId}` : null,
-                customerId ? `customer:${customerId}` : null
-            ].filter(Boolean)
+            rooms: buildOrderRooms({
+                orderId: order._id,
+                customerId,
+                restaurantId
+            })
         });
         const response = toOrderResponse(order);
         res.status(201).json(response);
@@ -342,12 +372,11 @@ export const updateOrderStatus = async (req, res) => {
                 updatedBy: req.user?.id,
                 role
             },
-            rooms: [
-                `order:${order._id}`,
-                "role:superAdmin",
-                order.customerId ? `customer:${order.customerId}` : null,
-                order.restaurantId ? `restaurant:${order.restaurantId}` : null
-            ].filter(Boolean)
+            rooms: buildOrderRooms({
+                orderId: order._id,
+                customerId: order.customerId,
+                restaurantId: order.restaurantId
+            })
         });
 
         res.status(200).json(toOrderResponse(order));
@@ -409,12 +438,11 @@ export const cancelOrder = async (req, res) => {
                 cancelledBy: req.user?.id,
                 role
             },
-            rooms: [
-                `order:${order._id}`,
-                "role:superAdmin",
-                order.customerId ? `customer:${order.customerId}` : null,
-                order.restaurantId ? `restaurant:${order.restaurantId}` : null
-            ].filter(Boolean)
+            rooms: buildOrderRooms({
+                orderId: order._id,
+                customerId: order.customerId,
+                restaurantId: order.restaurantId
+            })
         });
 
         res.status(200).json({ message: "Order cancelled", order: toOrderResponse(order) });

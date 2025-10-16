@@ -3,81 +3,138 @@ import bcrypt from "bcryptjs";
 
 const DriverSchema = new mongoose.Schema({
   // Identity
-  name: { 
-    type: String, 
-    required: [true, 'Driver name is required'],
+  name: {
+    type: String,
+    required: [true, "Driver name is required"],
     trim: true,
-    minlength: [2, 'Name must be at least 2 characters'],
-    maxlength: [50, 'Name cannot exceed 50 characters']
+    minlength: [2, "Name must be at least 2 characters"],
+    maxlength: [50, "Name cannot exceed 50 characters"],
   },
-  email: { 
-    type: String, 
-    required: [true, 'Email is required'],
+  email: {
+    type: String,
+    required: [true, "Email is required"],
     unique: true,
     lowercase: true,
     validate: {
       validator: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
-      message: 'Invalid email format'
-    }
+      message: "Invalid email format",
+    },
   },
-  password: { 
-    type: String, 
-    required: [true, 'Password is required'],
-    select: false
+  password: {
+    type: String,
+    required: [true, "Password is required"],
+    select: false,
   },
-  phone: { 
-    type: String, 
-    required: [true, 'Phone number is required'],
+  phone: {
+    type: String,
+    required: [true, "Phone number is required"],
     unique: true,
     validate: {
       validator: (phone) => /^[0-9]{10,15}$/.test(phone),
-      message: 'Invalid phone number (10-15 digits)'
-    }
+      message: "Invalid phone number (10-15 digits)",
+    },
   },
 
   // Vehicle Information
   vehicleType: {
     type: String,
     enum: {
-      values: ['bike', 'car', 'truck'],
-      message: 'Vehicle type must be bike, car, or truck'
+      values: ["bike", "car", "truck"],
+      message: "Vehicle type must be bike, car, or truck",
     },
-    required: [true, 'Vehicle type is required']
+    required: [true, "Vehicle type is required"],
   },
-  location: {
-    type: {
-      type: String, // default: "Point"
-      enum: ["Point"]
-    },
-    coordinates: [Number, Number] // longitude, latitude
-  },
-  
   vehicleNumber: {
     type: String,
-    required: [true, 'Vehicle number is required'],
+    required: [true, "Vehicle number is required"],
     uppercase: true,
     validate: {
       validator: (num) => /^[A-Z0-9-]{3,15}$/.test(num),
-      message: 'Invalid vehicle number format'
-    }
+      message: "Invalid vehicle number format",
+    },
+  },
+  licenseNumber: {
+    type: String,
+    trim: true,
+  },
+  address: {
+    type: String,
+    trim: true,
+  },
+  documents: [
+    {
+      label: { type: String, trim: true },
+      url: { type: String, trim: true },
+    },
+  ],
+
+  // Location
+  location: {
+    type: {
+      type: String,
+      enum: ["Point"],
+    },
+    coordinates: [Number, Number],
   },
 
   // Operational Data
   status: {
     type: String,
-    enum: ['available', 'on-delivery', 'offline'],
-    default: 'available'
-  }
-}, { 
+    enum: ["offline", "online", "busy", "available", "on-delivery"],
+    default: "offline",
+  },
+  approvalStatus: {
+    type: String,
+    enum: ["pending", "approved", "rejected"],
+    default: "pending",
+  },
+  approvalNotes: {
+    type: String,
+    default: "",
+  },
+  approvedAt: {
+    type: Date,
+  },
+  rejectedAt: {
+    type: Date,
+  },
+  lastReviewedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "SuperAdmin",
+  },
+  onboardingEmailSentAt: {
+    type: Date,
+  },
+  totalTrips: {
+    type: Number,
+    default: 0,
+  },
+  acceptanceRate: {
+    type: Number,
+    min: 0,
+    max: 1,
+    default: 0,
+  },
+  rating: {
+    type: Number,
+    min: 0,
+    max: 5,
+  },
+  currentLocation: {
+    type: String,
+    default: "",
+  },
+},
+{
   timestamps: true,
   toJSON: {
     virtuals: true,
-    transform: function(doc, ret) {
+    transform: function (doc, ret) {
       delete ret.password;
       delete ret.__v;
       return ret;
-    }
-  }
+    },
+  },
 });
 
 DriverSchema.index({ location: "2dsphere" });
