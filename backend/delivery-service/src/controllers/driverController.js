@@ -1,5 +1,6 @@
 import Driver from '../models/Driver.js';
 import { sendEmail } from '../utils/emailService.js';
+import emitEvent from '../utils/eventBus.js';
 
 const DEFAULT_ADMIN_EMAILS = ['thanhhungnguyen8204@gmail.com', 'thanhhunggpt@gmail.com'];
 
@@ -155,6 +156,15 @@ export const registerDriver = async (req, res) => {
       }).catch((err) => console.error('Failed to send driver acknowledgement email:', err.message));
     }
 
+    emitEvent({
+      event: 'driver.registered',
+      payload: {
+        driverId: driver._id,
+        approvalStatus: driver.approvalStatus,
+      },
+      rooms: ['role:superAdmin', `driver:${driver._id}`],
+    });
+
     res.status(201).json({
       message: 'Đăng ký thành công. Hồ sơ của bạn đang chờ phê duyệt.',
       driver: formatDriver(driver),
@@ -219,6 +229,17 @@ export const updateDriverApproval = async (req, res) => {
 
     await driver.save();
 
+    emitEvent({
+      event: 'driver.approval.updated',
+      payload: {
+        driverId: driver._id,
+        approvalStatus: driver.approvalStatus,
+        notes: driver.approvalNotes,
+        updatedBy: req.adminId,
+      },
+      rooms: ['role:superAdmin', `driver:${driver._id}`],
+    });
+
     await notifyDriverApprovalUpdate(driver).catch((err) => {
       console.error('Failed to send driver approval update email:', err.message);
     });
@@ -250,6 +271,15 @@ export const updateDriverActivity = async (req, res) => {
 
     driver.status = status;
     await driver.save();
+
+    emitEvent({
+      event: 'driver.activity.updated',
+      payload: {
+        driverId: driver._id,
+        status: driver.status,
+      },
+      rooms: ['role:superAdmin', `driver:${driver._id}`],
+    });
 
     res.json({ message: 'Cập nhật trạng thái hoạt động thành công.', driver: formatDriver(driver) });
   } catch (error) {

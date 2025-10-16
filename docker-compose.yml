@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - appnet
+
   auth-service:
     image: node:20-alpine
     container_name: auth-service
@@ -55,6 +64,8 @@ services:
       PORT: ${ORDER_PORT:-5005}
       MONGO_URI: ${MONGO_URI}
       NODE_ENV: development
+      REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
+      SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
     ports:
       - "${ORDER_PORT:-5005}:${ORDER_PORT:-5005}"
     restart: unless-stopped
@@ -76,6 +87,8 @@ services:
       MONGO_URI: ${MONGO_URI}
       JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: development
+      REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
+      SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
     ports:
       - "${DELIVERY_PORT:-5003}:${DELIVERY_PORT:-5003}"
     restart: unless-stopped
@@ -155,6 +168,30 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
+    networks:
+      - appnet
+
+  realtime-gateway:
+    image: node:20-alpine
+    container_name: realtime-gateway
+    working_dir: /usr/src/app
+    command: sh -c "npm install && node src/server.js"
+    volumes:
+      - ./backend/realtime-gateway:/usr/src/app
+      - /usr/src/app/node_modules
+    env_file:
+      - .env
+    environment:
+      PORT: ${REALTIME_PORT:-5050}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      JWT_SECRET: ${JWT_SECRET}
+      SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
+      NODE_ENV: development
+    depends_on:
+      - redis
+    ports:
+      - "${REALTIME_PORT:-5050}:${REALTIME_PORT:-5050}"
+    restart: unless-stopped
     networks:
       - appnet
 

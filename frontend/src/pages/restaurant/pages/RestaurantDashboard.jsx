@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import '../styles/rdashboard.css';
 import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL } from '../../../utils/serviceUrls';
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
@@ -215,6 +215,208 @@ function RestaurantDashboard() {
     return amount.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' });
   };
 
+  const formatNumber = (value) => {
+    const number = typeof value === 'number' ? value : Number(value);
+    if (Number.isNaN(number)) {
+      return value;
+    }
+    return number.toLocaleString('vi-VN');
+  };
+
+  const financialMetrics = useMemo(() => {
+    if (!orders.length) {
+      return {
+        deliveredOrders: [],
+        totalRevenue: 0,
+        dailyRevenue: 0,
+        monthlyRevenue: 0,
+        yearlyRevenue: 0,
+        deliveredCount: 0,
+        cancelledCount: 0,
+        failedCount: 0,
+        averageOrderValue: 0,
+        dailyOrders: 0,
+        monthlyOrders: 0,
+        yearlyOrders: 0,
+        pendingRevenue: 0,
+        pendingOrders: 0,
+        revenueTrend: [],
+        topItems: [],
+        paymentBreakdown: {
+          cash: 0,
+          card: 0,
+          other: 0,
+        },
+      };
+    }
+
+    const parseAmount = (order) =>
+      Number(
+        order.totalPrice ??
+          order.total ??
+          order.grandTotal ??
+          order.amount ??
+          order.totalAmount ??
+          0
+      );
+
+    const resolveDate = (order) => {
+      const candidate =
+        order.deliveredAt ||
+        order.completedAt ||
+        order.updatedAt ||
+        order.createdAt ||
+        order.created_at;
+      const date = candidate ? new Date(candidate) : new Date();
+      if (Number.isNaN(date.getTime())) {
+        return new Date();
+      }
+      return date;
+    };
+
+    const deliveredOrders = orders.filter((order) =>
+      ['Delivered', 'Completed'].includes(order.status)
+    );
+    const cancelledCount = orders.filter((order) => order.status === 'Cancelled').length;
+    const failedCount = orders.filter((order) => order.status === 'Failed').length;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    let totalRevenue = 0;
+    let dailyRevenue = 0;
+    let monthlyRevenue = 0;
+    let yearlyRevenue = 0;
+    let dailyOrders = 0;
+    let monthlyOrders = 0;
+    let yearlyOrders = 0;
+
+    const revenueTrendMap = new Map();
+    const itemSalesMap = new Map();
+    const paymentBreakdown = { cash: 0, card: 0, other: 0 };
+
+    deliveredOrders.forEach((order) => {
+      const amount = parseAmount(order);
+      totalRevenue += amount;
+
+      const orderDate = resolveDate(order);
+      if (orderDate >= startOfToday) {
+        dailyRevenue += amount;
+        dailyOrders += 1;
+      }
+      if (orderDate >= startOfMonth) {
+        monthlyRevenue += amount;
+        monthlyOrders += 1;
+      }
+      if (orderDate >= startOfYear) {
+        yearlyRevenue += amount;
+        yearlyOrders += 1;
+      }
+
+      const dateKey = orderDate.toISOString().slice(0, 10);
+      const existing = revenueTrendMap.get(dateKey) || { revenue: 0, orders: 0, date: orderDate };
+      existing.revenue += amount;
+      existing.orders += 1;
+      revenueTrendMap.set(dateKey, existing);
+
+      const paymentMethod = (order.paymentMethod || order.payment?.method || 'cash').toLowerCase();
+      if (paymentMethod === 'card') {
+        paymentBreakdown.card += amount;
+      } else if (paymentMethod === 'cash') {
+        paymentBreakdown.cash += amount;
+      } else {
+        paymentBreakdown.other += amount;
+      }
+
+      if (Array.isArray(order.items)) {
+        order.items.forEach((item) => {
+          const key = item.foodId || item.foodName || item.name;
+          if (!key) return;
+          const existingItem = itemSalesMap.get(key) || {
+            name: item.foodName || item.name || 'Món',
+            quantity: 0,
+            revenue: 0,
+          };
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.price) || 0;
+          existingItem.quantity += qty;
+          existingItem.revenue += qty * price;
+          itemSalesMap.set(key, existingItem);
+        });
+      }
+    });
+
+    const deliveredCount = deliveredOrders.length;
+    const averageOrderValue = deliveredCount ? totalRevenue / deliveredCount : 0;
+
+    const revenueTrend = Array.from(revenueTrendMap.entries())
+      .sort((a, b) => new Date(a[0]) - new Date(b[0]))
+      .slice(-7)
+      .map(([dateKey, info]) => ({
+        dateKey,
+        dateLabel: new Date(dateKey).toLocaleDateString('vi-VN'),
+        revenue: info.revenue,
+        orders: info.orders,
+      }));
+
+    const topItems = Array.from(itemSalesMap.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    const pendingStatuses = new Set([
+      'Pending Confirmation',
+      'Pending',
+      'Confirmed',
+      'Preparing',
+      'Awaiting Driver',
+      'Out for Delivery',
+    ]);
+
+    const pendingOrdersList = orders.filter((order) => pendingStatuses.has(order.status));
+    const pendingRevenue = pendingOrdersList.reduce((sum, order) => sum + parseAmount(order), 0);
+
+    return {
+      deliveredOrders,
+      totalRevenue,
+      dailyRevenue,
+      monthlyRevenue,
+      yearlyRevenue,
+      deliveredCount,
+      cancelledCount,
+      failedCount,
+      averageOrderValue,
+      dailyOrders,
+      monthlyOrders,
+      yearlyOrders,
+      pendingRevenue,
+      pendingOrders: pendingOrdersList.length,
+      revenueTrend,
+      topItems,
+      paymentBreakdown,
+    };
+  }, [orders]);
+  const {
+    deliveredOrders,
+    totalRevenue,
+    dailyRevenue,
+    monthlyRevenue,
+    yearlyRevenue,
+    deliveredCount,
+    cancelledCount,
+    failedCount,
+    averageOrderValue,
+    dailyOrders,
+    monthlyOrders,
+    yearlyOrders,
+    pendingRevenue,
+    pendingOrders,
+    revenueTrend,
+    topItems,
+    paymentBreakdown,
+  } = financialMetrics;
+
   useEffect(() => {
     fetchRestaurantProfile();
     fetchFoodItems();
@@ -222,7 +424,7 @@ function RestaurantDashboard() {
   }, [fetchRestaurantProfile, fetchFoodItems, fetchOrders]);
 
   useEffect(() => {
-    if (activeTab === 'orders') {
+    if (activeTab === 'orders' || activeTab === 'finance') {
       fetchOrders();
     }
   }, [activeTab, fetchOrders]);
@@ -403,6 +605,7 @@ function RestaurantDashboard() {
         <button className={activeTab === 'profile' ? 'active' : ''} onClick={() => setActiveTab('profile')}>Profile</button>
         <button className={activeTab === 'foodItems' ? 'active' : ''} onClick={() => setActiveTab('foodItems')}>Food Items</button>
         <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>Orders</button>
+        <button className={activeTab === 'finance' ? 'active' : ''} onClick={() => setActiveTab('finance')}>Finance</button>
         <button className={activeTab === 'availability' ? 'active' : ''} onClick={() => setActiveTab('availability')}>Availability</button>
       </div>
 
@@ -603,6 +806,147 @@ function RestaurantDashboard() {
     Add Food Item
   </button>
 </form>
+          </div>
+        )}
+
+        {activeTab === 'finance' && (
+          <div className="finance-section">
+            <div className="finance-header">
+              <h2>Tài chính & Doanh thu</h2>
+              <span className="finance-chip">
+                {formatNumber(deliveredCount)} đơn hoàn tất
+              </span>
+            </div>
+            {deliveredOrders.length === 0 ? (
+              <div className="finance-empty">
+                <h3>Chưa có dữ liệu doanh thu</h3>
+                <p>Hoàn tất đơn hàng để bắt đầu theo dõi báo cáo tài chính tại đây.</p>
+              </div>
+            ) : (
+              <>
+                <div className="finance-overview">
+                  <div className="finance-card primary">
+                    <h3>Doanh thu hôm nay</h3>
+                    <p>{formatCurrency(dailyRevenue)}</p>
+                    <span>{formatNumber(dailyOrders)} đơn</span>
+                  </div>
+                  <div className="finance-card accent">
+                    <h3>Doanh thu tháng</h3>
+                    <p>{formatCurrency(monthlyRevenue)}</p>
+                    <span>{formatNumber(monthlyOrders)} đơn</span>
+                  </div>
+                  <div className="finance-card emerald">
+                    <h3>Doanh thu năm</h3>
+                    <p>{formatCurrency(yearlyRevenue)}</p>
+                    <span>{formatNumber(yearlyOrders)} đơn</span>
+                  </div>
+                  <div className="finance-card neutral">
+                    <h3>Tổng doanh thu</h3>
+                    <p>{formatCurrency(totalRevenue)}</p>
+                    <span>Giá trị TB: {formatCurrency(averageOrderValue)}</span>
+                  </div>
+                  <div className="finance-card warning">
+                    <h3>Đơn đang xử lý</h3>
+                    <p>{formatCurrency(pendingRevenue)}</p>
+                    <span>{formatNumber(pendingOrders)} đơn chờ hoàn tất</span>
+                  </div>
+                  <div className="finance-card danger">
+                    <h3>Đơn hủy / thất bại</h3>
+                    <p>{formatNumber(cancelledCount + failedCount)} đơn</p>
+                    <span>
+                      Hủy: {formatNumber(cancelledCount)} • Thất bại: {formatNumber(failedCount)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="finance-stats-grid">
+                  <div className="finance-panel">
+                    <h3>Phương thức thanh toán</h3>
+                    <ul className="finance-list compact">
+                      <li>
+                        <span>Tiền mặt</span>
+                        <strong>{formatCurrency(paymentBreakdown.cash)}</strong>
+                      </li>
+                      <li>
+                        <span>Thẻ</span>
+                        <strong>{formatCurrency(paymentBreakdown.card)}</strong>
+                      </li>
+                      <li>
+                        <span>Khác</span>
+                        <strong>{formatCurrency(paymentBreakdown.other)}</strong>
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="finance-panel">
+                    <h3>Trạng thái đơn hàng</h3>
+                    <ul className="finance-list compact">
+                      <li>
+                        <span>Hoàn tất</span>
+                        <strong>{formatNumber(deliveredCount)}</strong>
+                      </li>
+                      <li>
+                        <span>Đang xử lý</span>
+                        <strong>{formatNumber(pendingOrders)}</strong>
+                      </li>
+                      <li>
+                        <span>Đã hủy</span>
+                        <strong>{formatNumber(cancelledCount)}</strong>
+                      </li>
+                      <li>
+                        <span>Thất bại</span>
+                        <strong>{formatNumber(failedCount)}</strong>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="finance-grid">
+                  <div className="finance-panel">
+                    <h3>Xu hướng 7 ngày gần nhất</h3>
+                    {revenueTrend.length === 0 ? (
+                      <p>Chưa có đủ dữ liệu để hiển thị xu hướng.</p>
+                    ) : (
+                      <table className="finance-table">
+                        <thead>
+                          <tr>
+                            <th>Ngày</th>
+                            <th>Doanh thu</th>
+                            <th>Đơn</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {revenueTrend.map((item) => (
+                            <tr key={item.dateKey}>
+                              <td>{item.dateLabel}</td>
+                              <td>{formatCurrency(item.revenue)}</td>
+                              <td>{formatNumber(item.orders)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <div className="finance-panel">
+                    <h3>Top món bán chạy</h3>
+                    {topItems.length === 0 ? (
+                      <p>Chưa có món nào đủ dữ liệu.</p>
+                    ) : (
+                      <ul className="finance-list">
+                        {topItems.map((item) => (
+                          <li key={item.name}>
+                            <div className="finance-list-label">
+                              <span>{item.name}</span>
+                              <small>{formatNumber(item.quantity)} món</small>
+                            </div>
+                            <strong>{formatCurrency(item.revenue)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 

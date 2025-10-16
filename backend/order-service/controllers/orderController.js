@@ -1,4 +1,5 @@
 import Order from "../models/orderModel.js";
+import emitEvent from "../utils/eventBus.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed"];
 
@@ -142,6 +143,21 @@ export const createOrder = async (req, res) => {
         });
 
         await order.save();
+        emitEvent({
+            event: "order.created",
+            payload: {
+                orderId: order._id,
+                status: order.status,
+                restaurantId,
+                customerId
+            },
+            rooms: [
+                `order:${order._id}`,
+                "role:superAdmin",
+                restaurantId ? `restaurant:${restaurantId}` : null,
+                customerId ? `customer:${customerId}` : null
+            ].filter(Boolean)
+        });
         const response = toOrderResponse(order);
         res.status(201).json(response);
     } catch (error) {
@@ -318,6 +334,22 @@ export const updateOrderStatus = async (req, res) => {
 
         await order.save();
 
+        emitEvent({
+            event: "order.status.changed",
+            payload: {
+                orderId: order._id,
+                status: order.status,
+                updatedBy: req.user?.id,
+                role
+            },
+            rooms: [
+                `order:${order._id}`,
+                "role:superAdmin",
+                order.customerId ? `customer:${order.customerId}` : null,
+                order.restaurantId ? `restaurant:${order.restaurantId}` : null
+            ].filter(Boolean)
+        });
+
         res.status(200).json(toOrderResponse(order));
     } catch (error) {
         console.error("Error updating order status:", error);
@@ -368,6 +400,22 @@ export const cancelOrder = async (req, res) => {
 
         order.status = "Cancelled";
         await order.save();
+
+        emitEvent({
+            event: "order.cancelled",
+            payload: {
+                orderId: order._id,
+                status: order.status,
+                cancelledBy: req.user?.id,
+                role
+            },
+            rooms: [
+                `order:${order._id}`,
+                "role:superAdmin",
+                order.customerId ? `customer:${order.customerId}` : null,
+                order.restaurantId ? `restaurant:${order.restaurantId}` : null
+            ].filter(Boolean)
+        });
 
         res.status(200).json({ message: "Order cancelled", order: toOrderResponse(order) });
     } catch (error) {
