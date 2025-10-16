@@ -279,6 +279,16 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-items: center;
+}
+
+.sa-sidebar-section.nav h3 {
+  align-self: stretch;
+}
+
+.sa-sidebar-nav .sa-tab {
+  width: 100%;
+  max-width: 220px;
 }
 
 .sa-sidebar-status {
@@ -1326,6 +1336,14 @@
 
   .sa-sidebar-section {
     padding: 18px;
+  }
+
+  .sa-sidebar-nav {
+    align-items: stretch;
+  }
+
+  .sa-sidebar-nav .sa-tab {
+    max-width: none;
   }
 
   .sa-sidebar-metrics {
