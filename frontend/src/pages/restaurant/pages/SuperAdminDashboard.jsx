@@ -575,6 +575,21 @@ const normalizeOrders = (raw = []) => {
     });
 };
 
+const getOrderTimestamp = (order) => {
+  const candidates = [order?.createdAt, order?.updatedAt];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const parsed = Date.parse(candidate);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+};
+
+const sortOrdersByNewest = (orders = []) =>
+  [...orders].sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
+
 function SuperAdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [superAdminName, setSuperAdminName] = useState('');
@@ -898,7 +913,7 @@ function SuperAdminDashboard() {
       try {
         const data = await fetchJSON(`${SUPER_ADMIN_API_URL}/api/superadmin/orders?scope=all`);
         if (!ignore) {
-          const normalized = normalizeOrders(data);
+          const normalized = sortOrdersByNewest(normalizeOrders(data));
           setOrders(normalized);
           setOrderAlert(
             normalized.length
@@ -909,7 +924,7 @@ function SuperAdminDashboard() {
       } catch (error) {
         console.error('Failed to load orders:', error);
         if (!ignore) {
-          setOrders(normalizeOrders(FALLBACK_ORDERS));
+          setOrders(sortOrdersByNewest(normalizeOrders(FALLBACK_ORDERS)));
           setOrderAlert({
             type: 'warning',
             message: `Dịch vụ đơn hàng chưa phản hồi${

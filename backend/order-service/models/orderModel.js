@@ -39,7 +39,33 @@ const orderSchema = new mongoose.Schema(
             ],
             default: "Pending Confirmation"
         },
-        deliveryAddress: { type: String, required: true }
+        deliveryAddress: { type: String, required: true },
+        deliveryFeedback: {
+            rating: {
+                type: Number,
+                min: 1,
+                max: 5
+            },
+            comment: {
+                type: String,
+                trim: true,
+                maxlength: 1000
+            },
+            ratedAt: { type: Date }
+        },
+        orderFeedback: {
+            rating: {
+                type: Number,
+                min: 1,
+                max: 5
+            },
+            comment: {
+                type: String,
+                trim: true,
+                maxlength: 1000
+            },
+            ratedAt: { type: Date }
+        }
     },
     { timestamps: true }
 );

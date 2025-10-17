@@ -5,7 +5,8 @@ import {
     getOrderById,
     updateOrderStatus,
     cancelOrder,
-    updateOrderDetails
+    updateOrderDetails,
+    submitOrderFeedback
 } from "../controllers/orderController.js";
 
 import { protect, authorizeRoles } from "../middleware/authMiddleware.js";
@@ -24,6 +25,9 @@ router.patch("/:id", protect, authorizeRoles("customer", "restaurant", "admin", 
 
 // Restaurant, driver and admin-specific status transitions
 router.patch("/:id/status", protect, authorizeRoles("restaurant", "driver", "admin", "superAdmin"), updateOrderStatus);
+
+// Customers can rate their experience after completion
+router.post("/:id/feedback", protect, authorizeRoles("customer"), submitOrderFeedback);
 
 // Customers, restaurants and admins can cancel subject to status checks
 router.delete("/:id", protect, authorizeRoles("customer", "restaurant", "admin", "superAdmin"), cancelOrder);

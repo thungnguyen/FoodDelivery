@@ -34,6 +34,7 @@ const STATUS_ALIASES = {
 };
 
 const CLOSED_STATUSES = new Set(["Completed", "Cancelled", "Failed", "Refunded"]);
+const RATEABLE_STATUSES = new Set(["Delivered", "Completed"]);
 
 const STATUS_TRANSITIONS = {
     restaurant: {
@@ -382,6 +383,97 @@ export const updateOrderStatus = async (req, res) => {
         res.status(200).json(toOrderResponse(order));
     } catch (error) {
         console.error("Error updating order status:", error);
+        res.status(500).json({ error: "Server Error" });
+    }
+};
+
+const parseRating = (value) => {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return null;
+    }
+    const clamped = Math.min(5, Math.max(1, numeric));
+    return Math.round(clamped * 10) / 10;
+};
+
+const sanitizeComment = (value) => {
+    if (typeof value !== "string") {
+        return "";
+    }
+    return value.trim().slice(0, 1000);
+};
+
+// @desc Submit feedback for an order/driver after completion
+// @route POST /api/orders/:id/feedback
+export const submitOrderFeedback = async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.id);
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
+
+        const role = req.user?.role;
+        if (role !== "customer") {
+            return res.status(403).json({ message: "Only customers can submit feedback for orders." });
+        }
+
+        const customerId = req.user?.customerId || req.user?.id;
+        if (order.customerId && customerId && order.customerId !== customerId) {
+            return res.status(403).json({ message: "You can only rate your own orders." });
+        }
+
+        const currentStatus = normalizeOrderStatusInPlace(order);
+        if (!RATEABLE_STATUSES.has(currentStatus)) {
+            return res.status(400).json({ message: "Order must be delivered or completed before submitting feedback." });
+        }
+
+        const { orderRating, orderComment, driverRating, driverComment } = req.body || {};
+
+        const parsedOrderRating = parseRating(orderRating);
+        const parsedDriverRating = parseRating(driverRating);
+
+        if (parsedOrderRating === null && parsedDriverRating === null) {
+            return res.status(400).json({ message: "Please provide at least one valid rating between 1 and 5." });
+        }
+
+        if (parsedOrderRating !== null) {
+            order.orderFeedback = {
+                rating: parsedOrderRating,
+                comment: sanitizeComment(orderComment),
+                ratedAt: new Date()
+            };
+        }
+
+        if (parsedDriverRating !== null) {
+            order.deliveryFeedback = {
+                rating: parsedDriverRating,
+                comment: sanitizeComment(driverComment),
+                ratedAt: new Date()
+            };
+        }
+
+        await order.save();
+
+        emitEvent({
+            event: "order.feedback.updated",
+            payload: {
+                orderId: order._id,
+                orderFeedback: order.orderFeedback,
+                deliveryFeedback: order.deliveryFeedback
+            },
+            rooms: buildOrderRooms({
+                orderId: order._id,
+                customerId: order.customerId,
+                restaurantId: order.restaurantId
+            })
+        });
+
+        res.status(200).json(toOrderResponse(order));
+    } catch (error) {
+        console.error("Error submitting order feedback:", error);
         res.status(500).json({ error: "Server Error" });
     }
 };

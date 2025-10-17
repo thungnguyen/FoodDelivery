@@ -71,8 +71,12 @@ router.put('/:id', authMiddleware, upload.single('image'), async (req, res) => {
     if (category) foodItem.category = category;
     if (typeof availability !== 'undefined') foodItem.availability = availability;
 
+    const cleanedUrl = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+
     if (req.file) {
       foodItem.image = `/uploads/${req.file.filename}`;
+    } else if (cleanedUrl) {
+      foodItem.image = cleanedUrl;
     }
 
     await foodItem.save();

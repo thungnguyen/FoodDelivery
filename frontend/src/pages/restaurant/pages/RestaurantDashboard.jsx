@@ -4,6 +4,29 @@ import { io } from 'socket.io-client';
 import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL, REALTIME_SERVICE_URL } from '../../../utils/serviceUrls';
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
+const FALLBACK_IMAGE =
+  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="%23eceff1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2399a1a7" font-family="Arial" font-size="14">No Image</text></svg>';
+
+const useFilePreview = (file) => {
+  const [preview, setPreview] = useState('');
+
+  useEffect(() => {
+    if (!file) {
+      setPreview('');
+      return undefined;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setPreview(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [file]);
+
+  return preview;
+};
+
 const ORDER_STATUS_LABELS = {
   'Pending Confirmation': 'Chờ xác nhận',
   Confirmed: 'Đã xác nhận',
@@ -65,6 +88,8 @@ function RestaurantDashboard() {
     price: '',
     category: '',
     imageUrl: '',
+    imageFile: null,
+    imageMode: 'file',
   });
   const [editFoodItem, setEditFoodItem] = useState(null); // For editing food items
   const [editProfile, setEditProfile] = useState(false); // For editing profile
@@ -80,6 +105,115 @@ function RestaurantDashboard() {
   const restaurantIdRef = useRef(null);
   const ordersRef = useRef([]);
   const isMountedRef = useRef(false);
+
+  const resolveImageSrc = useCallback(
+    (raw) => {
+      if (!raw || typeof raw !== 'string') {
+        return '';
+      }
+
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        return '';
+      }
+
+      if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
+        return trimmed;
+      }
+
+      if (/^(?:https?:)?\/\//i.test(trimmed)) {
+        if (trimmed.startsWith('//')) {
+          const protocol = typeof window !== 'undefined' ? window.location.protocol : 'https:';
+          return `${protocol}${trimmed}`;
+        }
+        return trimmed;
+      }
+
+      if (trimmed.startsWith('/')) {
+        return `${API_BASE}${trimmed}`;
+      }
+
+      return `${API_BASE}/${trimmed}`;
+    },
+    [API_BASE]
+  );
+
+  const handleImageError = useCallback((event) => {
+    event.currentTarget.onerror = null;
+    event.currentTarget.src = FALLBACK_IMAGE;
+  }, []);
+
+  const profileImageSrc = useMemo(
+    () => resolveImageSrc(restaurant.profilePicture),
+    [resolveImageSrc, restaurant.profilePicture]
+  );
+
+  const newFoodFilePreview = useFilePreview(
+    newFoodItem.imageMode === 'file' ? newFoodItem.imageFile : null
+  );
+  const editFoodFilePreview = useFilePreview(
+    editFoodItem?.imageMode === 'file' ? editFoodItem.imageFile : null
+  );
+  const profileFilePreview = useFilePreview(
+    editableProfile?.profileImageMode === 'file' ? editableProfile.profilePictureFile : null
+  );
+
+  const newFoodImagePreview = useMemo(() => {
+    if (newFoodItem.imageMode === 'file') {
+      return newFoodFilePreview;
+    }
+    return resolveImageSrc(newFoodItem.imageUrl);
+  }, [newFoodFilePreview, newFoodItem.imageMode, newFoodItem.imageUrl, resolveImageSrc]);
+
+  const editFoodImagePreview = useMemo(() => {
+    if (!editFoodItem) {
+      return '';
+    }
+    if (editFoodItem.imageMode === 'file') {
+      return editFoodFilePreview;
+    }
+    return resolveImageSrc(editFoodItem.imageUrl || editFoodItem.image);
+  }, [editFoodFilePreview, editFoodItem, resolveImageSrc]);
+
+  const editableProfileImagePreview = useMemo(() => {
+    if (!editableProfile) {
+      return '';
+    }
+
+    if (editableProfile.profileImageMode === 'file') {
+      return profileFilePreview;
+    }
+
+    return resolveImageSrc(
+      editableProfile.profilePictureUrl || editableProfile.profilePicture
+    );
+  }, [editableProfile, profileFilePreview, resolveImageSrc]);
+
+  const editFoodPreviewSrc = useMemo(() => {
+    if (!editFoodItem) {
+      return '';
+    }
+    return editFoodImagePreview || resolveImageSrc(editFoodItem.image) || '';
+  }, [editFoodImagePreview, editFoodItem, resolveImageSrc]);
+
+  const handleOpenEditFoodItem = useCallback((item) => {
+    setEditFoodItem({
+      ...item,
+      imageUrl: item.image || '',
+      imageFile: null,
+      imageMode: 'url',
+    });
+  }, [setEditFoodItem]);
+
+  const filteredFoodItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return foodItems;
+    }
+    return foodItems.filter((item) =>
+      item.name?.toLowerCase().includes(query)
+    );
+  }, [foodItems, searchQuery]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -621,19 +755,40 @@ function RestaurantDashboard() {
   }, [activeTab, fetchOrders]);
 
   const handleAddFoodItem = async () => {
-    if (!newFoodItem.name || !newFoodItem.description || !newFoodItem.price || !newFoodItem.category || !newFoodItem.imageFile) {
+    const trimmedName = newFoodItem.name?.trim();
+    const trimmedDescription = newFoodItem.description?.trim();
+    const trimmedCategory = newFoodItem.category?.trim();
+    const trimmedPrice = newFoodItem.price;
+    const trimmedUrl = newFoodItem.imageUrl?.trim() || '';
+
+    if (!trimmedName || !trimmedDescription || !trimmedPrice || !trimmedCategory) {
       alert('Please fill in all fields before adding a food item.');
+      return;
+    }
+
+    const wantsFile = newFoodItem.imageMode === 'file' && newFoodItem.imageFile;
+    const wantsUrl = newFoodItem.imageMode === 'url' && trimmedUrl;
+
+    if (!wantsFile && !wantsUrl) {
+      alert('Please choose an image file or provide an image URL.');
       return;
     }
 
     try {
       const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const formData = new FormData();
-      formData.append('name', newFoodItem.name);
-      formData.append('description', newFoodItem.description);
-      formData.append('price', newFoodItem.price);
-      formData.append('category', newFoodItem.category);
-      formData.append('image', newFoodItem.imageFile);
+      formData.append('name', trimmedName);
+      formData.append('description', trimmedDescription);
+      formData.append('price', trimmedPrice);
+      formData.append('category', trimmedCategory);
+
+      if (wantsFile) {
+        formData.append('image', newFoodItem.imageFile);
+      }
+
+      if (wantsUrl) {
+        formData.append('imageUrl', trimmedUrl);
+      }
 
       const res = await fetch(`${API_BASE}/api/food-items/create`, {
         method: 'POST',
@@ -646,7 +801,15 @@ function RestaurantDashboard() {
       if (res.ok) {
         alert('Food item added successfully!');
         fetchFoodItems(); // Refresh the food items list
-        setNewFoodItem({ name: '', description: '', price: '', category: '', imageFile: null }); // Reset form
+        setNewFoodItem({
+          name: '',
+          description: '',
+          price: '',
+          category: '',
+          imageUrl: '',
+          imageFile: null,
+          imageMode: 'file',
+        }); // Reset form
       } else {
         alert(data.message || 'Failed to add food item');
       }
@@ -680,21 +843,45 @@ function RestaurantDashboard() {
   };
 
   const handleEditFoodItem = async () => {
-    if (!editFoodItem.name || !editFoodItem.description || !editFoodItem.price || !editFoodItem.category ) {
+    if (!editFoodItem) {
+      return;
+    }
+
+    const trimmedName = editFoodItem.name?.trim();
+    const trimmedDescription = editFoodItem.description?.trim();
+    const trimmedCategory = editFoodItem.category?.trim();
+    const trimmedPrice = editFoodItem.price;
+    const trimmedUrl = editFoodItem.imageUrl?.trim() || editFoodItem.image?.trim() || '';
+
+    if (!trimmedName || !trimmedDescription || !trimmedPrice || !trimmedCategory) {
       alert('Please fill in all fields before updating the food item.');
+      return;
+    }
+
+    const wantsFile = editFoodItem.imageMode === 'file' && editFoodItem.imageFile;
+    const wantsUrl = editFoodItem.imageMode === 'url' && trimmedUrl;
+
+    if (!wantsFile && !wantsUrl) {
+      alert('Please choose an image file or provide an image URL.');
       return;
     }
 
     try {
       const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const formData = new FormData();
-      formData.append('name', editFoodItem.name);
-      formData.append('description', editFoodItem.description);
-      formData.append('price', editFoodItem.price);
-      formData.append('category', editFoodItem.category);
-      if (editFoodItem.imageFile) {
+      formData.append('name', trimmedName);
+      formData.append('description', trimmedDescription);
+      formData.append('price', trimmedPrice);
+      formData.append('category', trimmedCategory);
+
+      if (wantsFile) {
         formData.append('image', editFoodItem.imageFile);
-          } 
+      }
+
+      if (wantsUrl) {
+        formData.append('imageUrl', trimmedUrl);
+      }
+
       const res = await fetch(`${API_BASE}/api/food-items/${editFoodItem._id}`, {
         method: 'PUT',
         headers: {
@@ -717,7 +904,12 @@ function RestaurantDashboard() {
   };
 
   const handleEditProfileClick = () => {
-    setEditableProfile({ ...restaurant }); // Copy current profile data
+    setEditableProfile({
+      ...restaurant,
+      profilePictureUrl: restaurant.profilePicture || '',
+      profilePictureFile: null,
+      profileImageMode: restaurant.profilePicture ? 'url' : 'file',
+    }); // Copy current profile data
     setEditProfile(true); // Show the edit form
   };
 
@@ -727,21 +919,40 @@ function RestaurantDashboard() {
   };
 
   const handleEditProfile = async (updatedProfile) => {
+    const trimmedName = updatedProfile.name?.trim();
+    const trimmedOwner = updatedProfile.ownerName?.trim();
+    const trimmedLocation = updatedProfile.location?.trim();
+    const trimmedContact = updatedProfile.contactNumber?.trim();
+    const trimmedUrl = updatedProfile.profilePictureUrl?.trim() || '';
+
+    if (!trimmedName || !trimmedOwner || !trimmedLocation || !trimmedContact) {
+      alert('Please complete all profile fields before saving.');
+      return;
+    }
+
+    if (updatedProfile.profileImageMode === 'url' && !trimmedUrl) {
+      alert('Please provide a valid image URL.');
+      return;
+    }
+
     try {
       const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const formData = new FormData();
-  
+
       // Append fields to FormData
-      formData.append('name', updatedProfile.name);
-      formData.append('ownerName', updatedProfile.ownerName);
-      formData.append('location', updatedProfile.location);
-      formData.append('contactNumber', updatedProfile.contactNumber);
-  
-      // Append profile picture file if it exists
-      if (updatedProfile.profilePictureFile) {
+      formData.append('name', trimmedName);
+      formData.append('ownerName', trimmedOwner);
+      formData.append('location', trimmedLocation);
+      formData.append('contactNumber', trimmedContact);
+
+      if (updatedProfile.profileImageMode === 'file' && updatedProfile.profilePictureFile) {
         formData.append('profilePicture', updatedProfile.profilePictureFile);
       }
-  
+
+      if (updatedProfile.profileImageMode === 'url') {
+        formData.append('profilePictureUrl', trimmedUrl);
+      }
+
       const res = await fetch(`${API_BASE}/api/restaurants/update`, {
         method: 'PUT',
         headers: {
@@ -749,7 +960,7 @@ function RestaurantDashboard() {
         },
         body: formData, // Send FormData
       });
-  
+
       const data = await res.json();
       if (res.ok) {
         alert('Profile updated successfully!');
@@ -803,200 +1014,541 @@ function RestaurantDashboard() {
       {/* Main Content */}
       <div className="dashboard-content">
         {activeTab === 'profile' && (
-          <div>
-            <h2>Profile</h2>
-            {editProfile ? (
-  <form>
-    <input
-      type="text"
-      placeholder="Name"
-      value={editableProfile.name}
-      onChange={(e) => setEditableProfile({ ...editableProfile, name: e.target.value })}
-    />
-    <input
-      type="text"
-      placeholder="Owner Name"
-      value={editableProfile.ownerName}
-      onChange={(e) => setEditableProfile({ ...editableProfile, ownerName: e.target.value })}
-    />
-    <input
-      type="text"
-      placeholder="Location"
-      value={editableProfile.location}
-      onChange={(e) => setEditableProfile({ ...editableProfile, location: e.target.value })}
-    />
-    <input
-      type="text"
-      placeholder="Contact Number"
-      value={editableProfile.contactNumber}
-      onChange={(e) => setEditableProfile({ ...editableProfile, contactNumber: e.target.value })}
-    />
-    <input
-      type="file"
-      accept="image/*"
-      onChange={(e) => setEditableProfile({ ...editableProfile, profilePictureFile: e.target.files[0] })}
-    />
-    <button type="button"  className="save-btn"onClick={() => handleEditProfile(editableProfile)}>
-      Save Changes
-    </button>
-    <button type="button" className="cancel-btn" onClick={handleCancelEdit}>
-      Cancel
-    </button>
-  </form>
-) : (
-  <>
-    {restaurant.profilePicture && (
-      <img
-        src={`${API_BASE}${restaurant.profilePicture}`}
-        alt="Restaurant"
-        style={{
-          width: '150px',
-          height: '150px',
-          borderRadius: '50%',
-          objectFit: 'cover',
-          marginBottom: '20px',
-        }}
-      />
-    )}
-    <p><strong>Name:</strong> {restaurant.name}</p>
-    <p><strong>Owner:</strong> {restaurant.ownerName}</p>
-    <p><strong>Location:</strong> {restaurant.location}</p>
-    <p><strong>Contact:</strong> {restaurant.contactNumber}</p>
-    <button className="edit-btn" onClick={handleEditProfileClick}>Edit Profile</button>
-  </>
-)}
+          <div className="profile-section">
+            <div className="section-header">
+              <div>
+                <h2>Hồ sơ nhà hàng</h2>
+                <p>Thông tin này hiển thị với khách hàng trong ứng dụng.</p>
+              </div>
+              {!editProfile && (
+                <button className="edit-btn" type="button" onClick={handleEditProfileClick}>
+                  Chỉnh sửa
+                </button>
+              )}
+            </div>
+            {editProfile && editableProfile ? (
+              <form
+                className="form-card profile-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleEditProfile(editableProfile);
+                }}
+              >
+                <div className="profile-form-grid">
+                  <div className="profile-media-field">
+                    <span className="field-label">Ảnh đại diện</span>
+                    <div className="image-mode-toggle">
+                      <button
+                        type="button"
+                        className={editableProfile.profileImageMode === 'file' ? 'active' : ''}
+                        onClick={() =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            profileImageMode: 'file',
+                            profilePictureFile: null,
+                          }))
+                        }
+                      >
+                        Chọn ảnh
+                      </button>
+                      <button
+                        type="button"
+                        className={editableProfile.profileImageMode === 'url' ? 'active' : ''}
+                        onClick={() =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            profileImageMode: 'url',
+                          }))
+                        }
+                      >
+                        Dùng URL
+                      </button>
+                    </div>
+                    {editableProfile.profileImageMode === 'file' ? (
+                      <label className="file-picker">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              profilePictureFile: event.target.files?.[0] || null,
+                            }))
+                          }
+                        />
+                        <span>Chọn ảnh từ thiết bị</span>
+                      </label>
+                    ) : (
+                      <input
+                        type="text"
+                        className="text-input"
+                        placeholder="https://example.com/thumbnail.jpg"
+                        value={editableProfile.profilePictureUrl || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            profilePictureUrl: event.target.value,
+                          }))
+                        }
+                      />
+                    )}
+                    <div className="image-preview">
+                      <img
+                        src={editableProfileImagePreview || profileImageSrc || FALLBACK_IMAGE}
+                        alt="Restaurant preview"
+                        onError={handleImageError}
+                      />
+                    </div>
+                  </div>
+                  <div className="profile-fields">
+                    <label>
+                      <span className="field-label">Tên nhà hàng</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.name || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({ ...prev, name: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Chủ sở hữu</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.ownerName || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            ownerName: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Địa chỉ</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.location || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            location: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Số liên hệ</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.contactNumber || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            contactNumber: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="form-actions">
+                  <button type="submit" className="form-primary">
+                    Lưu thay đổi
+                  </button>
+                  <button type="button" className="form-secondary" onClick={handleCancelEdit}>
+                    Hủy
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="profile-card">
+                <div className="profile-card-media">
+                  <img
+                    src={profileImageSrc || FALLBACK_IMAGE}
+                    alt="Restaurant"
+                    onError={handleImageError}
+                  />
+                  <span className={`status-pill ${availability ? 'open' : 'closed'}`}>
+                    {availability ? 'Đang mở cửa' : 'Tạm đóng'}
+                  </span>
+                </div>
+                <div className="profile-card-body">
+                  <h3>{restaurant.name || 'Chưa cập nhật'}</h3>
+                  <ul className="profile-details">
+                    <li>
+                      <span>Chủ nhà hàng</span>
+                      <strong>{restaurant.ownerName || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Địa chỉ</span>
+                      <strong>{restaurant.location || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Liên hệ</span>
+                      <strong>{restaurant.contactNumber || 'Chưa cập nhật'}</strong>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'foodItems' && (
-          <div>
-            <h2>Food Items</h2>
-            <input
-              type="text"
-              placeholder="Search by food name..."
-              className="search-bar"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <table>
-              <thead>
-                <tr>
-                  <th>Image</th>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th>Price</th>
-                  <th>Category</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {foodItems
-                  .filter((item) =>
-                    item.name.toLowerCase().includes(searchQuery.toLowerCase())
-                  )
-                  .map((item) => (
-                    <tr key={item._id}>
-                      <td>
-                        <img
-                         src={`${API_BASE}${item.image}`} 
-                          alt={item.name}
-                          style={{
-                            width: '50px',
-                            height: '50px',
-                            objectFit: 'cover',
-                            borderRadius: '4px',
-                          }}
-                        />
-                      </td>
-                      <td>{item.name}</td>
-                      <td>{item.description}</td>
-                      <td>{item.price}</td>
-                      <td>{item.category}</td>
-                      <td>
-                        <button className="fedit-btn" onClick={() => setEditFoodItem(item)}>Edit</button>
-                        <button className="fdelete-btn" onClick={() => handleDeleteFoodItem(item._id)}>Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-
-            {editFoodItem && (
+          <div className="food-section">
+            <div className="section-header">
               <div>
-                <h3>Edit Food Item</h3>
-                <form>
-  <input
-    type="text"
-    placeholder="Name"
-    value={editFoodItem.name}
-    onChange={(e) => setEditFoodItem({ ...editFoodItem, name: e.target.value })}
-  />
-  <textarea
-    placeholder="Description"
-    value={editFoodItem.description}
-    onChange={(e) => setEditFoodItem({ ...editFoodItem, description: e.target.value })}
-  />
-  <input
-    type="number"
-    placeholder="Price"
-    value={editFoodItem.price}
-    onChange={(e) => setEditFoodItem({ ...editFoodItem, price: e.target.value })}
-  />
-  <input
-    type="text"
-    placeholder="Category"
-    value={editFoodItem.category}
-    onChange={(e) => setEditFoodItem({ ...editFoodItem, category: e.target.value })}
-  />
-  <input
-    type="file"
-    accept="image/*"
-    onChange={(e) => setEditFoodItem({ ...editFoodItem, imageFile: e.target.files[0] })}
-  />
-  <button type="button"  className="rsave-btn" onClick={handleEditFoodItem}>
-    Save Changes
-  </button>
-        <button type="button" className="rcancel-btn" onClick={() => setEditFoodItem(null)}>
-          Cancel
-        </button>
-        </form>
-       </div>
-             )}
-
-            <h3>Add Food Item</h3>
-            <form>
-  <input
-    type="text"
-    placeholder="Name"
-    value={newFoodItem.name}
-    onChange={(e) => setNewFoodItem({ ...newFoodItem, name: e.target.value })}
-  />
-  <textarea
-    placeholder="Description"
-    value={newFoodItem.description}
-    onChange={(e) => setNewFoodItem({ ...newFoodItem, description: e.target.value })}
-  />
-  <input
-    type="number"
-    placeholder="Price"
-    value={newFoodItem.price}
-    onChange={(e) => setNewFoodItem({ ...newFoodItem, price: e.target.value })}
-  />
-  <input
-    type="text"
-    placeholder="Category"
-    value={newFoodItem.category}
-    onChange={(e) => setNewFoodItem({ ...newFoodItem, category: e.target.value })}
-  />
-  <input
-    type="file"
-    accept="image/*"
-    onChange={(e) => setNewFoodItem({ ...newFoodItem, imageFile: e.target.files[0] })}
-  />
-  <button type="button" onClick={handleAddFoodItem}>
-    Add Food Item
-  </button>
-</form>
+                <h2>Quản lý thực đơn</h2>
+                <p>Chỉnh sửa món hiện có và thêm sản phẩm mới với hình ảnh rõ nét.</p>
+              </div>
+            </div>
+            <div className="food-layout">
+              <div className="food-table-card">
+                <div className="list-toolbar">
+                  <input
+                    type="text"
+                    className="text-input"
+                    placeholder="Tìm kiếm theo tên món..."
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                  />
+                </div>
+                {filteredFoodItems.length === 0 ? (
+                  <div className="empty-state">
+                    <h3>Không tìm thấy món ăn</h3>
+                    <p>Thử từ khóa khác hoặc thêm món mới ở khung bên cạnh.</p>
+                  </div>
+                ) : (
+                  <div className="food-table-wrapper">
+                    <table className="food-table">
+                      <thead>
+                        <tr>
+                          <th>Hình ảnh</th>
+                          <th>Tên món</th>
+                          <th>Mô tả</th>
+                          <th>Giá</th>
+                          <th>Phân loại</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredFoodItems.map((item) => {
+                          const imageSrc = resolveImageSrc(item.image);
+                          return (
+                            <tr key={item._id}>
+                              <td>
+                                <div className="food-thumb">
+                                  <img
+                                    src={imageSrc || FALLBACK_IMAGE}
+                                    alt={item.name}
+                                    onError={handleImageError}
+                                  />
+                                </div>
+                              </td>
+                              <td>{item.name}</td>
+                              <td className="food-description">{item.description || '—'}</td>
+                              <td>{formatCurrency(item.price)}</td>
+                              <td>{item.category || '—'}</td>
+                              <td className="food-actions">
+                                <button
+                                  type="button"
+                                  className="link-button"
+                                  onClick={() => handleOpenEditFoodItem(item)}
+                                >
+                                  Chỉnh sửa
+                                </button>
+                                <button
+                                  type="button"
+                                  className="link-button danger"
+                                  onClick={() => handleDeleteFoodItem(item._id)}
+                                >
+                                  Xóa
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="food-editor-stack">
+                {editFoodItem && (
+                  <div className="form-card">
+                    <div className="form-card-header">
+                      <h3>Chỉnh sửa món</h3>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => setEditFoodItem(null)}
+                      >
+                        Đóng
+                      </button>
+                    </div>
+                    <div className="form-grid">
+                      <label>
+                        <span className="field-label">Tên món</span>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={editFoodItem.name || ''}
+                          onChange={(event) =>
+                            setEditFoodItem((prev) => ({ ...prev, name: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">Mô tả</span>
+                        <textarea
+                          className="text-area"
+                          value={editFoodItem.description || ''}
+                          onChange={(event) =>
+                            setEditFoodItem((prev) => ({
+                              ...prev,
+                              description: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">Giá</span>
+                        <input
+                          type="number"
+                          min="0"
+                          className="text-input"
+                          value={editFoodItem.price}
+                          onChange={(event) =>
+                            setEditFoodItem((prev) => ({ ...prev, price: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">Loại món</span>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={editFoodItem.category || ''}
+                          onChange={(event) =>
+                            setEditFoodItem((prev) => ({
+                              ...prev,
+                              category: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className="image-field">
+                      <span className="field-label">Hình ảnh</span>
+                      <div className="image-mode-toggle">
+                        <button
+                          type="button"
+                          className={editFoodItem.imageMode === 'file' ? 'active' : ''}
+                          onClick={() =>
+                            setEditFoodItem((prev) => ({
+                              ...prev,
+                              imageMode: 'file',
+                              imageFile: null,
+                            }))
+                          }
+                        >
+                          Chọn ảnh
+                        </button>
+                        <button
+                          type="button"
+                          className={editFoodItem.imageMode === 'url' ? 'active' : ''}
+                          onClick={() =>
+                            setEditFoodItem((prev) => ({
+                              ...prev,
+                              imageMode: 'url',
+                            }))
+                          }
+                        >
+                          Dùng URL
+                        </button>
+                      </div>
+                      {editFoodItem.imageMode === 'file' ? (
+                        <label className="file-picker">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) =>
+                              setEditFoodItem((prev) => ({
+                                ...prev,
+                                imageFile: event.target.files?.[0] || null,
+                              }))
+                            }
+                          />
+                          <span>Chọn ảnh mới</span>
+                        </label>
+                      ) : (
+                        <input
+                          type="text"
+                          className="text-input"
+                          placeholder="https://example.com/food.jpg"
+                          value={editFoodItem.imageUrl || ''}
+                          onChange={(event) =>
+                            setEditFoodItem((prev) => ({
+                              ...prev,
+                              imageUrl: event.target.value,
+                            }))
+                          }
+                        />
+                      )}
+                      <div className="image-preview">
+                        <img
+                          src={editFoodPreviewSrc || FALLBACK_IMAGE}
+                          alt="Food preview"
+                          onError={handleImageError}
+                        />
+                      </div>
+                    </div>
+                    <div className="form-actions">
+                      <button type="button" className="form-primary" onClick={handleEditFoodItem}>
+                        Lưu
+                      </button>
+                      <button
+                        type="button"
+                        className="form-secondary"
+                        onClick={() => setEditFoodItem(null)}
+                      >
+                        Hủy
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="form-card">
+                  <h3>Thêm món mới</h3>
+                  <div className="form-grid">
+                    <label>
+                      <span className="field-label">Tên món</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={newFoodItem.name}
+                        onChange={(event) =>
+                          setNewFoodItem((prev) => ({ ...prev, name: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Mô tả</span>
+                      <textarea
+                        className="text-area"
+                        value={newFoodItem.description}
+                        onChange={(event) =>
+                          setNewFoodItem((prev) => ({
+                            ...prev,
+                            description: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Giá</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="text-input"
+                        value={newFoodItem.price}
+                        onChange={(event) =>
+                          setNewFoodItem((prev) => ({ ...prev, price: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Loại món</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={newFoodItem.category}
+                        onChange={(event) =>
+                          setNewFoodItem((prev) => ({
+                            ...prev,
+                            category: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <div className="image-field">
+                    <span className="field-label">Hình ảnh món</span>
+                    <div className="image-mode-toggle">
+                      <button
+                        type="button"
+                        className={newFoodItem.imageMode === 'file' ? 'active' : ''}
+                        onClick={() =>
+                          setNewFoodItem((prev) => ({
+                            ...prev,
+                            imageMode: 'file',
+                            imageFile: null,
+                          }))
+                        }
+                      >
+                        Chọn ảnh
+                      </button>
+                      <button
+                        type="button"
+                        className={newFoodItem.imageMode === 'url' ? 'active' : ''}
+                        onClick={() =>
+                          setNewFoodItem((prev) => ({
+                            ...prev,
+                            imageMode: 'url',
+                          }))
+                        }
+                      >
+                        Dùng URL
+                      </button>
+                    </div>
+                    {newFoodItem.imageMode === 'file' ? (
+                      <label className="file-picker">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) =>
+                            setNewFoodItem((prev) => ({
+                              ...prev,
+                              imageFile: event.target.files?.[0] || null,
+                            }))
+                          }
+                        />
+                        <span>Chọn ảnh từ thiết bị</span>
+                      </label>
+                    ) : (
+                      <input
+                        type="text"
+                        className="text-input"
+                        placeholder="https://example.com/food.jpg"
+                        value={newFoodItem.imageUrl}
+                        onChange={(event) =>
+                          setNewFoodItem((prev) => ({
+                            ...prev,
+                            imageUrl: event.target.value,
+                          }))
+                        }
+                      />
+                    )}
+                    <div className="image-preview">
+                      <img
+                        src={newFoodImagePreview || FALLBACK_IMAGE}
+                        alt="Food preview"
+                        onError={handleImageError}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button type="button" className="form-primary" onClick={handleAddFoodItem}>
+                      Thêm món
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

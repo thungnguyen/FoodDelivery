@@ -7,9 +7,10 @@ import {
   REALTIME_SERVICE_URL,
 } from "../../utils/serviceUrls";
 import { Link, useNavigate } from "react-router-dom";
-import { Button, Spinner, Badge } from "react-bootstrap";
+import { Button, Spinner, Badge, Form } from "react-bootstrap";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { io } from "socket.io-client";
+import { BsStar, BsStarFill } from "react-icons/bs";
 
 const formatCurrency = (value) => {
   if (typeof value !== "number") return "0 VND";
@@ -23,6 +24,7 @@ function Orders() {
   const [currentCustomer, setCurrentCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [feedbackDrafts, setFeedbackDrafts] = useState({});
   const navigate = useNavigate();
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
@@ -111,6 +113,28 @@ function Orders() {
     ordersRef.current = orders;
   }, [orders]);
 
+  useEffect(() => {
+    setFeedbackDrafts((prev) => {
+      if (!Object.keys(prev).length) return prev;
+      const allowedKeys = new Set(
+        orders
+          .map((order) => order?._id || order?.id)
+          .filter(Boolean)
+          .map((value) => String(value))
+      );
+      let changed = false;
+      const next = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        if (allowedKeys.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [orders]);
+
   const handleRealtimeEvent = useCallback(
     (message) => {
       if (!message || typeof message !== "object") return;
@@ -158,6 +182,31 @@ function Orders() {
             return next;
           });
           fetchOrders({ silent: true });
+          break;
+        }
+        case "order.feedback.updated": {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              orderFeedback: payload?.orderFeedback ?? next[index].orderFeedback,
+              deliveryFeedback: payload?.deliveryFeedback ?? next[index].deliveryFeedback,
+            };
+            return next;
+          });
+          setFeedbackDrafts((prev) => {
+            const key = String(orderId);
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
           break;
         }
         default:
@@ -340,11 +389,133 @@ function Orders() {
 
   const categorizeOrder = (status = "") => status.trim().toLowerCase();
 
+  const isRateableStatus = (status = "") => {
+    const normalized = categorizeOrder(status);
+    return normalized === "delivered" || normalized === "completed";
+  };
+
+  const startFeedbackForOrder = (order) => {
+    const orderId = order?._id || order?.id;
+    if (!orderId) return;
+    const key = String(orderId);
+    setFeedbackDrafts((prev) => ({
+      ...prev,
+      [key]: {
+        mode: "edit",
+        orderRating: order.orderFeedback?.rating || 0,
+        orderComment: order.orderFeedback?.comment || "",
+        driverRating: order.deliveryFeedback?.rating || 0,
+        driverComment: order.deliveryFeedback?.comment || "",
+        submitting: false,
+        error: "",
+      },
+    }));
+  };
+
+  const cancelFeedbackForOrder = (orderId) => {
+    if (!orderId) return;
+    const key = String(orderId);
+    setFeedbackDrafts((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const updateFeedbackDraft = (orderId, updates) => {
+    if (!orderId) return;
+    const key = String(orderId);
+    setFeedbackDrafts((prev) => {
+      const current = prev[key];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          ...updates,
+        },
+      };
+    });
+  };
+
+  const handleSubmitFeedback = async (order, draft) => {
+    const orderId = order?._id || order?.id;
+    if (!orderId || !draft) return;
+    if (!draft.orderRating && !draft.driverRating) {
+      updateFeedbackDraft(orderId, {
+        error: "Vui lòng chọn ít nhất một mức đánh giá.",
+      });
+      return;
+    }
+
+    updateFeedbackDraft(orderId, { submitting: true, error: "" });
+
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+    if (!token) {
+      updateFeedbackDraft(orderId, {
+        submitting: false,
+        error: "Bạn cần đăng nhập để gửi đánh giá.",
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        `${ORDER_SERVICE_URL}/api/orders/${orderId}/feedback`,
+        {
+          orderRating: draft.orderRating || null,
+          orderComment: draft.orderComment || "",
+          driverRating: draft.driverRating || null,
+          driverComment: draft.driverComment || "",
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      const updatedOrder = response.data;
+      setOrders((prev) =>
+        prev.map((item) => (item._id === updatedOrder._id ? updatedOrder : item))
+      );
+      setFeedbackDrafts((prev) => {
+        const next = { ...prev };
+        delete next[String(orderId)];
+        return next;
+      });
+    } catch (submitErr) {
+      const message =
+        submitErr.response?.data?.message ||
+        "Không thể gửi đánh giá. Vui lòng thử lại.";
+      updateFeedbackDraft(orderId, { submitting: false, error: message });
+    }
+  };
+
+  const renderRatingStars = (value, onSelect) => (
+    <div className="d-flex align-items-center gap-1 mt-2">
+      {[1, 2, 3, 4, 5].map((score) => {
+        const active = Number(value) >= score;
+        return (
+          <Button
+            key={score}
+            type="button"
+            variant={active ? "warning" : "outline-secondary"}
+            size="sm"
+            className={active ? "text-dark" : ""}
+            onClick={() => onSelect(score)}
+          >
+            {active ? <BsStarFill /> : <BsStar />}
+          </Button>
+        );
+      })}
+    </div>
+  );
+
   const activeOrders = useMemo(
     () =>
       orders.filter((order) => {
         const status = categorizeOrder(order.status);
-        return status && !["delivered", "canceled", "cancelled"].includes(status);
+        return status && !["delivered", "completed", "canceled", "cancelled"].includes(status);
       }),
     [orders]
   );
@@ -353,7 +524,7 @@ function Orders() {
     () =>
       orders.filter((order) => {
         const status = categorizeOrder(order.status);
-        return ["delivered", "canceled", "cancelled"].includes(status);
+        return ["delivered", "completed", "canceled", "cancelled"].includes(status);
       }),
     [orders]
   );
@@ -420,6 +591,18 @@ function Orders() {
       const paymentLabel = order.paymentStatus || "Pending";
       const badgeVariant =
         paymentLabel === "Paid" ? "success" : paymentLabel === "Failed" ? "danger" : "warning";
+      const orderId = order._id || order.id;
+      const orderKey = orderId ? String(orderId) : "";
+      const orderFeedback = order.orderFeedback || {};
+      const driverFeedback = order.deliveryFeedback || {};
+      const draft = orderKey ? feedbackDrafts[orderKey] : undefined;
+      const isEditingFeedback = draft?.mode === "edit";
+      const canRate = Boolean(orderKey) && isRateableStatus(order.status);
+      const hasFeedback = Boolean(orderFeedback?.rating || driverFeedback?.rating);
+      const draftOrderRating = draft?.orderRating ?? orderFeedback?.rating ?? 0;
+      const draftDriverRating = draft?.driverRating ?? driverFeedback?.rating ?? 0;
+      const submittingFeedback = Boolean(draft?.submitting);
+      const feedbackError = draft?.error;
 
       return (
         <div key={order._id} className="bg-white rounded-3 shadow-sm p-4 mb-4 border border-light">
@@ -463,13 +646,135 @@ function Orders() {
                   Xem chi tiết đơn
                 </Button>
               </Link>
-            {categorizeOrder(order.status) !== "delivered" && (
-              <Button variant="outline-danger" size="sm" onClick={() => handleDelete(order._id)}>
-                Hủy đơn
-              </Button>
-            )}
+              {categorizeOrder(order.status) !== "delivered" && (
+                <Button variant="outline-danger" size="sm" onClick={() => handleDelete(order._id)}>
+                  Hủy đơn
+                </Button>
+              )}
             </div>
           </div>
+
+          {canRate && (
+            <div className="mt-3 pt-3 border-top">
+              {isEditingFeedback ? (
+                <div className="bg-light rounded-3 p-3">
+                  <h6 className="fw-semibold mb-3">Đánh giá trải nghiệm</h6>
+                  <div className="mb-3">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="fw-semibold">Đơn hàng</span>
+                      <small className="text-muted">
+                        {draftOrderRating ? `${draftOrderRating}/5` : "Chưa chọn"}
+                      </small>
+                    </div>
+                    {renderRatingStars(draftOrderRating, (value) =>
+                      updateFeedbackDraft(orderKey, { orderRating: value })
+                    )}
+                    <Form.Control
+                      as="textarea"
+                      rows={2}
+                      className="mt-2"
+                      placeholder="Chia sẻ cảm nhận về món ăn (tuỳ chọn)"
+                      value={draft?.orderComment ?? ""}
+                      onChange={(event) =>
+                        updateFeedbackDraft(orderKey, { orderComment: event.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="fw-semibold">Tài xế giao hàng</span>
+                      <small className="text-muted">
+                        {draftDriverRating ? `${draftDriverRating}/5` : "Chưa chọn"}
+                      </small>
+                    </div>
+                    {renderRatingStars(draftDriverRating, (value) =>
+                      updateFeedbackDraft(orderKey, { driverRating: value })
+                    )}
+                    <Form.Control
+                      as="textarea"
+                      rows={2}
+                      className="mt-2"
+                      placeholder="Nhận xét về tài xế (tuỳ chọn)"
+                      value={draft?.driverComment ?? ""}
+                      onChange={(event) =>
+                        updateFeedbackDraft(orderKey, { driverComment: event.target.value })
+                      }
+                    />
+                  </div>
+                  {feedbackError && (
+                    <div className="alert alert-danger py-2 px-3 mb-3">{feedbackError}</div>
+                  )}
+                  <div className="d-flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="success"
+                      disabled={submittingFeedback}
+                      onClick={() => handleSubmitFeedback(order, draft)}
+                    >
+                      {submittingFeedback ? "Đang gửi..." : "Gửi đánh giá"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      disabled={submittingFeedback}
+                      onClick={() => cancelFeedbackForOrder(orderId)}
+                    >
+                      Huỷ
+                    </Button>
+                  </div>
+                </div>
+              ) : hasFeedback ? (
+                <div className="bg-light rounded-3 p-3 d-flex flex-column flex-md-row gap-3">
+                  <div className="flex-grow-1">
+                    <h6 className="text-uppercase text-muted fw-bold mb-2">Đánh giá của bạn</h6>
+                    <div className="d-flex flex-column flex-md-row gap-3">
+                      <div>
+                        <p className="mb-1 fw-semibold">
+                          Đơn hàng:{" "}
+                          <span className="text-warning">
+                            {orderFeedback?.rating ? `${orderFeedback.rating}/5` : "Chưa có"}
+                          </span>
+                        </p>
+                        {orderFeedback?.comment && (
+                          <p className="mb-0 text-muted">{orderFeedback.comment}</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="mb-1 fw-semibold">
+                          Tài xế:{" "}
+                          <span className="text-warning">
+                            {driverFeedback?.rating ? `${driverFeedback.rating}/5` : "Chưa có"}
+                          </span>
+                        </p>
+                        {driverFeedback?.comment && (
+                          <p className="mb-0 text-muted">{driverFeedback.comment}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="d-flex align-items-start">
+                    <Button size="sm" variant="outline-primary" onClick={() => startFeedbackForOrder(order)}>
+                      Cập nhật đánh giá
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-light rounded-3 p-3 d-flex flex-column flex-md-row justify-content-between gap-3">
+                  <div>
+                    <h6 className="text-uppercase text-muted fw-bold mb-2">Đánh giá trải nghiệm</h6>
+                    <p className="mb-0 text-secondary">
+                      Đơn hàng đã hoàn tất. Hãy cho chúng tôi biết cảm nhận về món ăn và tài xế nhé!
+                    </p>
+                  </div>
+                  <div className="d-flex align-items-start">
+                    <Button size="sm" variant="primary" onClick={() => startFeedbackForOrder(order)}>
+                      Đánh giá đơn hàng này
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     });

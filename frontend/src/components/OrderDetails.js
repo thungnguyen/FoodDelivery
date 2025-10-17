@@ -397,6 +397,50 @@ function OrderDetails() {
               <span className="text-muted">Tổng cộng</span>
               <h4 className="mb-0 text-primary">{formatCurrency(order.totalPrice || 0)}</h4>
             </div>
+
+            {["Delivered", "Completed"].includes(order.status) && (
+              <div className="bg-light rounded-3 p-3 mt-4">
+                <h6 className="text-uppercase text-muted fw-bold mb-3">Đánh giá của bạn</h6>
+                {order.orderFeedback?.rating || order.deliveryFeedback?.rating ? (
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <div className="border rounded-3 p-3 h-100">
+                        <p className="mb-1 fw-semibold">
+                          Đơn hàng:{" "}
+                          <span className="text-warning">
+                            {order.orderFeedback?.rating
+                              ? `${order.orderFeedback.rating}/5`
+                              : "Chưa có"}
+                          </span>
+                        </p>
+                        {order.orderFeedback?.comment && (
+                          <p className="mb-0 text-muted">{order.orderFeedback.comment}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="col-md-6">
+                      <div className="border rounded-3 p-3 h-100">
+                        <p className="mb-1 fw-semibold">
+                          Tài xế:{" "}
+                          <span className="text-warning">
+                            {order.deliveryFeedback?.rating
+                              ? `${order.deliveryFeedback.rating}/5`
+                              : "Chưa có"}
+                          </span>
+                        </p>
+                        {order.deliveryFeedback?.comment && (
+                          <p className="mb-0 text-muted">{order.deliveryFeedback.comment}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mb-0 text-muted">
+                    Bạn chưa gửi đánh giá. Vào trang quản lý đơn để chia sẻ cảm nhận nhé!
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
