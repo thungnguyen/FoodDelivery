@@ -9,6 +9,7 @@ import "../../styles/checkout.css";
 import { PAYMENT_SERVICE_URL, ORDER_SERVICE_URL } from "../../utils/serviceUrls";
 import { CartContext } from "../contexts/CartContext";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
+import { computeShippingFee, roundCurrency } from "../../utils/pricing";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
@@ -33,7 +34,35 @@ const CheckoutFormInner = () => {
       navigate("/customer/home");
       return;
     }
-    setOrderData(JSON.parse(pendingOrder));
+    try {
+      const parsed = JSON.parse(pendingOrder);
+      const items = Array.isArray(parsed.items) ? parsed.items : [];
+      const derivedItemsTotal = roundCurrency(
+        parsed.itemsTotal ??
+          items.reduce(
+            (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+            0
+          )
+      );
+      const derivedShipping = roundCurrency(
+        parsed.shippingFee ?? computeShippingFee(items)
+      );
+      const derivedTotal = roundCurrency(
+        parsed.totalPrice ?? derivedItemsTotal + derivedShipping
+      );
+      setOrderData({
+        ...parsed,
+        items: items,
+        itemsTotal: derivedItemsTotal,
+        shippingFee: derivedShipping,
+        totalPrice: derivedTotal,
+      });
+    } catch (err) {
+      console.error("Failed to parse pending order from storage", err);
+      localStorage.removeItem("pendingOrder");
+      alert("Order data is corrupted. Please recreate your order.");
+      navigate("/customer/home");
+    }
   }, [navigate]);
 
   // Create payment intent for card payment
@@ -126,10 +155,17 @@ const CheckoutFormInner = () => {
 
       // Create order in backend
       const token = getAuthToken(AUTH_ROLES.CUSTOMER);
-      const calculatedTotal = orderData.items.reduce(
-        (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
-        0
+      const itemsTotal = roundCurrency(
+        orderData.itemsTotal ??
+          orderData.items.reduce(
+            (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+            0
+          )
       );
+      const shippingFee = roundCurrency(
+        orderData.shippingFee ?? computeShippingFee(orderData.items)
+      );
+      const calculatedTotal = roundCurrency(itemsTotal + shippingFee);
 
       const paymentStatusValue = paymentMethod === "card" ? "Paid" : "Pending";
 
@@ -141,6 +177,8 @@ const CheckoutFormInner = () => {
         restaurantId: orderData.restaurantId,
         restaurantName: orderData.restaurantName,
         items: orderData.items,
+        itemsTotal,
+        shippingFee,
         totalPrice: calculatedTotal,
         deliveryAddress: orderData.deliveryAddress,
         paymentMethod: paymentMethod,
@@ -186,10 +224,17 @@ const CheckoutFormInner = () => {
     );
   }
 
-  const displayTotal = orderData.items.reduce(
-    (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
-    0
+  const displayItemsTotal = roundCurrency(
+    orderData.itemsTotal ??
+      orderData.items.reduce(
+        (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
+        0
+      )
   );
+  const displayShippingFee = roundCurrency(
+    orderData.shippingFee ?? computeShippingFee(orderData.items)
+  );
+  const displayGrandTotal = roundCurrency(displayItemsTotal + displayShippingFee);
 
   return (
     <div className="container" style={{ padding: "20px", backgroundColor: "#f0f4f8", minHeight: "100vh" }}>
@@ -217,9 +262,17 @@ const CheckoutFormInner = () => {
             </div>
           ))}
           <hr />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", marginBottom: "6px" }}>
+            <span>Subtotal:</span>
+            <span>Rs. {displayItemsTotal}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", marginBottom: "6px" }}>
+            <span>Shipping:</span>
+            <span>Rs. {displayShippingFee}</span>
+          </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "18px" }}>
             <span>Total:</span>
-            <span>Rs. {displayTotal}</span>
+            <span>Rs. {displayGrandTotal}</span>
           </div>
         </div>
 

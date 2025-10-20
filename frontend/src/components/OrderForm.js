@@ -6,6 +6,7 @@ import { Button, Form, Spinner } from "react-bootstrap";
 import { BsArrowLeftCircle } from "react-icons/bs";
 import { CartContext } from "../pages/contexts/CartContext";
 import { getAuthToken, AUTH_ROLES } from "../utils/authTokens";
+import { computeShippingFee, roundCurrency } from "../utils/pricing";
 
 function OrderForm({ addOrder }) {
   const { cartItems, clearCart } = useContext(CartContext);
@@ -50,10 +51,13 @@ function OrderForm({ addOrder }) {
   }, [cartItems, navigate]);
 
   // Calculate total price with quantities
-  const totalPrice = cartItems.reduce(
+  const itemsTotal = cartItems.reduce(
     (total, item) => total + (item.price || 0) * (item.quantity || 1),
     0
   );
+  const roundedItemsTotal = roundCurrency(itemsTotal);
+  const shippingFee = roundCurrency(computeShippingFee(cartItems));
+  const grandTotal = roundCurrency(roundedItemsTotal + shippingFee);
 
   const validateDeliveryAddress = (value) => {
     if (!value.trim()) {
@@ -91,7 +95,9 @@ function OrderForm({ addOrder }) {
         quantity: item.quantity || 1,
         price: item.price
       })),
-      totalPrice: totalPrice,
+      itemsTotal: roundedItemsTotal,
+      shippingFee,
+      totalPrice: grandTotal,
       deliveryAddress: deliveryAddress,
       restaurantName,
       customerName: `${customerInfo.firstName} ${customerInfo.lastName}`,
@@ -197,16 +203,45 @@ function OrderForm({ addOrder }) {
             style={{
               display: "flex",
               justifyContent: "space-between",
+              flexDirection: "column",
+              gap: "8px",
               padding: "15px",
               marginTop: "15px",
               backgroundColor: "#fff3cd",
               borderRadius: "6px",
-              fontSize: "18px",
-              fontWeight: "bold",
             }}
           >
-            <span>Total:</span>
-            <span>Rs. {totalPrice}</span>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "16px",
+              }}
+            >
+              <span>Subtotal:</span>
+              <span>{roundedItemsTotal} VND</span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "16px",
+              }}
+            >
+              <span>Shipping:</span>
+              <span>{shippingFee} VND</span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "18px",
+                fontWeight: "bold",
+              }}
+            >
+              <span>Total:</span>
+              <span>{grandTotal} VND</span>
+            </div>
           </div>
         </div>
 

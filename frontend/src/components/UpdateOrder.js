@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { ORDER_SERVICE_URL } from "../utils/serviceUrls";
+import { roundCurrency } from "../utils/pricing";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Form, Spinner } from "react-bootstrap";
 import { FaArrowLeft } from "react-icons/fa"; 
@@ -10,6 +11,8 @@ function UpdateOrder({ addOrder }) {
     customerId: "",
     restaurantId: "",
     items: [{ foodId: "", quantity: 1, price: 0 }],
+    itemsTotal: 0,
+    shippingFee: 0,
     totalPrice: 0,
     deliveryAddress: "",
   });
@@ -30,7 +33,33 @@ function UpdateOrder({ addOrder }) {
           },
         })
         .then((response) => {
-          setOrder(response.data);
+          const data = response.data || {};
+          const items = Array.isArray(data.items) ? data.items : [];
+          const itemsTotal = roundCurrency(
+            Number.isFinite(Number(data.itemsTotal))
+              ? Number(data.itemsTotal)
+              : items.reduce(
+                  (sum, item) =>
+                    sum + Number(item?.quantity || 0) * Number(item?.price || 0),
+                  0
+                )
+          );
+          const shippingFee = roundCurrency(
+            Number.isFinite(Number(data.shippingFee)) ? Number(data.shippingFee) : 0
+          );
+          const totalPrice = roundCurrency(
+            Number.isFinite(Number(data.totalPrice))
+              ? Number(data.totalPrice)
+              : itemsTotal + shippingFee
+          );
+
+          setOrder({
+            ...data,
+            items,
+            itemsTotal,
+            shippingFee,
+            totalPrice,
+          });
           setLoading(false);
         })
         .catch((error) => {
@@ -79,6 +108,10 @@ function UpdateOrder({ addOrder }) {
         "Delivery address can only contain letters, numbers, commas, dots, and spaces.";
     }
 
+    if (Number(order.shippingFee) < 0) {
+      newErrors.shippingFee = "Shipping fee must be zero or positive.";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -97,12 +130,21 @@ function UpdateOrder({ addOrder }) {
       return;
     }
 
-    const totalPrice = order.items.reduce(
-      (total, item) => total + item.quantity * item.price,
-      0
+    const itemsTotal = roundCurrency(
+      order.items.reduce(
+        (total, item) => total + Number(item.quantity || 0) * Number(item.price || 0),
+        0
+      )
     );
+    const shippingFee = roundCurrency(Number(order.shippingFee) || 0);
+    const totalPrice = roundCurrency(itemsTotal + shippingFee);
 
-    const updatedOrder = { ...order, totalPrice };
+    const updatedOrder = {
+      ...order,
+      itemsTotal,
+      shippingFee,
+      totalPrice,
+    };
 
     axios
       .patch(`${ORDER_SERVICE_URL}/api/orders/${id}`, updatedOrder, {
@@ -271,6 +313,25 @@ function UpdateOrder({ addOrder }) {
             </Form.Group>
           </div>
         ))}
+
+        <Form.Group style={formGroupStyle}>
+          <Form.Label>Shipping Fee</Form.Label>
+          <Form.Control
+            type="number"
+            min="0"
+            step="1000"
+            value={order.shippingFee}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              setOrder({
+                ...order,
+                shippingFee: Number.isFinite(value) && value >= 0 ? value : 0,
+              });
+            }}
+            style={formControlStyle}
+          />
+          {errors.shippingFee && <div style={errorStyle}>{errors.shippingFee}</div>}
+        </Form.Group>
 
         <Form.Group style={formGroupStyle}>
           <Form.Label>Delivery Address</Form.Label>

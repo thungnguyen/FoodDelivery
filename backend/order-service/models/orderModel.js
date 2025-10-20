@@ -16,6 +16,8 @@ const orderSchema = new mongoose.Schema(
                 price: { type: Number, required: true }
             }
         ],
+        itemsTotal: { type: Number, default: 0 },
+        shippingFee: { type: Number, default: 0 },
         totalPrice: { type: Number, required: true },
         paymentMethod: { type: String, enum: ["card", "cash"], default: "cash" },
         paymentStatus: { type: String, enum: ["Pending", "Paid", "Failed"], default: "Pending" },

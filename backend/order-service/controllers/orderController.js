@@ -71,6 +71,24 @@ const toOrderResponse = (orderDoc) => {
     if (canonicalStatus) {
         plain.status = canonicalStatus;
     }
+    const resolvedShipping = typeof plain.shippingFee === "number" && plain.shippingFee >= 0
+        ? plain.shippingFee
+        : 0;
+    let resolvedItemsTotal = typeof plain.itemsTotal === "number" && plain.itemsTotal > 0
+        ? plain.itemsTotal
+        : 0;
+    if (resolvedItemsTotal === 0 && Array.isArray(plain.items)) {
+        resolvedItemsTotal = plain.items.reduce(
+            (sum, item) =>
+                sum +
+                (Number.isFinite(Number(item?.quantity)) ? Number(item.quantity) : 0) *
+                    (Number.isFinite(Number(item?.price)) ? Number(item.price) : 0),
+            0
+        );
+    }
+    plain.itemsTotal = Math.round(resolvedItemsTotal * 100) / 100;
+    plain.shippingFee = Math.round(resolvedShipping * 100) / 100;
+    plain.totalPrice = Math.round((plain.itemsTotal + plain.shippingFee) * 100) / 100;
     return plain;
 };
 
@@ -80,6 +98,29 @@ const normalizeOrderStatusInPlace = (orderDoc) => {
         orderDoc.status = canonicalStatus;
     }
     return canonicalStatus || orderDoc.status;
+};
+
+const parseAmount = (value, fallback = 0) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) {
+        return fallback;
+    }
+    return Math.round(num * 100) / 100;
+};
+
+const recalculateOrderTotals = (orderDoc) => {
+    if (!orderDoc) return;
+    const normalizedItems = Array.isArray(orderDoc.items) ? orderDoc.items : [];
+    const itemsTotal = normalizedItems.reduce(
+        (sum, item) =>
+            sum +
+            (Number.isFinite(Number(item?.quantity)) ? Number(item.quantity) : 0) *
+                (Number.isFinite(Number(item?.price)) ? Number(item.price) : 0),
+        0
+    );
+    orderDoc.itemsTotal = Math.round(itemsTotal * 100) / 100;
+    orderDoc.shippingFee = parseAmount(orderDoc.shippingFee, 0);
+    orderDoc.totalPrice = Math.round((orderDoc.itemsTotal + orderDoc.shippingFee) * 100) / 100;
 };
 
 const toRoomId = (prefix, rawValue) => {
@@ -128,7 +169,8 @@ export const createOrder = async (req, res) => {
             deliveryAddress,
             paymentMethod,
             paymentStatus,
-            status
+            status,
+            shippingFee
         } = req.body;
 
         if (!items.length) {
@@ -148,8 +190,13 @@ export const createOrder = async (req, res) => {
             return res.status(400).json({ message: "Order items are invalid." });
         }
 
-        // Calculate totalPrice based on items (quantity * price)
-        const totalPrice = normalizedItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
+        // Calculate totals and shipping fee
+        const itemsTotal = normalizedItems.reduce(
+            (sum, item) => sum + item.quantity * item.price,
+            0
+        );
+        const normalizedShippingFee = parseAmount(shippingFee, 0);
+        const totalPrice = Math.round((itemsTotal + normalizedShippingFee) * 100) / 100;
 
         const normalizedPaymentStatus = PAYMENT_STATUSES.find(
             (value) => value.toLowerCase() === (paymentStatus || "").toLowerCase()
@@ -167,6 +214,8 @@ export const createOrder = async (req, res) => {
             restaurantId,  // Manually inputted restaurantId
             restaurantName,
             items: normalizedItems,
+            itemsTotal,
+            shippingFee: normalizedShippingFee,
             totalPrice,
             deliveryAddress,
             paymentMethod: normalizedPaymentMethod,
@@ -174,6 +223,7 @@ export const createOrder = async (req, res) => {
             status: normalizedStatus
         });
 
+        recalculateOrderTotals(order);
         await order.save();
         emitEvent({
             event: "order.created",
@@ -254,7 +304,7 @@ export const updateOrderDetails = async (req, res) => {
         }
 
         // Update order details
-        const { items, deliveryAddress, paymentStatus, status, paymentMethod } = req.body;
+        const { items, deliveryAddress, paymentStatus, status, paymentMethod, shippingFee } = req.body;
 
         // Update only provided fields
         if (items) {
@@ -272,9 +322,16 @@ export const updateOrderDetails = async (req, res) => {
             }
 
             order.items = normalizedItems;
-            order.totalPrice = normalizedItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
+            order.itemsTotal = normalizedItems.reduce(
+                (sum, item) => sum + item.quantity * item.price,
+                0
+            );
         }
         if (deliveryAddress) order.deliveryAddress = deliveryAddress;
+
+        if (shippingFee !== undefined) {
+            order.shippingFee = parseAmount(shippingFee, order.shippingFee || 0);
+        }
 
         if (paymentStatus) {
             const normalizedPaymentStatus = PAYMENT_STATUSES.find(
@@ -301,6 +358,7 @@ export const updateOrderDetails = async (req, res) => {
         }
 
         normalizeOrderStatusInPlace(order);
+        recalculateOrderTotals(order);
         await order.save();
 
         res.status(200).json(toOrderResponse(order));
@@ -383,6 +441,107 @@ export const updateOrderStatus = async (req, res) => {
         res.status(200).json(toOrderResponse(order));
     } catch (error) {
         console.error("Error updating order status:", error);
+        res.status(500).json({ error: "Server Error" });
+    }
+};
+
+// @desc Get customer feedback for restaurant menu items
+// @route GET /api/orders/feedback/restaurant
+export const getRestaurantProductReviews = async (req, res) => {
+    try {
+        const role = req.user?.role;
+        let { restaurantId } = req.query || {};
+
+        if (role === "restaurant") {
+            restaurantId = req.user?.restaurantId || req.user?.id || restaurantId;
+        }
+
+        if (!restaurantId) {
+            return res.status(400).json({ message: "Restaurant identifier is required." });
+        }
+
+        const normalizedRestaurantId = String(restaurantId);
+        const orders = await Order.find({
+            restaurantId: normalizedRestaurantId,
+            "orderFeedback.rating": { $exists: true, $ne: null }
+        })
+            .sort({ "orderFeedback.ratedAt": -1, createdAt: -1 })
+            .lean();
+
+        if (!orders.length) {
+            return res.status(200).json({
+                restaurantId: normalizedRestaurantId,
+                restaurantName: null,
+                totalOrdersWithFeedback: 0,
+                totalReviews: 0,
+                averageRating: null,
+                reviews: []
+            });
+        }
+
+        let ratingSum = 0;
+        let ratedOrderCount = 0;
+        const reviews = [];
+
+        orders.forEach((order) => {
+            const rating = Number(order?.orderFeedback?.rating);
+            if (!Number.isFinite(rating)) {
+                return;
+            }
+            ratedOrderCount += 1;
+            ratingSum += rating;
+            const rawComment = order?.orderFeedback?.comment;
+            const comment =
+                typeof rawComment === "string" ? rawComment.trim().slice(0, 1000) : "";
+            const ratedAt = order?.orderFeedback?.ratedAt || order?.updatedAt || order?.createdAt;
+            const baseReview = {
+                orderId: order._id,
+                customerId: order.customerId || null,
+                customerName: order.customerName || order.customerEmail || "Khách hàng",
+                rating: Math.round(rating * 10) / 10,
+                comment,
+                ratedAt
+            };
+
+            const items = Array.isArray(order.items) ? order.items : [];
+            if (!items.length) {
+                reviews.push({
+                    ...baseReview,
+                    foodId: null,
+                    foodName: "Đơn hàng",
+                    quantity: 0,
+                    itemPrice: 0
+                });
+                return;
+            }
+
+            items.forEach((item) => {
+                reviews.push({
+                    ...baseReview,
+                    foodId: item?.foodId || null,
+                    foodName: item?.foodName || item?.name || "Món ăn",
+                    quantity: Number.isFinite(Number(item?.quantity)) ? Number(item.quantity) : 0,
+                    itemPrice: Number.isFinite(Number(item?.price)) ? Number(item.price) : 0
+                });
+            });
+        });
+
+        const averageRating =
+            ratedOrderCount > 0 ? Math.round((ratingSum / ratedOrderCount) * 10) / 10 : null;
+
+        res.status(200).json({
+            restaurantId: normalizedRestaurantId,
+            restaurantName: orders[0]?.restaurantName || null,
+            totalOrdersWithFeedback: ratedOrderCount,
+            totalReviews: reviews.length,
+            averageRating,
+            reviews: reviews.map((review) => ({
+                ...review,
+                ratedAt: review.ratedAt ? new Date(review.ratedAt).toISOString() : null
+            }))
+        });
+    } catch (error) {
+        console.error("Error fetching restaurant feedback:", error);
         res.status(500).json({ error: "Server Error" });
     }
 };

@@ -199,7 +199,7 @@ function FoodItemList() {
                     color: "#000",
                   }}
                 >
-                  Rs. {food.price}
+                   {food.price} VND
                 </p>
                 <p
                   style={{

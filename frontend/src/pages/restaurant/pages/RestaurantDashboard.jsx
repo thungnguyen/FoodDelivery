@@ -98,6 +98,14 @@ function RestaurantDashboard() {
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState('');
+  const [reviewStats, setReviewStats] = useState({
+    averageRating: null,
+    totalReviews: 0,
+    totalOrders: 0,
+  });
   const ORDER_API_BASE = ORDER_SERVICE_URL;
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
@@ -320,6 +328,49 @@ function RestaurantDashboard() {
     [ORDER_API_BASE, handleUnauthorizedError]
   );
 
+  const fetchReviews = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        if (!silent) {
+          setReviewsLoading(true);
+        }
+        setReviewsError('');
+        const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+        const res = await fetch(`${ORDER_API_BASE}/api/orders/feedback/restaurant`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          handleUnauthorizedError();
+          return;
+        }
+        const data = await res.json();
+        if (!isMountedRef.current) {
+          return;
+        }
+        if (res.ok) {
+          const normalizedReviews = Array.isArray(data?.reviews) ? data.reviews : [];
+          setReviews(normalizedReviews);
+          setReviewStats({
+            averageRating: data?.averageRating ?? null,
+            totalReviews: data?.totalReviews ?? normalizedReviews.length,
+            totalOrders: data?.totalOrdersWithFeedback ?? 0,
+          });
+        } else {
+          setReviewsError(data?.message || 'Không thể tải đánh giá khách hàng.');
+        }
+      } catch (err) {
+        if (isMountedRef.current) {
+          setReviewsError('Có lỗi khi tải đánh giá khách hàng.');
+        }
+      } finally {
+        if (!silent && isMountedRef.current) {
+          setReviewsLoading(false);
+        }
+      }
+    },
+    [ORDER_API_BASE, handleUnauthorizedError]
+  );
+
   const handleRealtimeEvent = useCallback(
     (message) => {
       if (!message || typeof message !== 'object') return;
@@ -383,11 +434,31 @@ function RestaurantDashboard() {
           fetchOrders({ silent: true });
           break;
         }
+        case 'order.feedback.updated': {
+          const orderId = payload?.orderId;
+          if (orderId) {
+            setOrders((prev) => {
+              const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+              if (index === -1) {
+                return prev;
+              }
+              const next = [...prev];
+              next[index] = {
+                ...next[index],
+                orderFeedback: payload?.orderFeedback ?? next[index].orderFeedback,
+                deliveryFeedback: payload?.deliveryFeedback ?? next[index].deliveryFeedback,
+              };
+              return next;
+            });
+          }
+          fetchReviews({ silent: true });
+          break;
+        }
         default:
           break;
       }
     },
-    [fetchOrders]
+    [fetchOrders, fetchReviews]
   );
 
   useEffect(() => {
@@ -752,7 +823,10 @@ function RestaurantDashboard() {
     if (activeTab === 'orders' || activeTab === 'finance') {
       fetchOrders({ silent: true });
     }
-  }, [activeTab, fetchOrders]);
+    if (activeTab === 'reviews') {
+      fetchReviews();
+    }
+  }, [activeTab, fetchOrders, fetchReviews]);
 
   const handleAddFoodItem = async () => {
     const trimmedName = newFoodItem.name?.trim();
@@ -1007,6 +1081,7 @@ function RestaurantDashboard() {
         <button className={activeTab === 'profile' ? 'active' : ''} onClick={() => setActiveTab('profile')}>Profile</button>
         <button className={activeTab === 'foodItems' ? 'active' : ''} onClick={() => setActiveTab('foodItems')}>Food Items</button>
         <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>Orders</button>
+        <button className={activeTab === 'reviews' ? 'active' : ''} onClick={() => setActiveTab('reviews')}>Reviews</button>
         <button className={activeTab === 'finance' ? 'active' : ''} onClick={() => setActiveTab('finance')}>Finance</button>
         <button className={activeTab === 'availability' ? 'active' : ''} onClick={() => setActiveTab('availability')}>Availability</button>
       </div>
@@ -1713,13 +1788,27 @@ function RestaurantDashboard() {
             )}
             {!ordersLoading && !ordersError && orders.length > 0 && (
               <div className="orders-list">
-                {orders.map((order) => (
-                  <div className="order-card" key={order._id}>
-                    <div className="order-card-header">
-                      <div>
-                        <h3>Đơn #{order._id.slice(-6).toUpperCase()}</h3>
-                        <p className="order-meta">
-                          Đặt lúc: {new Date(order.createdAt || Date.now()).toLocaleString('vi-VN')}
+                {orders.map((order) => {
+                  const items = Array.isArray(order.items) ? order.items : [];
+                  const itemsTotal = items.reduce(
+                    (sum, item) =>
+                      sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 0),
+                    0
+                  );
+                  const shippingFee = Number.isFinite(Number(order.shippingFee))
+                    ? Number(order.shippingFee)
+                    : 0;
+                  const grandTotal = Number.isFinite(Number(order.totalPrice))
+                    ? Number(order.totalPrice)
+                    : itemsTotal + shippingFee;
+
+                  return (
+                    <div className="order-card" key={order._id}>
+                      <div className="order-card-header">
+                        <div>
+                          <h3>Đơn #{order._id.slice(-6).toUpperCase()}</h3>
+                          <p className="order-meta">
+                            Đặt lúc: {new Date(order.createdAt || Date.now()).toLocaleString('vi-VN')}
                         </p>
                       </div>
                       <span className={`status-badge ${ORDER_STATUS_CLASSES[order.status] || ''}`}>
@@ -1748,7 +1837,9 @@ function RestaurantDashboard() {
                       </ul>
                     </div>
                     <div className="order-footer">
-                      <p><strong>Tổng tiền:</strong> {formatCurrency(order.totalPrice)}</p>
+                      <p><strong>Tạm tính:</strong> {formatCurrency(itemsTotal)}</p>
+                      <p><strong>Phí giao hàng:</strong> {formatCurrency(shippingFee)}</p>
+                      <p><strong>Tổng tiền:</strong> {formatCurrency(grandTotal)}</p>
                       <div className="order-actions">
                         {ORDER_CANCELABLE_STATUSES.has(order.status) && (
                           <button className="order-secondary-btn" onClick={() => handleCancelOrder(order)}>
@@ -1762,9 +1853,131 @@ function RestaurantDashboard() {
                         )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'reviews' && (
+          <div>
+            <div className="orders-header">
+              <h2>Đánh giá khách hàng</h2>
+              <button
+                type="button"
+                className="order-refresh-btn"
+                onClick={() => fetchReviews()}
+                disabled={reviewsLoading}
+              >
+                {reviewsLoading ? 'Đang tải...' : 'Tải lại'}
+              </button>
+            </div>
+            {reviewsLoading && <p>Đang tải đánh giá...</p>}
+            {!reviewsLoading && reviewsError && <p className="error-text">{reviewsError}</p>}
+            {!reviewsLoading && !reviewsError && (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '16px',
+                    marginBottom: '24px',
+                  }}
+                >
+                  <div
+                    style={{
+                      flex: '1 1 200px',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '12px',
+                      padding: '16px',
+                    }}
+                  >
+                    <div style={{ color: '#64748b', fontSize: '0.85rem', textTransform: 'uppercase' }}>
+                      Điểm trung bình
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a' }}>
+                      {reviewStats.averageRating ? `${reviewStats.averageRating}/5` : 'Chưa có'}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: '1 1 200px',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '12px',
+                      padding: '16px',
+                    }}
+                  >
+                    <div style={{ color: '#64748b', fontSize: '0.85rem', textTransform: 'uppercase' }}>
+                      Lượt đánh giá
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a' }}>
+                      {reviewStats.totalReviews || reviews.length}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: '1 1 200px',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '12px',
+                      padding: '16px',
+                    }}
+                  >
+                    <div style={{ color: '#64748b', fontSize: '0.85rem', textTransform: 'uppercase' }}>
+                      Đơn có đánh giá
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a' }}>
+                      {reviewStats.totalOrders}
+                    </div>
+                  </div>
+                </div>
+                {reviews.length === 0 ? (
+                  <p>Chưa có đánh giá nào từ khách hàng.</p>
+                ) : (
+                  <div className="orders-list">
+                    {reviews.map((review, index) => {
+                      const ratedAt = review?.ratedAt
+                        ? new Date(review.ratedAt).toLocaleString('vi-VN')
+                        : 'Chưa cập nhật';
+                      const orderLabel = review?.orderId
+                        ? `#${String(review.orderId).slice(-6).toUpperCase()}`
+                        : '';
+                      return (
+                        <div
+                          className="order-card"
+                          key={`${review.orderId || index}-${review.foodId || index}`}
+                        >
+                          <div className="order-card-header">
+                            <div>
+                              <h3>{review.foodName || 'Món ăn'}</h3>
+                              <p className="order-meta">
+                                {orderLabel ? `${orderLabel} • ${ratedAt}` : ratedAt}
+                              </p>
+                            </div>
+                            <span
+                              className="status-badge"
+                              style={{
+                                backgroundColor: '#fde68a',
+                                color: '#92400e',
+                                fontWeight: 700,
+                              }}
+                            >
+                              {review?.rating ? `${review.rating}/5` : 'N/A'}
+                            </span>
+                          </div>
+                          <div className="order-details">
+                            <p><strong>Khách hàng:</strong> {review.customerName || 'Ẩn danh'}</p>
+                            <p><strong>Số lượng:</strong> {review.quantity || 0}</p>
+                            <p><strong>Giá món:</strong> {formatCurrency(review.itemPrice || 0)}</p>
+                            <p><strong>Nhận xét:</strong> {review.comment || 'Không có nhận xét thêm.'}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

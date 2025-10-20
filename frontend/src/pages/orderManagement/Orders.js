@@ -11,6 +11,7 @@ import { Button, Spinner, Badge, Form } from "react-bootstrap";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { io } from "socket.io-client";
 import { BsStar, BsStarFill } from "react-icons/bs";
+import { computeShippingFee, roundCurrency } from "../../utils/pricing";
 
 const formatCurrency = (value) => {
   if (typeof value !== "number") return "0 VND";
@@ -603,6 +604,26 @@ function Orders() {
       const draftDriverRating = draft?.driverRating ?? driverFeedback?.rating ?? 0;
       const submittingFeedback = Boolean(draft?.submitting);
       const feedbackError = draft?.error;
+      const items = Array.isArray(order.items) ? order.items : [];
+      const itemsTotal = roundCurrency(
+        Number.isFinite(Number(order.itemsTotal))
+          ? Number(order.itemsTotal)
+          : items.reduce(
+              (sum, item) =>
+                sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 0),
+              0
+            )
+      );
+      const shippingFee = roundCurrency(
+        Number.isFinite(Number(order.shippingFee))
+          ? Number(order.shippingFee)
+          : computeShippingFee(items)
+      );
+      const grandTotal = roundCurrency(
+        Number.isFinite(Number(order.totalPrice))
+          ? Number(order.totalPrice)
+          : itemsTotal + shippingFee
+      );
 
       return (
         <div key={order._id} className="bg-white rounded-3 shadow-sm p-4 mb-4 border border-light">
@@ -639,7 +660,12 @@ function Orders() {
           </div>
 
           <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center mt-3 gap-3">
-            <div className="fw-bold fs-5">Tổng cộng: {formatCurrency(order.totalPrice || 0)}</div>
+            <div>
+              <div className="fw-bold fs-5">Tổng cộng: {formatCurrency(grandTotal)}</div>
+              <div className="text-muted small">
+                Tạm tính {formatCurrency(itemsTotal)} • Phí vận chuyển {formatCurrency(shippingFee)}
+              </div>
+            </div>
             <div className="d-flex gap-2">
               <Link to={`/orders/details/${order._id}`}>
                 <Button variant="primary" size="sm">

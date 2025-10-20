@@ -6,7 +6,8 @@ import {
     updateOrderStatus,
     cancelOrder,
     updateOrderDetails,
-    submitOrderFeedback
+    submitOrderFeedback,
+    getRestaurantProductReviews
 } from "../controllers/orderController.js";
 
 import { protect, authorizeRoles } from "../middleware/authMiddleware.js";
@@ -18,6 +19,12 @@ router.post("/", protect, authorizeRoles("customer"), createOrder);
 
 // Customers, restaurants, drivers and admins can view orders (scoped in controller)
 router.get("/", protect, authorizeRoles("customer", "restaurant", "driver", "admin", "superAdmin"), getOrders);
+router.get(
+    "/feedback/restaurant",
+    protect,
+    authorizeRoles("restaurant", "admin", "superAdmin"),
+    getRestaurantProductReviews
+);
 router.get("/:id", protect, authorizeRoles("customer", "restaurant", "driver", "admin", "superAdmin"), getOrderById);
 
 // Customers can adjust their order details before confirmation, admins/restaurants may also edit via same endpoint

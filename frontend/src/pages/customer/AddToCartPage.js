@@ -151,10 +151,10 @@ function AddToCartPage() {
                     marginBottom: "10px",
                   }}
                 >
-                  {item.quantity || 1} x Rs. {item.price}
+                  {item.quantity || 1} x {item.price} VND
                 </p>
                 <p style={{ fontSize: "18px", fontWeight: "bold", color: "#333", marginBottom: "12px" }}>
-                  Rs. {(item.price || 0) * (item.quantity || 1)}
+                   {(item.price || 0) * (item.quantity || 1)} VND
                 </p>
 
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

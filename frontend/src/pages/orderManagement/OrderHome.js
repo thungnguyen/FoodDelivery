@@ -152,6 +152,7 @@ function OrderHome({ handleDelete, handleEdit }) {
             <th>Food</th>
             <th>Quantity</th>
             <th>Price</th>
+            <th>Shipping Fee</th>
             <th>Total Price</th>
             <th>Delivery Address</th>
             <th>Options</th>
@@ -177,6 +178,7 @@ function OrderHome({ handleDelete, handleEdit }) {
                   <td>{item.foodId}</td>
                   <td>{item.quantity}</td>
                   <td>{item.price}</td>
+                  <td>{order.shippingFee ?? 0}</td>
                   <td>{order.totalPrice}</td>
                   <td>{order.deliveryAddress}</td>
                   <td>
