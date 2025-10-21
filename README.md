@@ -1,7 +1,7 @@
 # SkyDish – Food Delivery Microservices
 
-A cloud‐native, microservices‐based food ordering & delivery platform.  
-Supports four roles: Customer, Restaurant Admin, Delivery Personnel, Super Admin.
+Cloud‑native food ordering and delivery platform built with microservices.
+Roles supported: Customer, Restaurant Admin, Delivery Driver, Super Admin.
 
 ---
 
@@ -12,107 +12,122 @@ Supports four roles: Customer, Restaurant Admin, Delivery Personnel, Super Admin
 3. [Prerequisites](#prerequisites)  
 4. [Repository Layout](#repository-layout)  
 5. [Environment Variables](#environment-variables)  
-6. [Running Locally with Docker Compose](#running-locally-with-docker-compose)  
-7. [Running on Kubernetes](#running-on-kubernetes)  
-8. [Microservices & Endpoints](#microservices--endpoints)  
+6. [Running Locally](#running-locally)  
+7. [Microservices & Endpoints](#microservices--endpoints)  
+8. [Realtime Gateway](#realtime-gateway)  
 9. [Frontend Setup](#frontend-setup)  
 10. [Testing & Linting](#testing--linting)  
-11. [Troubleshooting Tips](#troubleshooting-tips)  
+11. [Troubleshooting](#troubleshooting)  
 12. [Demo & Submission](#demo--submission)  
 
 ---
 
 ## 1. Overview
 
-- **Customers** can browse restaurants, add to cart, place orders, and track deliveries.  
-- **Restaurant Admins** manage their menus, view and update orders.  
-- **Delivery Personnel** accept assignments, update statuses, and share real‐time location.  
-- **Super Admin** oversees all users and restaurants.
+- Customers: đăng ký/đăng nhập, đặt đơn, theo dõi trạng thái, phản hồi.  
+- Restaurant Admin: quản trị hồ sơ, mở/đóng, quản lý menu, xem đơn.  
+- Delivery Driver: đăng ký/đăng nhập, nhận giao, cập nhật trạng thái, thống kê.  
+- Super Admin: duyệt nhà hàng/tài xế, xem khách hàng/đơn, proxy quản trị.
 
-Microservices:
-1. **Auth Service** (Port 4000)  
-2. **Restaurant Service** (Port 5002)  
-3. **Order Service** (Port 5005)  
-4. **Delivery Service** (Port 5003)  
-5. **Payment Service** (Port 5004)  
-6. **Frontend** (Port 3000)
+Microservices & Infra:
+1. Auth Service (4000)  
+2. Restaurant Service (5002)  
+3. Order Service (5005)  
+4. Delivery Service (5003)  
+5. Payment Service (5004)  
+6. Realtime Gateway (5050) + Redis (6379)  
+7. Frontend (3000) + Delivery Frontend (3001)
 
 ---
 
 ## 2. Tech Stack
 
-- **Frontend**: React, React Router, Axios, Tailwind/CSS  
-- **Backend**: Node.js, Express.js  
-- **Database**: MongoDB Atlas (Mongoose)  
-- **Auth**: JWT & bcrypt  
-- **Realtime**: Socket.IO  
-- **Payments**: Stripe  
-- **Notifications**: Twilio (SMS), Resend (Email)  
-- **Containerization**: Docker Compose  
-- **Orchestration**: Kubernetes (YAML manifests)  
-- **API Docs**: Swagger (Payment Service)  
+- Frontend: React  
+- Backend: Node.js 20, Express.js  
+- Database: MongoDB (Mongoose)  
+- Auth: JWT, bcrypt/bcryptjs  
+- Realtime: Socket.IO, Redis pub/sub (gateway)  
+- Payments: Stripe (PaymentIntent + Webhook)  
+- Notifications: Twilio SMS, Resend Email  
+- Containers: Docker Compose  
+- Docs: Swagger (Payment Service)
 
 ---
 
 ## 3. Prerequisites
 
-- Node.js v14+ & npm  
+- Node.js v18+ & npm (local dev for web UIs)  
 - Docker & docker-compose  
-- Kubernetes & kubectl (for local cluster)  
-- MongoDB URI (Atlas or self‐hosted)  
-- API keys for:
-  - JWT_SECRET  
-  - STRIPE_SECRET_KEY & STRIPE_WEBHOOK_SECRET  
-  - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER  
-  - RESEND_API_KEY  
+- MongoDB URI (Atlas hoặc local)  
+- API keys: JWT_SECRET, STRIPE, Twilio, Resend, (tùy chọn) OpenCage Geocoding
 
 ---
 
 ## 4. Repository Layout
 
 ```
-/  
-├── backend/  
-│   ├── auth-service/  
-│   ├── restaurant-service/  
-│   ├── order-service/  
-│   ├── delivery-service/  
-│   └── payment-service/  
-├── frontend/  
-│   └── src/  
-├── k8s/               # Kubernetes manifests (secrets, deployments, services)  
-├── docker-compose.yml  
-├── readme.txt          # ← this file  
-├── submission.txt      # GitHub & demo links  
-└── members.txt         # Team member details  
+/
+├── backend/
+│   ├── auth-service/
+│   ├── restaurant-service/
+│   ├── order-service/
+│   ├── payment-service/
+│   └── realtime-gateway/
+├── delivery-service/
+│   ├── backend/
+│   └── frontend/
+├── frontend/
+├── Document/
+├── docker-compose.yml
+├── README.md
+├── members.md
+└── submission.txt
 ```
 
 ---
 
 ## 5. Environment Variables
 
-Create a `.env` file in the **project root** with:
+Create `.env` at project root (used by docker-compose):
 
 ```dotenv
-# MongoDB (shared)
-MONGO_URI=<your_mongo_uri>
+# Mongo
+MONGO_URI=mongodb+srv://...
 
-# Auth Service (4000)
-AUTH_PORT=4000
-JWT_SECRET=<your_jwt_secret>
+# JWT
+JWT_SECRET=your_jwt_secret
 JWT_EXPIRES_IN=7d
 
-# Restaurant Service (5002)
+# Ports (optional overrides)
+AUTH_PORT=4000
 REST_PORT=5002
-
-# Order Service (5005)
-ORDER_PORT=5005
-
-# Delivery Service (5003)
 DELIVERY_PORT=5003
-
-# Payment Service (5004)
 PAY_PORT=5004
+ORDER_PORT=5005
+REALTIME_PORT=5050
+
+# Realtime & Internal
+REALTIME_URL=http://localhost:5050
+REDIS_URL=redis://localhost:6379
+SERVICE_INTERNAL_KEY=super-admin-internal-key
+
+# Service base URLs (used by proxies/clients between services)
+AUTH_SERVICE_URL=http://localhost:4000
+RESTAURANT_SERVICE_URL=http://localhost:5002
+DELIVERY_SERVICE_URL=http://localhost:5003
+ORDER_SERVICE_URL=http://localhost:5005
+
+# Delivery Service → Order Service JWT (shared short‑lived tokens)
+SHARED_JWT_SECRET=CNPM2025
+# or ORDER_SERVICE_JWT_SECRET=CNPM2025
+
+# Geocoding (Delivery Service)
+OPENCAGE_API_KEY=<optional>
+GEOCODING_COUNTRY_CODE=vn
+# GEOCODING_DEFAULT_LAT=...
+# GEOCODING_DEFAULT_LNG=...
+
+# Payments & Notifications (Payment Service)
 STRIPE_SECRET_KEY=<sk_test_...>
 STRIPE_WEBHOOK_SECRET=<whsec_...>
 TWILIO_ACCOUNT_SID=<AC...>
@@ -121,91 +136,118 @@ TWILIO_PHONE_NUMBER=<+...>
 RESEND_API_KEY=<re_...>
 ```
 
-And in `frontend/.env`:
+Frontend `.env` (optional):
 
 ```dotenv
-REACT_APP_BACKEND_URL=http://localhost:4000
+REACT_APP_API_BASE=http://localhost:4000
 REACT_APP_STRIPE_PUBLISHABLE_KEY=<pk_test_...>
 ```
 
 ---
 
-## 6. Running Locally with Docker Compose
+## 6. Running Locally
 
-From repo root:
+From repository root:
 
 ```bash
 docker-compose up --build
 ```
 
-- MongoDB container → `mongodb://mongo:27017`
-- Services available on ports 4000, 5002, 5003, 5004, 5005
-- Frontend → `http://localhost:3000`
-- Nếu muốn gom vào Docker Compose để chạy cùng lúc với các service khác, bạn có thể thêm một service mới cho `delivery-service/frontend` (tương tự như service `frontend` hiện tại) và map port `3001`.
+- Services: 4000 (auth), 5002 (restaurant), 5003 (delivery), 5004 (payment), 5005 (order)  
+- Frontends: 3000 (main), 3001 (delivery)  
+- Realtime Gateway: 5050, Redis: 6379
+
+The compose file already starts Redis and Realtime Gateway. Ensure `.env` has valid `MONGO_URI` and `JWT_SECRET`.
 
 ---
 
-## 7. Running on Kubernetes
+## 7. Microservices & Endpoints
 
-Ensure your local cluster is running (e.g., Docker Desktop).
+### 7.1 Auth Service (http://localhost:4000)
+- POST `/api/auth/register/customer`
+- POST `/api/auth/login`
+- GET `/api/auth/customer/profile` (JWT)
+- PATCH `/api/auth/customer/profile` (JWT)
+- GET `/api/auth/admin/customers` (Admin JWT)
+- PATCH `/api/auth/admin/customers/:id/status` (Admin JWT)
 
-Apply secrets & manifests:
+### 7.2 Restaurant Service (http://localhost:5002)
+- POST `/api/restaurants/register`
+- POST `/api/restaurants/login`
+- GET `/api/restaurants/profile` (JWT)
+- PUT `/api/restaurants/update` (JWT)
+- PUT `/api/restaurants/availability` (JWT)
+- GET `/api/restaurants/all`
+- GET `/api/restaurants/:id`
 
-```bash
-kubectl apply -f k8s/secrets.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
-```
+#### Food Items (http://localhost:5002)
+- POST `/api/food-items/create` (Restaurant JWT, file or URL image)
+- GET `/api/food-items/` (Restaurant JWT)
+- PUT `/api/food-items/:id` (Restaurant JWT)
+- PUT `/api/food-items/availability/:id` (Restaurant JWT)
+- DELETE `/api/food-items/:id` (Restaurant JWT)
+- GET `/api/food-items/all` (Public)
+- GET `/api/food-items/restaurant/:restaurantId` (Public)
 
-Verify pods/services:
+#### Super Admin (http://localhost:5002)
+- POST `/api/superadmin/register|login`
+- GET `/api/superadmin/restaurants` (JWT superAdmin)
+- GET `/api/superadmin/restaurant/:id` (JWT superAdmin)
+- PUT `/api/superadmin/restaurant/:id` (JWT superAdmin)
+- PATCH `/api/superadmin/restaurant/:id/approve|reject` (JWT superAdmin)
+- DELETE `/api/superadmin/restaurant/:id` (JWT superAdmin)
+- Proxy: `/api/superadmin/customers|drivers|orders` (for centralized admin)
 
-```bash
-kubectl get pods
-kubectl get svc
-```
+### 7.3 Order Service (http://localhost:5005)
+- POST `/api/orders` (role: customer)
+- GET `/api/orders` (roles: customer, restaurant, driver, admin, superAdmin)
+- GET `/api/orders/:id` (roles: as above)
+- PATCH `/api/orders/:id` (roles: customer, restaurant, admin, superAdmin)
+- PATCH `/api/orders/:id/status` (roles: restaurant, driver, admin, superAdmin)
+- DELETE `/api/orders/:id` (roles: customer, restaurant, admin, superAdmin)
+- POST `/api/orders/:id/feedback` (role: customer)
+- GET `/api/orders/feedback/restaurant` (roles: restaurant, admin, superAdmin)
+
+### 7.4 Delivery Service (http://localhost:5003)
+Auth (driver):
+- POST `/api/auth/register`
+- POST `/api/auth/login`
+- GET `/api/auth/profile` (JWT)
+
+Deliveries (driver):
+- POST `/api/delivery/create` (JWT)
+- GET `/api/delivery` (JWT, list own)
+- GET `/api/delivery/stats/summary` (JWT)
+- GET `/api/delivery/available` (JWT)
+- GET `/api/delivery/order/:orderId` (JWT)
+- GET `/api/delivery/:id` (JWT)
+- PUT `/api/delivery/:id/status` (JWT)
+- DELETE `/api/delivery/:id` (JWT)
+
+Admin drivers:
+- GET `/api/admin/drivers` (Admin JWT)
+- PATCH `/api/admin/drivers/:id/status` (Admin JWT)
+- PATCH `/api/admin/drivers/:id/activity` (Admin JWT)
+
+### 7.5 Payment Service (http://localhost:5004)
+- POST `/api/payment/process`
+- POST `/api/payment/webhook` (Stripe Webhook, raw body)
+- Swagger UI: `http://localhost:5004/api-docs`
+
+> Lưu ý: `orderId` là duy nhất trong Payment; webhook cập nhật `status` = Paid/Failed và có thể gửi SMS/Email.
 
 ---
 
-## 8. Microservices & Endpoints
+## 8. Realtime Gateway
 
-### 8.1 Auth Service (http://localhost:4000)
-- **POST** `/api/auth/register/customer`
-- **POST** `/api/auth/login`
-- **GET** `/api/auth/customer/me` (JWT protect)
-- **PATCH** `/api/auth/customer/me`
+Service: http://localhost:5050
 
-### 8.2 Restaurant Service (:5002)
-- **POST** `/api/restaurant/register`
-- **POST** `/api/restaurant/login`
-- **GET** `/api/restaurant/profile`
-- **PUT** `/api/restaurant/update`
+- GET `/health`
+- POST `/internal/events`  
+  Headers: `x-service-key: ${SERVICE_INTERNAL_KEY}`  
+  Body: `{ event, payload, rooms?: string[], broadcast?: boolean }`
 
-#### Food Items:
-- **POST** `/api/food-items/create`
-- **GET** `/api/food-items/all`
-- **PUT** `/api/food-items/:id`
-- **DELETE** `/api/food-items/:id`
-
-### 8.3 Order Service (:5005)
-- **POST** `/api/orders`
-- **GET** `/api/orders`
-- **GET** `/api/orders/:id`
-- **PATCH** `/api/orders/:id`
-- **DELETE** `/api/orders/:id`
-- **WebSocket event**: `orderStatusUpdate`
-
-### 8.4 Delivery Service (:5003)
-- **POST** `/api/delivery/create`
-- **GET** `/api/delivery`
-- **GET** `/api/delivery/:id`
-- **PUT** `/api/delivery/:id/status`
-- **WebSocket event**: `location-update`
-
-### 8.5 Payment Service (:5004)
-- **POST** `/api/payment/process`
-- **GET** `/api/payment/status/:orderId`
-- **POST** `/api/payment/webhook` (Stripe webhook)
-- **Swagger UI**: `http://localhost:5004/api-docs`
+Clients kết nối Socket.IO với JWT và join các room như `user:{id}`, `role:{role}`; Order/Delivery sẽ gọi gateway để phát sự kiện (gateway publish qua Redis rồi emit tới client).
 
 ---
 
@@ -241,7 +283,7 @@ npm test
 
 ---
 
-## 11. Troubleshooting Tips
+## 11. Troubleshooting
 
 - **CORS errors**: Ensure each service uses:
 
@@ -249,7 +291,7 @@ npm test
 app.use(cors({ origin: "http://localhost:3000" }));
 ```
 
-- **MongoDB connectivity**: Whitelist `0.0.0.0/0` in Atlas for development.
+- **MongoDB connectivity**: Whitelist your IP/`0.0.0.0/0` in Atlas for development.
 
 - **Stripe webhooks (local)**:
 
@@ -257,11 +299,12 @@ app.use(cors({ origin: "http://localhost:3000" }));
 stripe listen --forward-to localhost:5004/api/payment/webhook
 ```
 
+- **Geocoding**: Set `OPENCAGE_API_KEY` or provide `GEOCODING_DEFAULT_LAT/LNG` fallback.
+
+- **Realtime**: Ensure `REDIS_URL` is reachable and `SERVICE_INTERNAL_KEY` matches across services.
+
 ---
 
 ## 12. Demo & Submission
 
-- **GitHub Repo**: [https://github.com/R-Tharanka/Food-Delivery-Microservices.git](https://github.com/R-Tharanka/Food-Delivery-Microservices.git)
-- **Demo Video**: [https://youtu.be/0Y53-xwQHyc](https://youtu.be/0Y53-xwQHyc)
-- **Members**: See `members.txt`
-
+- **GitHub Repo**: [https://github.com/thungnguyen/FoodDelivery](https://github.com/thungnguyen/FoodDelivery)
