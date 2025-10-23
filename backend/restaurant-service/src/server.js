@@ -29,9 +29,16 @@ app.get('/', (req, res) => {
 });
 
 // MongoDB connection
-mongoose.connect(process.env.MONGO_URI, {})
-  .then(() => console.log('✅ MongoDB Connected'))
-  .catch(err => console.log('MongoDB connection error:', err));
+const mongoUri = process.env.RESTAURANT_MONGO_URI || process.env.MONGO_URI;
+const mongoOptions = {};
+if (process.env.RESTAURANT_DB_NAME) {
+  mongoOptions.dbName = process.env.RESTAURANT_DB_NAME;
+}
+
+mongoose
+  .connect(mongoUri, mongoOptions)
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.log("MongoDB connection error:", err));
 
 // Error handling middleware
 app.use((req, res, next) => {

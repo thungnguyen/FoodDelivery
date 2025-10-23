@@ -20,7 +20,8 @@ services:
       - .env
     environment:
       PORT: ${AUTH_PORT:-4000}
-      MONGO_URI: ${MONGO_URI}
+      MONGO_URI: ${AUTH_MONGO_URI}
+      AUTH_DB_NAME: ${AUTH_DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
       NODE_ENV: development
@@ -42,7 +43,8 @@ services:
       - .env
     environment:
       PORT: ${REST_PORT:-5002}
-      MONGO_URI: ${MONGO_URI}
+      MONGO_URI: ${RESTAURANT_MONGO_URI}
+      RESTAURANT_DB_NAME: ${RESTAURANT_DB_NAME}
       NODE_ENV: development
     ports:
       - "${REST_PORT:-5002}:${REST_PORT:-5002}"
@@ -62,7 +64,8 @@ services:
       - .env
     environment:
       PORT: ${ORDER_PORT:-5005}
-      MONGO_URI: ${MONGO_URI}
+      MONGO_URI: ${ORDER_MONGO_URI}
+      ORDER_DB_NAME: ${ORDER_DB_NAME}
       NODE_ENV: development
       REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
       SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
@@ -84,7 +87,8 @@ services:
       - .env
     environment:
       PORT: ${DELIVERY_PORT:-5003}
-      MONGO_URI: ${MONGO_URI}
+      MONGO_URI: ${DELIVERY_MONGO_URI}
+      DELIVERY_DB_NAME: ${DELIVERY_DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: development
       REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
@@ -107,7 +111,8 @@ services:
       - .env
     environment:
       PORT: ${PAY_PORT:-5004}
-      MONGO_URI: ${MONGO_URI}
+      MONGO_URI: ${PAYMENT_MONGO_URI}
+      PAYMENT_DB_NAME: ${PAYMENT_DB_NAME}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
