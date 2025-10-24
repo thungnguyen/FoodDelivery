@@ -89,6 +89,23 @@ const toOrderResponse = (orderDoc) => {
     plain.itemsTotal = Math.round(resolvedItemsTotal * 100) / 100;
     plain.shippingFee = Math.round(resolvedShipping * 100) / 100;
     plain.totalPrice = Math.round((plain.itemsTotal + plain.shippingFee) * 100) / 100;
+    if (plain.parentOrderId) {
+        plain.parentOrderId = plain.parentOrderId.toString();
+    }
+    if (Array.isArray(plain.childOrderIds)) {
+        plain.childOrderIds = plain.childOrderIds.map((value) => value && value.toString()).filter(Boolean);
+    }
+    if (Array.isArray(plain.childOrderSummaries)) {
+        plain.childOrderSummaries = plain.childOrderSummaries.map((summary) => {
+            if (!summary) return summary;
+            const next = { ...summary };
+            if (summary.orderId) {
+                next.orderId = summary.orderId.toString();
+            }
+            return next;
+        });
+    }
+    plain.isParentOrder = Boolean(plain.isParentOrder);
     return plain;
 };
 
@@ -106,6 +123,114 @@ const parseAmount = (value, fallback = 0) => {
         return fallback;
     }
     return Math.round(num * 100) / 100;
+};
+
+const allocateShippingFees = (totalShippingFee, groups) => {
+    const normalizedTotal = parseAmount(totalShippingFee, 0);
+    if (!groups?.length || normalizedTotal <= 0) {
+        return Array.isArray(groups) ? groups.map(() => 0) : [];
+    }
+
+    const itemsTotals = groups.map((group) => parseAmount(group.itemsTotal ?? 0, 0));
+    const aggregateItemsTotal = itemsTotals.reduce((sum, value) => sum + value, 0);
+    const allocations = [];
+    let remaining = normalizedTotal;
+
+    groups.forEach((group, index) => {
+        let share = 0;
+        if (index === groups.length - 1) {
+            share = remaining;
+        } else if (aggregateItemsTotal > 0) {
+            share = parseAmount((normalizedTotal * itemsTotals[index]) / aggregateItemsTotal, 0);
+        } else {
+            share = parseAmount(normalizedTotal / groups.length, 0);
+        }
+
+        if (share > remaining) {
+            share = remaining;
+        }
+
+        share = parseAmount(share, 0);
+        remaining = parseAmount(remaining - share, 0);
+
+        allocations.push(share);
+    });
+
+    if (allocations.length === groups.length && remaining !== 0) {
+        const lastIndex = allocations.length - 1;
+        allocations[lastIndex] = parseAmount(allocations[lastIndex] + remaining, 0);
+    }
+
+    return allocations;
+};
+
+const syncParentOrderFromChildren = async (parentOrderId) => {
+    if (!parentOrderId) {
+        return null;
+    }
+
+    const parentOrder = await Order.findById(parentOrderId);
+    if (!parentOrder || !parentOrder.isParentOrder) {
+        return null;
+    }
+
+    const childOrders = await Order.find({ parentOrderId: parentOrder._id }).sort({ createdAt: 1 });
+
+    parentOrder.childOrderIds = childOrders.map((child) => child._id);
+    parentOrder.childOrderSummaries = childOrders.map((child) => ({
+        orderId: child._id,
+        restaurantId: child.restaurantId,
+        restaurantName: child.restaurantName,
+        itemsTotal: parseAmount(child.itemsTotal, 0),
+        shippingFee: parseAmount(child.shippingFee, 0),
+        totalPrice: parseAmount(child.totalPrice, child.itemsTotal || 0),
+        status: canonicalizeStatus(child.status) || child.status
+    }));
+
+    const mergedItems = [];
+    childOrders.forEach((child) => {
+        const childItems = Array.isArray(child.items) ? child.items : [];
+        childItems.forEach((item) => {
+            mergedItems.push({
+                foodId: item.foodId,
+                foodName: item.foodName,
+                restaurantId: item.restaurantId || child.restaurantId,
+                restaurantName: item.restaurantName || child.restaurantName,
+                quantity: item.quantity,
+                price: item.price
+            });
+        });
+    });
+
+    parentOrder.items = mergedItems;
+
+    const aggregateItemsTotal = childOrders.reduce(
+        (sum, child) => sum + (Number.isFinite(Number(child.itemsTotal)) ? Number(child.itemsTotal) : 0),
+        0
+    );
+    const aggregateShipping = childOrders.reduce(
+        (sum, child) => sum + (Number.isFinite(Number(child.shippingFee)) ? Number(child.shippingFee) : 0),
+        0
+    );
+    const aggregateTotal = childOrders.reduce(
+        (sum, child) => sum + (Number.isFinite(Number(child.totalPrice)) ? Number(child.totalPrice) : 0),
+        0
+    );
+
+    parentOrder.itemsTotal = Math.round(aggregateItemsTotal * 100) / 100;
+    parentOrder.shippingFee = Math.round(aggregateShipping * 100) / 100;
+    parentOrder.totalPrice = Math.round(aggregateTotal * 100) / 100;
+
+    const childStatuses = new Set(
+        childOrders.map((child) => canonicalizeStatus(child.status) || child.status).filter(Boolean)
+    );
+    if (childStatuses.size === 1) {
+        parentOrder.status = Array.from(childStatuses)[0];
+    }
+
+    recalculateOrderTotals(parentOrder);
+    await parentOrder.save();
+    return parentOrder;
 };
 
 const recalculateOrderTotals = (orderDoc) => {
@@ -163,8 +288,6 @@ export const createOrder = async (req, res) => {
             customerName,
             customerEmail,
             customerPhone,
-            restaurantId,
-            restaurantName,
             items = [],
             deliveryAddress,
             paymentMethod,
@@ -179,22 +302,80 @@ export const createOrder = async (req, res) => {
 
         const normalizedItems = items
             .map(item => ({
-                foodId: item.foodId,
-                foodName: item.foodName,
+                foodId: item.foodId || item.food || item._id,
+                foodName: item.foodName || item.name || "",
+                restaurantId: item.restaurantId || item.restaurant,
+                restaurantName: item.restaurantName || item.restaurantTitle || item.restaurantName,
                 quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 0,
                 price: Number.isFinite(Number(item.price)) ? Number(item.price) : 0
             }))
-            .filter(item => item.foodId && item.quantity > 0);
+            .map((item) => {
+                const fallbackRestaurantId =
+                    item.restaurantId ??
+                    req.body.restaurantId ??
+                    req.body.restaurant ??
+                    null;
+                return {
+                    ...item,
+                    restaurantId: fallbackRestaurantId !== null && fallbackRestaurantId !== undefined
+                        ? String(fallbackRestaurantId)
+                        : undefined,
+                    restaurantName: item.restaurantName || req.body.restaurantName || ""
+                };
+            })
+            .filter(item => item.foodId && item.quantity > 0 && item.price >= 0);
 
         if (!normalizedItems.length) {
             return res.status(400).json({ message: "Order items are invalid." });
         }
 
+        const missingRestaurantItems = normalizedItems.filter((item) => !item.restaurantId);
+        if (missingRestaurantItems.length) {
+            return res.status(400).json({
+                message: "Each order item must reference a restaurant."
+            });
+        }
+
+        const restaurantGroupsMap = new Map();
+        normalizedItems.forEach((item) => {
+            const key = String(item.restaurantId);
+            if (!restaurantGroupsMap.has(key)) {
+                restaurantGroupsMap.set(key, {
+                    restaurantId: key,
+                    restaurantName: item.restaurantName || req.body.restaurantName || null,
+                    items: []
+                });
+            }
+            const group = restaurantGroupsMap.get(key);
+            if (item.restaurantName && !group.restaurantName) {
+                group.restaurantName = item.restaurantName;
+            }
+            group.items.push({
+                foodId: item.foodId,
+                foodName: item.foodName,
+                restaurantId: item.restaurantId,
+                restaurantName: item.restaurantName,
+                quantity: item.quantity,
+                price: item.price
+            });
+        });
+
+        const restaurantGroups = Array.from(restaurantGroupsMap.values()).map((group) => {
+            const itemsTotal = group.items.reduce(
+                (sum, groupItem) => sum + groupItem.quantity * groupItem.price,
+                0
+            );
+            return {
+                ...group,
+                itemsTotal: Math.round(itemsTotal * 100) / 100
+            };
+        });
+
         // Calculate totals and shipping fee
-        const itemsTotal = normalizedItems.reduce(
-            (sum, item) => sum + item.quantity * item.price,
-            0
-        );
+        const itemsTotal = Math.round(
+            (restaurantGroups.reduce((sum, group) => sum + (group.itemsTotal || 0), 0) ||
+                normalizedItems.reduce((sum, item) => sum + item.quantity * item.price, 0)) * 100
+        ) / 100;
         const normalizedShippingFee = parseAmount(shippingFee, 0);
         const totalPrice = Math.round((itemsTotal + normalizedShippingFee) * 100) / 100;
 
@@ -206,13 +387,62 @@ export const createOrder = async (req, res) => {
 
         const normalizedPaymentMethod = (paymentMethod || "cash").toLowerCase() === "card" ? "card" : "cash";
 
-        const order = new Order({
-            customerId,  // Manually inputted customerId
+        if (restaurantGroups.length <= 1) {
+            const singleGroup = restaurantGroups[0];
+            const resolvedRestaurantId = singleGroup?.restaurantId;
+            if (!resolvedRestaurantId) {
+                return res.status(400).json({
+                    message: "Restaurant identifier is required for the order."
+                });
+            }
+
+            const order = new Order({
+                customerId,
+                customerName,
+                customerEmail,
+                customerPhone,
+                restaurantId: resolvedRestaurantId,
+                restaurantName: singleGroup?.restaurantName || req.body.restaurantName || "",
+                items: singleGroup?.items || normalizedItems,
+                itemsTotal,
+                shippingFee: normalizedShippingFee,
+                totalPrice,
+                deliveryAddress,
+                paymentMethod: normalizedPaymentMethod,
+                paymentStatus: normalizedPaymentStatus,
+                status: normalizedStatus,
+                isParentOrder: false,
+                parentOrderId: null,
+                childOrderIds: []
+            });
+
+            recalculateOrderTotals(order);
+            await order.save();
+            emitEvent({
+                event: "order.created",
+                payload: {
+                    orderId: order._id,
+                    status: order.status,
+                    restaurantId: order.restaurantId,
+                    customerId
+                },
+                rooms: buildOrderRooms({
+                    orderId: order._id,
+                    customerId,
+                    restaurantId: order.restaurantId
+                })
+            });
+            const response = toOrderResponse(order);
+            return res.status(201).json(response);
+        }
+
+        const parentOrder = new Order({
+            customerId,
             customerName,
             customerEmail,
             customerPhone,
-            restaurantId,  // Manually inputted restaurantId
-            restaurantName,
+            restaurantId: null,
+            restaurantName: null,
             items: normalizedItems,
             itemsTotal,
             shippingFee: normalizedShippingFee,
@@ -220,27 +450,93 @@ export const createOrder = async (req, res) => {
             deliveryAddress,
             paymentMethod: normalizedPaymentMethod,
             paymentStatus: normalizedPaymentStatus,
-            status: normalizedStatus
+            status: normalizedStatus,
+            isParentOrder: true,
+            parentOrderId: null,
+            childOrderIds: []
         });
 
-        recalculateOrderTotals(order);
-        await order.save();
+        const shippingAllocations = allocateShippingFees(normalizedShippingFee, restaurantGroups);
+        const childOrders = [];
+
+        for (let index = 0; index < restaurantGroups.length; index += 1) {
+            const group = restaurantGroups[index];
+            const groupShipping = shippingAllocations[index] || 0;
+            const childOrder = new Order({
+                customerId,
+                customerName,
+                customerEmail,
+                customerPhone,
+                restaurantId: group.restaurantId,
+                restaurantName: group.restaurantName || "",
+                items: group.items,
+                itemsTotal: group.itemsTotal,
+                shippingFee: groupShipping,
+                totalPrice: Math.round((group.itemsTotal + groupShipping) * 100) / 100,
+                deliveryAddress,
+                paymentMethod: normalizedPaymentMethod,
+                paymentStatus: normalizedPaymentStatus,
+                status: normalizedStatus,
+                isParentOrder: false,
+                parentOrderId: parentOrder._id
+            });
+            recalculateOrderTotals(childOrder);
+            await childOrder.save();
+            childOrders.push(childOrder);
+        }
+
+        parentOrder.childOrderIds = childOrders.map((order) => order._id);
+        parentOrder.childOrderSummaries = childOrders.map((order) => ({
+            orderId: order._id,
+            restaurantId: order.restaurantId,
+            restaurantName: order.restaurantName,
+            itemsTotal: order.itemsTotal,
+            shippingFee: order.shippingFee,
+            totalPrice: order.totalPrice,
+            status: order.status
+        }));
+        recalculateOrderTotals(parentOrder);
+        await parentOrder.save();
+
         emitEvent({
             event: "order.created",
             payload: {
-                orderId: order._id,
-                status: order.status,
-                restaurantId,
+                orderId: parentOrder._id,
+                status: parentOrder.status,
+                restaurantId: null,
                 customerId
             },
             rooms: buildOrderRooms({
-                orderId: order._id,
+                orderId: parentOrder._id,
                 customerId,
-                restaurantId
+                restaurantId: null
             })
         });
-        const response = toOrderResponse(order);
-        res.status(201).json(response);
+
+        childOrders.forEach((order) => {
+            emitEvent({
+                event: "order.created",
+                payload: {
+                    orderId: order._id,
+                    status: order.status,
+                    restaurantId: order.restaurantId,
+                    customerId
+                },
+                rooms: buildOrderRooms({
+                    orderId: order._id,
+                    customerId,
+                    restaurantId: order.restaurantId
+                })
+            });
+        });
+
+        const parentResponse = toOrderResponse(parentOrder);
+        const childResponses = childOrders.map(toOrderResponse);
+        parentResponse.childOrders = childResponses;
+        res.status(201).json({
+            parentOrder: parentResponse,
+            childOrders: childResponses
+        });
     } catch (error) {
         console.error("Error creating order:", error);  // Log error for debugging
         res.status(500).json({ error: "Server Error" });
@@ -252,19 +548,24 @@ export const createOrder = async (req, res) => {
 export const getOrders = async (req, res) => {
     try {
         const query = {};
+        let role = req.user?.role || null;
+        let shouldGroupForCustomer = false;
 
-        if (req.user?.role === "restaurant") {
+        if (role === "restaurant") {
             const restaurantId = req.user.restaurantId || req.user.id;
             if (restaurantId) {
                 query.restaurantId = restaurantId;
+                query.isParentOrder = { $ne: true };
             }
-        } else if (req.user?.role === "customer") {
+        } else if (role === "customer") {
             const customerId = req.user.customerId || req.user.id;
             if (customerId) {
                 query.customerId = customerId;
             }
-        } else if (req.user?.role === "driver") {
+            shouldGroupForCustomer = true;
+        } else if (role === "driver") {
             query.status = { $in: ["Awaiting Driver", "Out for Delivery", "Delivered", "Failed"] };
+            query.isParentOrder = { $ne: true };
         }
 
         const requestedStatus = canonicalizeStatus(req.query?.status);
@@ -272,7 +573,60 @@ export const getOrders = async (req, res) => {
             query.status = requestedStatus;
         }
 
-        const orders = await Order.find(query);
+        const orders = await Order.find(query).sort({ createdAt: -1 });
+
+        if (shouldGroupForCustomer) {
+            const parentEntries = new Map();
+            const standaloneChildren = [];
+
+            orders.forEach((orderDoc) => {
+                if (orderDoc.isParentOrder) {
+                    parentEntries.set(orderDoc._id.toString(), {
+                        parent: orderDoc,
+                        children: []
+                    });
+                }
+            });
+
+            orders.forEach((orderDoc) => {
+                if (orderDoc.isParentOrder) {
+                    return;
+                }
+                const parentId = orderDoc.parentOrderId ? orderDoc.parentOrderId.toString() : null;
+                if (parentId && parentEntries.has(parentId)) {
+                    parentEntries.get(parentId).children.push(orderDoc);
+                } else {
+                    standaloneChildren.push(orderDoc);
+                }
+            });
+
+            const responsePayload = [];
+
+            parentEntries.forEach(({ parent, children }) => {
+                const parentResponse = toOrderResponse(parent);
+                parentResponse.childOrders = children
+                    .sort((a, b) => {
+                        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                        return aTime - bTime;
+                    })
+                    .map(toOrderResponse);
+                responsePayload.push(parentResponse);
+            });
+
+            standaloneChildren.forEach((orderDoc) => {
+                responsePayload.push(toOrderResponse(orderDoc));
+            });
+
+            responsePayload.sort((a, b) => {
+                const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return bTime - aTime;
+            });
+
+            return res.status(200).json(responsePayload);
+        }
+
         const response = orders.map(toOrderResponse);
         res.status(200).json(response);
     } catch (error) {
@@ -287,7 +641,27 @@ export const getOrderById = async (req, res) => {
         const order = await Order.findById(req.params.id);
         if (!order) return res.status(404).json({ message: "Order not found" });
 
-        res.status(200).json(toOrderResponse(order));
+        const response = toOrderResponse(order);
+
+        if (order.isParentOrder) {
+            const childOrders = await Order.find({ parentOrderId: order._id }).sort({ createdAt: 1 });
+            response.childOrders = childOrders.map(toOrderResponse);
+        } else if (order.parentOrderId) {
+            const parentOrder = await Order.findById(order.parentOrderId);
+            if (parentOrder) {
+                response.parentOrderSummary = {
+                    _id: parentOrder._id.toString(),
+                    status: canonicalizeStatus(parentOrder.status) || parentOrder.status,
+                    totalPrice: parseAmount(parentOrder.totalPrice, parentOrder.itemsTotal || 0),
+                    itemsTotal: parseAmount(parentOrder.itemsTotal, 0),
+                    shippingFee: parseAmount(parentOrder.shippingFee, 0),
+                    createdAt: parentOrder.createdAt,
+                    updatedAt: parentOrder.updatedAt
+                };
+            }
+        }
+
+        res.status(200).json(response);
     } catch (error) {
         res.status(500).json({ error: "Server Error" });
     }

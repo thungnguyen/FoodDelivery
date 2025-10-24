@@ -6,12 +6,19 @@ const orderSchema = new mongoose.Schema(
         customerName: { type: String },
         customerEmail: { type: String },
         customerPhone: { type: String },
-        restaurantId: { type: String, required: true }, // Change to String for manual input
+        restaurantId: {
+            type: String,
+            required() {
+                return !this.isParentOrder;
+            }
+        }, // Change to String for manual input
         restaurantName: { type: String },
         items: [
             {
                 foodId: { type: String, required: true }, // Change to String for manual input
                 foodName: { type: String },
+                restaurantId: { type: String },
+                restaurantName: { type: String },
                 quantity: { type: Number, required: true },
                 price: { type: Number, required: true }
             }
@@ -67,7 +74,34 @@ const orderSchema = new mongoose.Schema(
                 maxlength: 1000
             },
             ratedAt: { type: Date }
-        }
+        },
+        isParentOrder: { type: Boolean, default: false },
+        parentOrderId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Order",
+            default: null
+        },
+        childOrderIds: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Order"
+            }
+        ],
+        childOrderSummaries: [
+            {
+                orderId: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: "Order",
+                    required: true
+                },
+                restaurantId: { type: String },
+                restaurantName: { type: String },
+                itemsTotal: { type: Number },
+                shippingFee: { type: Number },
+                totalPrice: { type: Number },
+                status: { type: String }
+            }
+        ]
     },
     { timestamps: true }
 );
