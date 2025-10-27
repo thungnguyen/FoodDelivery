@@ -137,6 +137,18 @@
   color: white;
 }
 
+.landing-btn.tertiary {
+  background: transparent;
+  color: #764ba2;
+  border: 2px dashed #764ba2;
+}
+
+.landing-btn.tertiary:hover {
+  background: #764ba2;
+  color: white;
+  border-style: solid;
+}
+
 /* Back Link */
 .back-link {
   color: #667eea;

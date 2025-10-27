@@ -1,49 +1,171 @@
 /* src/styles/restaurantLogin.css */
-.restaurant-login-container {
-    width: 100%;
-    max-width: 400px;
-    margin: 50px auto;
-    padding: 20px;
-    border: 1px solid #ccc;
-    border-radius: 10px;
-    background-color: #f9f9f9;
+
+.restaurant-auth-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 16px;
+  background: linear-gradient(120deg, #eef2ff 0%, #e0e7ff 35%, #fdf2f8 100%);
+}
+
+.restaurant-auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 28px;
+  padding: 36px 32px;
+  box-shadow: 0 28px 60px rgba(79, 70, 229, 0.18);
+  backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.restaurant-auth-card h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 1.9rem;
+  color: #1f2937;
+}
+
+.helper-text {
+  font-size: 0.95rem;
+  color: #4b5563;
+  text-align: center;
+  margin: 0;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.auth-form input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  padding: 12px 14px;
+  background: rgba(248, 250, 252, 0.9);
+  font-size: 0.97rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: #6366f1;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18);
+}
+
+.auth-form input.has-error {
+  border-color: #ef4444;
+  background: rgba(254, 226, 226, 0.6);
+}
+
+.error-text {
+  font-size: 0.8rem;
+  color: #b91c1c;
+}
+
+.form-alert {
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.form-alert.success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.form-alert.error {
+  background: rgba(248, 113, 113, 0.13);
+  color: #b91c1c;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.auth-form button {
+  border: none;
+  border-radius: 14px;
+  padding: 14px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 40%, #ec4899 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-form button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 32px rgba(99, 102, 241, 0.25);
+}
+
+.auth-form button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.auth-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #4f46e5;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 8px 0;
+  transition: color 0.2s ease;
+}
+
+.link-button:hover {
+  color: #7c3aed;
+}
+
+.link-button:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .restaurant-auth-wrapper {
+    padding: 32px 12px;
   }
-  
-  h2 {
-    text-align: center;
-    margin-bottom: 20px;
+
+  .restaurant-auth-card {
+    padding: 28px 24px;
+    border-radius: 24px;
   }
-  
-  input {
-    width: 100%;
-    padding: 10px;
-    margin: 10px 0;
-    border: 1px solid #ccc;
-    border-radius: 5px;
+
+  .restaurant-auth-card h2 {
+    font-size: 1.6rem;
   }
-  
-  button {
-    width: 100%;
-    padding: 10px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-  }
-  
-  button:disabled {
-    background-color: #ccc;
-  }
-  
-  .error {
-    color: red;
-    font-size: 12px;
-  }
-  
-  .message {
-    color: green;
-    font-size: 14px;
-    text-align: center;
-  }
-  
+}
