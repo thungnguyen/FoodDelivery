@@ -39,6 +39,8 @@ import SuperAdminLogin from './pages/restaurant/components/SuperAdminLogin';
 import SuperAdminDashboard from './pages/restaurant/pages/SuperAdminDashboard';
 import RestaurantRegister from './pages/restaurant/components/RestaurantRegister';
 import RestaurantLogin from './pages/restaurant/components/RestaurantLogin';
+import RestaurantOnboardingVerify from './pages/restaurant/components/RestaurantOnboardingVerify';
+import RestaurantOnboardingSetPassword from './pages/restaurant/components/RestaurantOnboardingSetPassword';
 import RestaurantDashboard from './pages/restaurant/pages/RestaurantDashboard';
 import IndexPage from './pages/restaurant/components/IndexPage';
 
@@ -102,6 +104,11 @@ function App() {
           <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
           <Route path="/restaurant/register" element={<RestaurantRegister />} />
           <Route path="/restaurant/login" element={<RestaurantLogin />} />
+          <Route path="/restaurant/activate" element={<RestaurantOnboardingVerify />} />
+          <Route
+            path="/restaurant/activate/change-password"
+            element={<RestaurantOnboardingSetPassword />}
+          />
           <Route path="/restaurant/dashboard" element={<RestaurantDashboard />} />
           <Route path="/restaurant/home" element={<IndexPage />} />
 

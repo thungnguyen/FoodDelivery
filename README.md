@@ -117,6 +117,17 @@ RESTAURANT_SERVICE_URL=http://localhost:5002
 DELIVERY_SERVICE_URL=http://localhost:5003
 ORDER_SERVICE_URL=http://localhost:5005
 
+# Email (local SMTP for local dev)
+EMAIL_PREFER_SMTP=true
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=your_gmail@example.com
+SMTP_PASS=your_gmail_app_password   # Gmail App Password 16 ký tự
+NOTIFY_FROM_EMAIL="Food Delivery <your_gmail@example.com>"
+SUPER_ADMIN_PORTAL_URL=http://192.168.31.132:3000/super-admin/dashboard   # IP máy chạy frontend
+RESTAURANT_ONBOARDING_URL=http://192.168.31.132:3000/restaurant/activate
+
 # Delivery Service → Order Service JWT (shared short‑lived tokens)
 SHARED_JWT_SECRET=CNPM2025
 # or ORDER_SERVICE_JWT_SECRET=CNPM2025
@@ -302,6 +313,9 @@ stripe listen --forward-to localhost:5004/api/payment/webhook
 - **Geocoding**: Set `OPENCAGE_API_KEY` or provide `GEOCODING_DEFAULT_LAT/LNG` fallback.
 
 - **Realtime**: Ensure `REDIS_URL` is reachable and `SERVICE_INTERNAL_KEY` matches across services.
+
+- **Email (local dev)**: Nếu chưa có domain riêng, bật `EMAIL_PREFER_SMTP=true` và cấu hình `SMTP_HOST/PORT/USER/PASS` với Gmail App Password. Kiểm tra log `activation.deliveryStatus` sau khi Super Admin duyệt để chắc chắn mail đã được gửi (`sent`) — nếu thấy `simulated/failed`, hãy kiểm tra lại `.env` và giá trị App Password.
+- **Link truy cập trên điện thoại**: Để admin/nhà hàng mở các link trong email trên điện thoại, đặt `SUPER_ADMIN_PORTAL_URL` và `RESTAURANT_ONBOARDING_URL` bằng IP nội bộ của máy chạy frontend (ví dụ `http://192.168.xx.xx:3000/...`) và đảm bảo các thiết bị cùng mạng Wi-Fi.
 
 ---
 

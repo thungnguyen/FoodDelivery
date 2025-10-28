@@ -63,6 +63,16 @@ function RestaurantLanding() {
               Register Your Restaurant
             </motion.button>
           </Link>
+
+          <Link to="/restaurant/activate">
+            <motion.button
+              className="landing-btn tertiary"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Activate With OTP
+            </motion.button>
+          </Link>
         </div>
 
         <Link to="/" className="back-link">

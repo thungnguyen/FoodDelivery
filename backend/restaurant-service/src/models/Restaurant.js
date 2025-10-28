@@ -8,6 +8,12 @@ const restaurantSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    taxCode: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
     ownerName: {
       type: String,
       required: true,
@@ -45,15 +51,30 @@ const restaurantSchema = new mongoose.Schema(
     onboardingEmailSentAt: {
       type: Date,
     },
+    onboardingOtpHash: {
+      type: String,
+    },
+    onboardingOtpExpiresAt: {
+      type: Date,
+    },
+    onboardingOtpVerifiedAt: {
+      type: Date,
+    },
+    onboardingPasswordMustChange: {
+      type: Boolean,
+      default: true,
+    },
     admin: {
       email: {
         type: String,
         required: true,
         unique: true,
+        lowercase: true,
+        trim: true,
       },
       password: {
         type: String,
-        required: true,
+        default: '',
       },
     },
     availability: {
@@ -67,15 +88,23 @@ const restaurantSchema = new mongoose.Schema(
 // Hash the password before saving the restaurant document
 restaurantSchema.pre('save', async function (next) {
   if (this.isModified('admin.password')) {
-    const salt = await bcrypt.genSalt(10);
-    this.admin.password = await bcrypt.hash(this.admin.password, salt);
+    const rawPassword = this.admin.password;
+    if (typeof rawPassword === 'string' && rawPassword.trim().length) {
+      const salt = await bcrypt.genSalt(10);
+      this.admin.password = await bcrypt.hash(rawPassword, salt);
+    } else {
+      this.admin.password = '';
+    }
   }
   next();
 });
 
 // Method to compare password for login
 restaurantSchema.methods.compareAdminPassword = async function (password) {
-  return await bcrypt.compare(password, this.admin.password);
+  if (!this.admin?.password || !this.admin.password.trim().length) {
+    return false;
+  }
+  return bcrypt.compare(password, this.admin.password);
 };
 
 const Restaurant = mongoose.model('Restaurant', restaurantSchema);
