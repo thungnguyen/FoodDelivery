@@ -49,6 +49,8 @@ const resolveBoolean = (value, defaultValue = false) => {
   return defaultValue;
 };
 
+const preferSmtpFirst = resolveBoolean(process.env.EMAIL_PREFER_SMTP, false);
+
 const isDomainVerificationError = (status, bodyText) => {
   if (status !== 403) return false;
   try {
@@ -179,19 +181,34 @@ export const sendEmail = async ({ to, subject, html, text }) => {
 
   const errors = [];
 
-  if (process.env.RESEND_API_KEY) {
+  const tryResend = async () => {
+    if (!process.env.RESEND_API_KEY) {
+      return null;
+    }
     try {
       return await sendViaResend({ ...payload, from: primarySender });
     } catch (err) {
       errors.push(err);
       console.warn('[restaurant-email] Resend delivery failed, fallback to SMTP if available.', err.message);
     }
-  }
+    return null;
+  };
 
-  try {
-    return await sendViaSmtp(payload);
-  } catch (err) {
-    errors.push(err);
+  const trySmtp = async () => {
+    try {
+      return await sendViaSmtp(payload);
+    } catch (err) {
+      errors.push(err);
+      return null;
+    }
+  };
+
+  const sendOrder = preferSmtpFirst ? [trySmtp, tryResend] : [tryResend, trySmtp];
+  for (const attempt of sendOrder) {
+    const result = await attempt();
+    if (result) {
+      return result;
+    }
   }
 
   const reason =
