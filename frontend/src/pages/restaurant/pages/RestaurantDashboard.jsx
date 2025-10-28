@@ -688,6 +688,13 @@ function RestaurantDashboard() {
     let dailyOrders = 0;
     let monthlyOrders = 0;
     let yearlyOrders = 0;
+    let itemsGross = 0;
+    let shippingGross = 0;
+    let restaurantShippingShare = 0;
+    let driverShipping = 0;
+    let platformCommissionTotal = 0;
+    let maintenanceFeeTotal = 0;
+    let restaurantNetTotal = 0;
 
     const revenueTrendMap = new Map();
     const itemSalesMap = new Map();
@@ -742,6 +749,17 @@ function RestaurantDashboard() {
           itemSalesMap.set(key, existingItem);
         });
       }
+
+      if (order.financialSummary) {
+        const summary = order.financialSummary;
+        itemsGross += Number(summary.grossItems || 0);
+        shippingGross += Number(summary.shippingFee || 0);
+        restaurantShippingShare += Number(summary.restaurantShippingShare || 0);
+        driverShipping += Number(summary.driverPayout || 0);
+        platformCommissionTotal += Number(summary.commissionAmount || 0);
+        maintenanceFeeTotal += Number(summary.maintenanceFee || 0);
+        restaurantNetTotal += Number(summary.netRestaurant || 0);
+      }
     });
 
     const deliveredCount = deliveredOrders.length;
@@ -773,6 +791,9 @@ function RestaurantDashboard() {
     const pendingOrdersList = orders.filter((order) => pendingStatuses.has(order.status));
     const pendingRevenue = pendingOrdersList.reduce((sum, order) => sum + parseAmount(order), 0);
 
+    const restaurantItemShare = Math.max(0, itemsGross - platformCommissionTotal);
+    const platformRevenue = platformCommissionTotal + maintenanceFeeTotal;
+
     return {
       deliveredOrders,
       totalRevenue,
@@ -791,6 +812,15 @@ function RestaurantDashboard() {
       revenueTrend,
       topItems,
       paymentBreakdown,
+      itemsGross,
+      shippingGross,
+      restaurantShippingShare,
+      driverShipping,
+      platformCommissionTotal,
+      maintenanceFeeTotal,
+      restaurantNetTotal,
+      restaurantItemShare,
+      platformRevenue,
     };
   }, [orders]);
   const {
@@ -811,6 +841,15 @@ function RestaurantDashboard() {
     revenueTrend,
     topItems,
     paymentBreakdown,
+    itemsGross,
+    shippingGross,
+    restaurantShippingShare,
+    driverShipping,
+    platformCommissionTotal,
+    maintenanceFeeTotal,
+    restaurantNetTotal,
+    restaurantItemShare,
+    platformRevenue,
   } = financialMetrics;
 
   useEffect(() => {
@@ -1674,6 +1713,42 @@ function RestaurantDashboard() {
                     <span>
                       Hủy: {formatNumber(cancelledCount)} • Thất bại: {formatNumber(failedCount)}
                     </span>
+                  </div>
+                </div>
+
+                <div className="finance-flow-grid">
+                  <div className="finance-card flow restaurant">
+                    <h3>80% món cho nhà hàng</h3>
+                    <p>{formatCurrency(restaurantItemShare)}</p>
+                    <span>Tổng giá trị món: {formatCurrency(itemsGross)}</span>
+                  </div>
+                  <div className="finance-card flow platform">
+                    <h3>20% hoa hồng nền tảng</h3>
+                    <p>{formatCurrency(platformCommissionTotal)}</p>
+                    <span>Phí duy trì: {formatCurrency(maintenanceFeeTotal)}</span>
+                  </div>
+                  <div className="finance-card flow shipping">
+                    <h3>Phí giao hàng đã thu</h3>
+                    <p>{formatCurrency(shippingGross)}</p>
+                    <span>90% tài xế · 10% nhà hàng</span>
+                  </div>
+                  <div className="finance-card flow driver">
+                    <h3>Chi tài xế (90% ship)</h3>
+                    <p>{formatCurrency(driverShipping)}</p>
+                  </div>
+                  <div className="finance-card flow reward">
+                    <h3>Nhà hàng hưởng 10% ship</h3>
+                    <p>{formatCurrency(restaurantShippingShare)}</p>
+                  </div>
+                  <div className="finance-card flow highlight">
+                    <h3>Nhà hàng nhận ròng</h3>
+                    <p>{formatCurrency(restaurantNetTotal)}</p>
+                    <span>= 80% món - hoa hồng - phí duy trì + 10% ship</span>
+                  </div>
+                  <div className="finance-card flow total">
+                    <h3>Thu ròng nền tảng</h3>
+                    <p>{formatCurrency(platformRevenue)}</p>
+                    <span>Hoa hồng món + phí duy trì</span>
                   </div>
                 </div>
 

@@ -1,5 +1,6 @@
 import Order from "../models/orderModel.js";
 import emitEvent from "../utils/eventBus.js";
+import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed"];
 
@@ -371,78 +372,124 @@ export const updateOrderDetails = async (req, res) => {
 // @desc Update order status
 // @route PATCH /api/orders/:id
 export const updateOrderStatus = async (req, res) => {
-    try {
-        const { status } = req.body;
-        const requestedStatus = canonicalizeStatus(status);
+    const { status } = req.body;
+    const requestedStatus = canonicalizeStatus(status);
 
-        if (!requestedStatus) {
-            return res.status(400).json({ message: "Invalid status value" });
-        }
-
-        const order = await Order.findById(req.params.id);
-
-        if (!order) {
-            return res.status(404).json({ message: "Order not found" });
-        }
-
-        const role = req.user?.role;
-
-        if (!role) {
-            return res.status(403).json({ message: "Unauthorized" });
-        }
-
-        const currentStatus = normalizeOrderStatusInPlace(order);
-
-        // Block updates when order is already closed (except admins handling refunds or overrides)
-        if (role !== "admin" && CLOSED_STATUSES.has(currentStatus)) {
-            return res.status(400).json({ message: "Order is already closed and cannot be updated." });
-        }
-
-        // Validate ownership for restaurant role
-        if (role === "restaurant") {
-            const restaurantId = req.user?.restaurantId || req.user?.id;
-            if (restaurantId && order.restaurantId !== restaurantId) {
-                return res.status(403).json({ message: "Access denied: Cannot modify other restaurant orders." });
-            }
-        }
-
-        const roleTransitions = STATUS_TRANSITIONS[role];
-
-        if (role === "admin") {
-            // Admin can move to any canonical status
-            order.status = requestedStatus;
-        } else if (roleTransitions) {
-            const allowedNext = roleTransitions[currentStatus] || [];
-            if (!allowedNext.includes(requestedStatus)) {
-                return res.status(400).json({ message: `Transition from ${currentStatus} to ${requestedStatus} is not allowed for role ${role}.` });
-            }
-            order.status = requestedStatus;
-        } else {
-            return res.status(403).json({ message: "Role not permitted to update order status." });
-        }
-
-        await order.save();
-
-        emitEvent({
-            event: "order.status.changed",
-            payload: {
-                orderId: order._id,
-                status: order.status,
-                updatedBy: req.user?.id,
-                role
-            },
-            rooms: buildOrderRooms({
-                orderId: order._id,
-                customerId: order.customerId,
-                restaurantId: order.restaurantId
-            })
-        });
-
-        res.status(200).json(toOrderResponse(order));
-    } catch (error) {
-        console.error("Error updating order status:", error);
-        res.status(500).json({ error: "Server Error" });
+    if (!requestedStatus) {
+        return res.status(400).json({ message: "Invalid status value" });
     }
+
+    const role = req.user?.role;
+
+    if (!role) {
+        return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const session = await Order.startSession();
+    let raisedError = null;
+    let orderResponse = null;
+    let eventPayload = null;
+
+    try {
+        await session.withTransaction(async () => {
+            const order = await Order.findById(req.params.id).session(session);
+            if (!order) {
+                const notFoundError = new Error("Order not found");
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
+
+            const currentStatus = normalizeOrderStatusInPlace(order);
+            const previousStatus = currentStatus;
+
+            if (role !== "admin" && CLOSED_STATUSES.has(currentStatus)) {
+                const closedError = new Error("Order is already closed and cannot be updated.");
+                closedError.statusCode = 400;
+                throw closedError;
+            }
+
+            if (role === "restaurant") {
+                const restaurantId = req.user?.restaurantId || req.user?.id;
+                if (restaurantId && order.restaurantId !== restaurantId) {
+                    const ownershipError = new Error("Access denied: Cannot modify other restaurant orders.");
+                    ownershipError.statusCode = 403;
+                    throw ownershipError;
+                }
+            }
+
+            const roleTransitions = STATUS_TRANSITIONS[role];
+
+            if (role === "admin") {
+                order.status = requestedStatus;
+            } else if (roleTransitions) {
+                const allowedNext = roleTransitions[currentStatus] || [];
+                if (!allowedNext.includes(requestedStatus)) {
+                    const transitionError = new Error(
+                        `Transition from ${currentStatus} to ${requestedStatus} is not allowed for role ${role}.`
+                    );
+                    transitionError.statusCode = 400;
+                    throw transitionError;
+                }
+                order.status = requestedStatus;
+            } else {
+                const roleError = new Error("Role not permitted to update order status.");
+                roleError.statusCode = 403;
+                throw roleError;
+            }
+
+            normalizeOrderStatusInPlace(order);
+
+            const financeSummary = await handleOrderStatusFinancials({
+                order,
+                previousStatus,
+                session
+            });
+
+            if (financeSummary) {
+                order.financialSummary = {
+                    ...(order.financialSummary || {}),
+                    ...financeSummary
+                };
+            }
+
+            await order.save({ session });
+
+            orderResponse = toOrderResponse(order);
+            eventPayload = {
+                event: "order.status.changed",
+                payload: {
+                    orderId: order._id,
+                    status: orderResponse.status,
+                    updatedBy: req.user?.id,
+                    role
+                },
+                rooms: buildOrderRooms({
+                    orderId: order._id,
+                    customerId: order.customerId,
+                    restaurantId: order.restaurantId
+                })
+            };
+        });
+    } catch (error) {
+        raisedError = error;
+    } finally {
+        await session.endSession();
+    }
+
+    if (raisedError) {
+        const statusCode = raisedError.statusCode || 500;
+        if (statusCode >= 500) {
+            console.error("Error updating order status:", raisedError);
+            return res.status(500).json({ error: "Server Error" });
+        }
+        return res.status(statusCode).json({ message: raisedError.message });
+    }
+
+    if (eventPayload) {
+        emitEvent(eventPayload);
+    }
+
+    return res.status(200).json(orderResponse);
 };
 
 // @desc Get customer feedback for restaurant menu items

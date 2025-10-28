@@ -101,6 +101,31 @@
   font-weight: 700;
 }
 
+.driver-metric-card small {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.driver-metric-card--split {
+  border-left: 4px solid #0ea5e9;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(59, 130, 246, 0.08));
+}
+
+.driver-share-banner {
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: 16px;
+  padding: 16px 20px;
+  color: #0369a1;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.driver-share-banner strong {
+  color: #0f172a;
+  margin-right: 6px;
+}
+
 .driver-section-header {
   display: flex;
   justify-content: space-between;

@@ -389,6 +389,7 @@ export default function DriverDashboard() {
         <div className="driver-metric-card">
           <span className="driver-metric-card__label">Thu nhập hôm nay</span>
           <strong>{formatCurrency(stats?.earningsToday || 0)}</strong>
+          <small>= 90% phí ship + tiền tip thực nhận</small>
         </div>
         <div className="driver-metric-card">
           <span className="driver-metric-card__label">Tổng thu nhập</span>
@@ -402,7 +403,20 @@ export default function DriverDashboard() {
           <span className="driver-metric-card__label">Đơn đang xử lý</span>
           <strong>{stats?.activeDeliveries || 0}</strong>
         </div>
+        {typeof stats?.totalShippingFee === "number" && (
+          <div className="driver-metric-card driver-metric-card--split">
+            <span className="driver-metric-card__label">Phí giao hàng đã thu</span>
+            <strong>{formatCurrency(stats.totalShippingFee || 0)}</strong>
+            <small>Phần của bạn (90%): {formatCurrency((stats.totalShippingFee || 0) * 0.9)}</small>
+            <small>Nhà hàng (10%): {formatCurrency((stats.totalShippingFee || 0) * 0.1)}</small>
+          </div>
+        )}
       </section>
+
+      <div className="driver-share-banner">
+        <strong>Dòng tiền:</strong> 80% giá trị món chuyển cho nhà hàng, nền tảng giữ 20% cùng phí duy trì.
+        Phí giao hàng phân bổ 90% cho tài xế, 10% thưởng nhà hàng theo quy trình đối soát.
+      </div>
 
       <section className="driver-available-jobs">
         <div className="driver-section-header">

@@ -1730,12 +1730,53 @@ function SuperAdminDashboard() {
   };
 
   const financialSummary = useMemo(() => {
-    const delivered = ordersHydrated.filter((order) => order.status === 'Delivered');
-    const grossRevenue = delivered.reduce((sum, order) => sum + (order.total || 0), 0);
-    const restaurantShare = grossRevenue * 0.8;
-    const driverShare = grossRevenue * 0.15;
-    const platformCommission = grossRevenue * 0.05;
-    return { grossRevenue, restaurantShare, driverShare, platformCommission };
+    const settled = ordersHydrated.filter(
+      (order) =>
+        ['Completed', 'Delivered'].includes(order.status) && order.financialSummary
+    );
+
+    const totals = settled.reduce(
+      (acc, order) => {
+        const summary = order.financialSummary || {};
+        acc.totalOrders += 1;
+        acc.grossItems += Number(summary.grossItems || 0);
+        acc.shippingFee += Number(summary.shippingFee || 0);
+        acc.platformCommission += Number(summary.commissionAmount || 0);
+        acc.maintenanceFee += Number(summary.maintenanceFee || 0);
+        acc.restaurantShippingShare += Number(summary.restaurantShippingShare || 0);
+        acc.driverShipping += Number(summary.driverPayout || 0);
+        acc.restaurantNet += Number(summary.netRestaurant || 0);
+        return acc;
+      },
+      {
+        totalOrders: 0,
+        grossItems: 0,
+        shippingFee: 0,
+        platformCommission: 0,
+        maintenanceFee: 0,
+        restaurantShippingShare: 0,
+        driverShipping: 0,
+        restaurantNet: 0,
+      }
+    );
+
+    const platformRevenue = totals.platformCommission + totals.maintenanceFee;
+    const restaurantItemShare = Math.max(0, totals.grossItems - totals.platformCommission);
+    const totalRevenue = totals.grossItems + totals.shippingFee;
+
+    return {
+      totalOrders: totals.totalOrders,
+      totalRevenue,
+      grossItems: totals.grossItems,
+      shippingFee: totals.shippingFee,
+      platformCommission: totals.platformCommission,
+      maintenanceFee: totals.maintenanceFee,
+      platformRevenue,
+      restaurantItemShare,
+      restaurantShippingShare: totals.restaurantShippingShare,
+      driverShipping: totals.driverShipping,
+      restaurantNet: totals.restaurantNet,
+    };
   }, [ordersHydrated]);
 
   const renderAlert = (alert) =>
@@ -2602,38 +2643,63 @@ function SuperAdminDashboard() {
     <section className="sa-section">
       <header className="sa-section-header">
         <div>
-            <h2>
-              <span className="sa-icon">{SECTION_ICONS.finance}</span>Đối soát & Tài chính
-            </h2>
-          <p>Theo dõi dòng tiền, hoa hồng và ngân sách hoàn trả.</p>
+          <h2>
+            <span className="sa-icon">{SECTION_ICONS.finance}</span>Đối soát & Tài chính
+          </h2>
+          <p>Phân tách dòng tiền theo tỷ lệ 80/20 món ăn và 90/10 phí giao hàng.</p>
         </div>
       </header>
       <div className="sa-grid finance">
         <div className="sa-card">
-          <h3>Tổng doanh thu ghi nhận</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.grossRevenue)}</p>
+          <h3>Tổng giá trị đã đối soát</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.totalRevenue)}</p>
+          <span>{financialSummary.totalOrders} đơn hoàn tất</span>
         </div>
         <div className="sa-card">
-          <h3>Thanh toán cho nhà hàng</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantShare)}</p>
-          <span>80% doanh thu</span>
+          <h3>Giá trị món ăn</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.grossItems)}</p>
+          <span>80% chuyển cho nhà hàng · 20% cho nền tảng</span>
         </div>
         <div className="sa-card">
-          <h3>Thanh toán cho tài xế</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.driverShare)}</p>
-          <span>15% doanh thu</span>
-        </div>
-        <div className="sa-card">
-          <h3>Hoa hồng nền tảng</h3>
+          <h3>Hoa hồng nền tảng (20%)</h3>
           <p className="sa-highlight">{formatCurrency(financialSummary.platformCommission)}</p>
-          <span>5% doanh thu</span>
+          <span>Phí duy trì: {formatCurrency(financialSummary.maintenanceFee)}</span>
+        </div>
+        <div className="sa-card">
+          <h3>Nhà hàng nhận từ món ăn</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantItemShare)}</p>
+          <span>Chưa trừ phí duy trì định kỳ</span>
+        </div>
+        <div className="sa-card">
+          <h3>Phí giao hàng thu được</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.shippingFee)}</p>
+          <span>Chia 90% tài xế · 10% thưởng nhà hàng</span>
+        </div>
+        <div className="sa-card">
+          <h3>Chi cho tài xế (90% ship)</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.driverShipping)}</p>
+        </div>
+        <div className="sa-card">
+          <h3>Nhà hàng hưởng (10% ship)</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantShippingShare)}</p>
+        </div>
+        <div className="sa-card stretch">
+          <h3>Nhà hàng nhận ròng</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantNet)}</p>
+          <span>= 80% món - 20% hoa hồng - phí duy trì + 10% phí ship</span>
+        </div>
+        <div className="sa-card stretch">
+          <h3>Thu ròng nền tảng</h3>
+          <p className="sa-highlight">{formatCurrency(financialSummary.platformRevenue)}</p>
+          <span>Hoa hồng món ăn + phí duy trì</span>
         </div>
       </div>
       <div className="sa-card note">
-        <h4>Hoàn tiền & Ví điện tử</h4>
+        <h4>Dòng tiền & ví nội bộ</h4>
         <p>
-          Kết nối Payment Service để lập lịch hoàn tiền tự động và quản lý số dư ví khách hàng,
-          tài xế.
+          Số liệu lấy từ ledger: tiền món vào ví nền tảng, hoa hồng chuyển sang ví doanh thu,
+          90% phí ship về ví tài xế, 10% phí ship cộng vào ví công nợ nhà hàng. Báo cáo đối soát
+          dùng các số dư này để lập lịch payout.
         </p>
       </div>
     </section>
