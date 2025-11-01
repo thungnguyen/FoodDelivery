@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 const router = express.Router();
 
@@ -14,6 +15,43 @@ const DEFAULT_OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_TTL_MS = Number(process.env.RESTAURANT_ONBOARDING_OTP_TTL_MS) || DEFAULT_OTP_TTL_MS;
 const PASSWORD_POLICY_REGEX =
   /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+
+const PASSWORD_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const PASSWORD_NUMBERS = '23456789';
+const PASSWORD_SPECIALS = '@$!%*?&';
+const PASSWORD_ALL = PASSWORD_LETTERS + PASSWORD_NUMBERS + PASSWORD_SPECIALS;
+
+const randomFrom = (alphabet) => {
+  const buffer = crypto.randomBytes(1);
+  return alphabet[buffer[0] % alphabet.length];
+};
+
+const shuffleArray = (input) => {
+  const arr = [...input];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = crypto.randomBytes(1)[0] % (i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
+const generateTemporaryPassword = (length = 10) => {
+  const baseChars = [
+    randomFrom(PASSWORD_LETTERS),
+    randomFrom(PASSWORD_NUMBERS),
+    randomFrom(PASSWORD_SPECIALS),
+  ];
+  while (baseChars.length < length) {
+    baseChars.push(randomFrom(PASSWORD_ALL));
+  }
+  return shuffleArray(baseChars).join('');
+};
+
+const generateOtpCode = () => {
+  const buffer = crypto.randomBytes(3);
+  const numeric = buffer.readUIntBE(0, 3) % 1_000_000;
+  return numeric.toString().padStart(6, '0');
+};
 
 // Register a new restaurant (awaiting admin approval)
 router.post('/register', upload.single('profilePicture'), async (req, res) => {
@@ -272,6 +310,92 @@ router.post('/onboarding/verify', async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+router.post('/onboarding/resend', async (req, res) => {
+  const { email } = req.body;
+  const normalisedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+  if (!normalisedEmail) {
+    return res.status(400).json({ message: 'Vui lòng cung cấp email quản trị nhà hàng.' });
+  }
+
+  try {
+    const restaurant = await Restaurant.findOne({ 'admin.email': normalisedEmail });
+    if (!restaurant) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản nhà hàng.' });
+    }
+
+    if (restaurant.approvalStatus !== 'approved') {
+      return res.status(403).json({ message: 'Hồ sơ nhà hàng chưa được duyệt.' });
+    }
+
+    if (restaurant.onboardingPasswordMustChange === false) {
+      return res.status(409).json({
+        message: 'Tài khoản đã được kích hoạt. Vui lòng đăng nhập bằng mật khẩu hiện tại.',
+      });
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+    const otpCode = generateOtpCode();
+    const otpHash = await bcrypt.hash(otpCode, 10);
+    const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+    restaurant.admin.password = temporaryPassword;
+    restaurant.onboardingOtpHash = otpHash;
+    restaurant.onboardingOtpExpiresAt = otpExpiresAt;
+    restaurant.onboardingOtpVerifiedAt = null;
+    restaurant.onboardingPasswordMustChange = true;
+    restaurant.onboardingEmailSentAt = new Date();
+
+    await restaurant.save();
+
+    const activationUrl = process.env.RESTAURANT_ONBOARDING_URL || 'http://localhost:3000/restaurant/activate';
+    const expiryMinutes = Math.max(1, Math.round(OTP_TTL_MS / 60000));
+
+    if (restaurant.admin?.email) {
+      const html = `
+        <h2>Yêu cầu gửi lại thông tin kích hoạt tài khoản</h2>
+        <p><strong>Nhà hàng:</strong> ${restaurant.name}</p>
+        <p><strong>Mật khẩu tạm thời mới:</strong> ${temporaryPassword}</p>
+        <p><strong>Mã OTP mới:</strong> ${otpCode}</p>
+        <p>OTP có hiệu lực trong ${expiryMinutes} phút. Vui lòng truy cập <a href="${activationUrl}">${activationUrl}</a> để nhập OTP và đổi mật khẩu.</p>
+        <p>Nếu bạn không yêu cầu thao tác này, vui lòng liên hệ đội hỗ trợ ngay lập tức.</p>
+      `;
+      const text = [
+        'Bạn vừa yêu cầu gửi lại thông tin kích hoạt tài khoản nhà hàng.',
+        `Nhà hàng: ${restaurant.name}`,
+        `Mật khẩu tạm thời mới: ${temporaryPassword}`,
+        `OTP mới: ${otpCode} (hiệu lực ${expiryMinutes} phút)`,
+        `Truy cập ${activationUrl} để nhập OTP và đổi mật khẩu.`,
+        'Nếu không phải bạn yêu cầu, hãy liên hệ đội hỗ trợ.',
+      ].join('\n');
+
+      try {
+        const resendResult = await sendEmail({
+          to: restaurant.admin.email,
+          subject: 'Thông tin kích hoạt tài khoản nhà hàng',
+          html,
+          text,
+        });
+
+        if (resendResult?.skipped || resendResult?.simulated) {
+          console.warn(
+            '[restaurant-email] Activation email resend simulated. Check mail transport configuration.'
+          );
+        }
+      } catch (err) {
+        console.error('Failed to resend activation email:', err.message);
+      }
+    }
+
+    return res.status(200).json({
+      message: 'Đã gửi lại mật khẩu tạm thời và mã OTP mới. Vui lòng kiểm tra email của bạn.',
+    });
+  } catch (error) {
+    console.error(error);
     res.status(500).json({ message: 'Server Error' });
   }
 });

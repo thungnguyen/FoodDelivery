@@ -62,6 +62,7 @@ const RestaurantOnboardingVerify = () => {
     otp: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [feedback, setFeedback] = useState({ type: '', text: '' });
 
   const handleChange = (e) => {
@@ -141,6 +142,44 @@ const RestaurantOnboardingVerify = () => {
     }
   };
 
+  const handleResendActivation = async () => {
+    const emailError = validatorMap.email(form.email || '');
+    if (emailError) {
+      setErrors((prev) => ({ ...prev, email: emailError }));
+      setFeedback({ type: 'error', text: emailError });
+      return;
+    }
+
+    setIsResending(true);
+    try {
+      const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/onboarding/resend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email.trim() }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setFeedback({
+          type: 'success',
+          text: data.message || 'Đã gửi lại thông tin kích hoạt. Vui lòng kiểm tra email.',
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          text: data.message || 'Không thể gửi lại thông tin kích hoạt. Vui lòng thử lại.',
+        });
+      }
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        text: 'Không thể gửi lại thông tin kích hoạt. Vui lòng thử lại.',
+      });
+    } finally {
+      setIsResending(false);
+    }
+  };
+
   return (
     <div className="restaurant-auth-wrapper">
       <div className="restaurant-auth-card">
@@ -200,6 +239,14 @@ const RestaurantOnboardingVerify = () => {
           </button>
         </form>
         <div className="auth-actions">
+          <button
+            type="button"
+            className="link-button"
+            onClick={handleResendActivation}
+            disabled={isResending}
+          >
+            {isResending ? 'Đang gửi lại...' : 'Gửi lại thông tin kích hoạt'}
+          </button>
           <button type="button" className="link-button" onClick={() => navigate('/restaurant/login')}>
             Quay lại đăng nhập
           </button>
