@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 import {
     DEFAULT_COMMISSION_RATE,
     DEFAULT_MAINTENANCE_FEE,
-    DEFAULT_MAINTENANCE_INTERVAL_DAYS
+    DEFAULT_MAINTENANCE_INTERVAL_DAYS,
+    DEFAULT_VAT_RATE
 } from "../config/financeConfig.js";
 
 const restaurantFinanceProfileSchema = new mongoose.Schema(
@@ -26,6 +27,11 @@ const restaurantFinanceProfileSchema = new mongoose.Schema(
             type: Number,
             default: DEFAULT_MAINTENANCE_INTERVAL_DAYS,
             min: 1
+        },
+        vatRate: {
+            type: Number,
+            default: DEFAULT_VAT_RATE,
+            min: 0
         },
         lastMaintenanceChargedAt: {
             type: Date

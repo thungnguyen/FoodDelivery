@@ -106,6 +106,9 @@ function RestaurantDashboard() {
     totalReviews: 0,
     totalOrders: 0,
   });
+  const [walletSnapshot, setWalletSnapshot] = useState(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState('');
   const ORDER_API_BASE = ORDER_SERVICE_URL;
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
@@ -288,46 +291,6 @@ function RestaurantDashboard() {
     }
   }, [API_BASE, handleUnauthorizedError]);
 
-  const fetchOrders = useCallback(
-    async ({ silent = false } = {}) => {
-      try {
-        if (!silent) {
-          setOrdersLoading(true);
-        }
-        setOrdersError('');
-        const token = getAuthToken(AUTH_ROLES.RESTAURANT);
-        const res = await fetch(`${ORDER_API_BASE}/api/orders`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 401) {
-          handleUnauthorizedError();
-          return;
-        }
-        const data = await res.json();
-        if (!isMountedRef.current) {
-          return;
-        }
-        if (res.ok) {
-          const sortedOrders = Array.isArray(data)
-            ? [...data].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-            : [];
-          setOrders(sortedOrders);
-        } else {
-          setOrdersError(data.message || 'Không thể tải danh sách đơn hàng.');
-        }
-      } catch (err) {
-        if (isMountedRef.current) {
-          setOrdersError('Có lỗi khi tải danh sách đơn hàng.');
-        }
-      } finally {
-        if (!silent && isMountedRef.current) {
-          setOrdersLoading(false);
-        }
-      }
-    },
-    [ORDER_API_BASE, handleUnauthorizedError]
-  );
-
   const fetchReviews = useCallback(
     async ({ silent = false } = {}) => {
       try {
@@ -369,6 +332,97 @@ function RestaurantDashboard() {
       }
     },
     [ORDER_API_BASE, handleUnauthorizedError]
+  );
+
+  const fetchWalletSummary = useCallback(
+    async ({ silent = false } = {}) => {
+      const restaurantId = restaurantIdRef.current;
+      if (!restaurantId) {
+        return;
+      }
+
+      try {
+        if (!silent) {
+          setWalletLoading(true);
+        }
+        setWalletError('');
+        const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+        if (!token) {
+          handleUnauthorizedError();
+          return;
+        }
+
+        const res = await fetch(
+          `${ORDER_API_BASE}/api/orders/finance/restaurants/${encodeURIComponent(
+            restaurantId
+          )}/wallet`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (res.status === 401) {
+          handleUnauthorizedError();
+          return;
+        }
+
+        const data = await res.json();
+        if (res.ok) {
+          setWalletSnapshot(data);
+        } else {
+          setWalletError(data.message || 'Không thể tải số dư ví');
+        }
+      } catch (error) {
+        console.error('Failed to fetch wallet summary:', error);
+        setWalletError('Không thể tải số dư ví');
+      } finally {
+        if (!silent) {
+          setWalletLoading(false);
+        }
+      }
+    },
+    [ORDER_API_BASE, handleUnauthorizedError]
+  );
+
+  const fetchOrders = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        if (!silent) {
+          setOrdersLoading(true);
+        }
+        setOrdersError('');
+        const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+        const res = await fetch(`${ORDER_API_BASE}/api/orders`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          handleUnauthorizedError();
+          return;
+        }
+        const data = await res.json();
+        if (!isMountedRef.current) {
+          return;
+        }
+        if (res.ok) {
+          const sortedOrders = Array.isArray(data)
+            ? [...data].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+            : [];
+          setOrders(sortedOrders);
+          fetchWalletSummary({ silent: true });
+        } else {
+          setOrdersError(data.message || 'Không thể tải danh sách đơn hàng.');
+        }
+      } catch (err) {
+        if (isMountedRef.current) {
+          setOrdersError('Có lỗi khi tải danh sách đơn hàng.');
+        }
+      } finally {
+        if (!silent && isMountedRef.current) {
+          setOrdersLoading(false);
+        }
+      }
+    },
+    [ORDER_API_BASE, handleUnauthorizedError, fetchWalletSummary]
   );
 
   const handleRealtimeEvent = useCallback(
@@ -689,12 +743,17 @@ function RestaurantDashboard() {
     let monthlyOrders = 0;
     let yearlyOrders = 0;
     let itemsGross = 0;
+    let itemsNetTotal = 0;
+    let vatTotal = 0;
     let shippingGross = 0;
     let restaurantShippingShare = 0;
     let driverShipping = 0;
+    let driverServiceFeeTotal = 0;
     let platformCommissionTotal = 0;
     let maintenanceFeeTotal = 0;
-    let restaurantNetTotal = 0;
+    let restaurantFoodNetTotal = 0;
+    let restaurantTakeHomeTotal = 0;
+    let taxLiabilityTotal = 0;
 
     const revenueTrendMap = new Map();
     const itemSalesMap = new Map();
@@ -752,13 +811,31 @@ function RestaurantDashboard() {
 
       if (order.financialSummary) {
         const summary = order.financialSummary;
-        itemsGross += Number(summary.grossItems || 0);
-        shippingGross += Number(summary.shippingFee || 0);
-        restaurantShippingShare += Number(summary.restaurantShippingShare || 0);
-        driverShipping += Number(summary.driverPayout || 0);
-        platformCommissionTotal += Number(summary.commissionAmount || 0);
-        maintenanceFeeTotal += Number(summary.maintenanceFee || 0);
-        restaurantNetTotal += Number(summary.netRestaurant || 0);
+        const grossItems = Number(summary.grossItems || 0);
+        const shippingFee = Number(summary.shippingFee || 0);
+        const vatAmount = Number(summary.vatAmount || summary.taxLiability || 0);
+        const itemsNet = Number(summary.itemsNet || grossItems - vatAmount);
+        const commissionAmount = Number(summary.commissionAmount || 0);
+        const maintenanceAmount = Number(summary.maintenanceFee || 0);
+        const restaurantShipping = Number(summary.restaurantShippingShare || 0);
+        const driverPayout = Number(summary.driverPayout || 0);
+        const driverServiceFee = Number(summary.driverServiceFee || 0);
+        const netRestaurantBase =
+          Number(summary.netRestaurant || itemsNet - commissionAmount - maintenanceAmount);
+        const taxLiability = Number(summary.taxLiability || vatAmount);
+
+        itemsGross += grossItems;
+        itemsNetTotal += itemsNet;
+        vatTotal += vatAmount;
+        taxLiabilityTotal += taxLiability;
+        shippingGross += shippingFee;
+        restaurantShippingShare += restaurantShipping;
+        driverShipping += driverPayout;
+        driverServiceFeeTotal += driverServiceFee;
+        platformCommissionTotal += commissionAmount;
+        maintenanceFeeTotal += maintenanceAmount;
+        restaurantFoodNetTotal += netRestaurantBase;
+        restaurantTakeHomeTotal += netRestaurantBase + restaurantShipping;
       }
     });
 
@@ -791,7 +868,8 @@ function RestaurantDashboard() {
     const pendingOrdersList = orders.filter((order) => pendingStatuses.has(order.status));
     const pendingRevenue = pendingOrdersList.reduce((sum, order) => sum + parseAmount(order), 0);
 
-    const restaurantItemShare = Math.max(0, itemsGross - platformCommissionTotal);
+    const restaurantNetAfterFees = restaurantFoodNetTotal;
+    const restaurantTotalDisbursement = restaurantTakeHomeTotal + taxLiabilityTotal;
     const platformRevenue = platformCommissionTotal + maintenanceFeeTotal;
 
     return {
@@ -813,13 +891,18 @@ function RestaurantDashboard() {
       topItems,
       paymentBreakdown,
       itemsGross,
+      itemsNetTotal,
+      vatTotal,
       shippingGross,
       restaurantShippingShare,
       driverShipping,
+      driverServiceFeeTotal,
       platformCommissionTotal,
       maintenanceFeeTotal,
-      restaurantNetTotal,
-      restaurantItemShare,
+      restaurantFoodNetTotal,
+      restaurantTakeHomeTotal,
+      taxLiabilityTotal,
+      restaurantTotalDisbursement,
       platformRevenue,
     };
   }, [orders]);
@@ -840,23 +923,34 @@ function RestaurantDashboard() {
     pendingOrders,
     revenueTrend,
     topItems,
-    paymentBreakdown,
-    itemsGross,
-    shippingGross,
-    restaurantShippingShare,
-    driverShipping,
-    platformCommissionTotal,
-    maintenanceFeeTotal,
-    restaurantNetTotal,
-    restaurantItemShare,
-    platformRevenue,
-  } = financialMetrics;
+  paymentBreakdown,
+  itemsGross,
+  itemsNetTotal,
+  vatTotal,
+  shippingGross,
+  restaurantShippingShare,
+  driverShipping,
+  driverServiceFeeTotal,
+  platformCommissionTotal,
+  maintenanceFeeTotal,
+  restaurantFoodNetTotal,
+  restaurantTakeHomeTotal,
+  taxLiabilityTotal,
+  restaurantTotalDisbursement,
+  platformRevenue,
+} = financialMetrics;
 
   useEffect(() => {
     fetchRestaurantProfile();
     fetchFoodItems();
     fetchOrders();
   }, [fetchRestaurantProfile, fetchFoodItems, fetchOrders]);
+
+  useEffect(() => {
+    if (restaurant && (restaurant._id || restaurant.id || restaurant.restaurantId)) {
+      fetchWalletSummary({ silent: true });
+    }
+  }, [restaurant, fetchWalletSummary]);
 
   useEffect(() => {
     if (activeTab === 'orders' || activeTab === 'finance') {
@@ -1106,6 +1200,20 @@ function RestaurantDashboard() {
       alert('Error updating availability');
     }
   };
+
+  const walletDetails = walletSnapshot?.wallet || null;
+  const walletBalance = walletDetails ? Number(walletDetails.balance || 0) : 0;
+  const walletStatus =
+    walletDetails?.status ||
+    (walletBalance > 0 ? 'positive' : walletBalance < 0 ? 'negative' : 'even');
+  const walletStatusLabel =
+    walletStatus === 'positive'
+      ? 'Nền tảng đang giữ hộ nhà hàng'
+      : walletStatus === 'negative'
+      ? 'Nhà hàng cần thanh toán cho nền tảng'
+      : 'Không còn công nợ';
+  const walletUpdatedAt =
+    walletDetails?.updatedAt || walletSnapshot?.lastFinancialUpdate || null;
 
   return (
     <div className="dashboard-container">
@@ -1717,38 +1825,81 @@ function RestaurantDashboard() {
                 </div>
 
                 <div className="finance-flow-grid">
-                  <div className="finance-card flow restaurant">
-                    <h3>80% món cho nhà hàng</h3>
-                    <p>{formatCurrency(restaurantItemShare)}</p>
-                    <span>Tổng giá trị món: {formatCurrency(itemsGross)}</span>
+                  <div className={`finance-card balance ${walletStatus}`}>
+                    <h3>Số dư ví nhà hàng</h3>
+                    {walletLoading ? (
+                      <p>Đang tải số dư...</p>
+                    ) : walletError ? (
+                      <p className="error-text">{walletError}</p>
+                    ) : (
+                      <>
+                        <p className="balance-amount">{formatCurrency(walletBalance)}</p>
+                        <span className="status-label">{walletStatusLabel}</span>
+                        {walletUpdatedAt && (
+                          <small className="text-muted">
+                            Cập nhật: {new Date(walletUpdatedAt).toLocaleString('vi-VN')}
+                          </small>
+                        )}
+                      </>
+                    )}
                   </div>
-                  <div className="finance-card flow platform">
-                    <h3>20% hoa hồng nền tảng</h3>
-                    <p>{formatCurrency(platformCommissionTotal)}</p>
-                    <span>Phí duy trì: {formatCurrency(maintenanceFeeTotal)}</span>
+                  <div className="finance-card statement">
+                    <h3>Sao kê món ăn</h3>
+                    <ul className="finance-list statement">
+                      <li>
+                        <span>Giá trị món (Gross)</span>
+                        <strong>{formatCurrency(itemsGross)}</strong>
+                      </li>
+                      <li className="negative">
+                        <span>(-) Thuế VAT</span>
+                        <strong>{formatCurrency(vatTotal)}</strong>
+                      </li>
+                      <li className="subtotal">
+                        <span>= Món trước VAT</span>
+                        <strong>{formatCurrency(itemsNetTotal)}</strong>
+                      </li>
+                      <li className="negative">
+                        <span>(-) Hoa hồng nền tảng</span>
+                        <strong>{formatCurrency(platformCommissionTotal)}</strong>
+                      </li>
+                      <li className="negative">
+                        <span>(-) Phí duy trì</span>
+                        <strong>{formatCurrency(maintenanceFeeTotal)}</strong>
+                      </li>
+                      <li className="subtotal">
+                        <span>= Món ròng</span>
+                        <strong>{formatCurrency(restaurantFoodNetTotal)}</strong>
+                      </li>
+                      <li className="positive">
+                        <span>+ Nhà hàng hưởng phí ship</span>
+                        <strong>{formatCurrency(restaurantShippingShare)}</strong>
+                      </li>
+                      <li className="info">
+                        <span>+ VAT chờ nộp</span>
+                        <strong>{formatCurrency(taxLiabilityTotal)}</strong>
+                      </li>
+                      <li className="highlight">
+                        <span>= Tổng tiền nền tảng giữ hộ</span>
+                        <strong>{formatCurrency(restaurantTotalDisbursement)}</strong>
+                      </li>
+                    </ul>
                   </div>
-                  <div className="finance-card flow shipping">
-                    <h3>Phí giao hàng đã thu</h3>
-                    <p>{formatCurrency(shippingGross)}</p>
-                    <span>90% tài xế · 10% nhà hàng</span>
-                  </div>
-                  <div className="finance-card flow driver">
-                    <h3>Chi tài xế (90% ship)</h3>
-                    <p>{formatCurrency(driverShipping)}</p>
-                  </div>
-                  <div className="finance-card flow reward">
-                    <h3>Nhà hàng hưởng 10% ship</h3>
-                    <p>{formatCurrency(restaurantShippingShare)}</p>
-                  </div>
-                  <div className="finance-card flow highlight">
-                    <h3>Nhà hàng nhận ròng</h3>
-                    <p>{formatCurrency(restaurantNetTotal)}</p>
-                    <span>= 80% món - hoa hồng - phí duy trì + 10% ship</span>
-                  </div>
-                  <div className="finance-card flow total">
-                    <h3>Thu ròng nền tảng</h3>
-                    <p>{formatCurrency(platformRevenue)}</p>
-                    <span>Hoa hồng món + phí duy trì</span>
+                  <div className="finance-card shipping">
+                    <h3>Phí giao hàng</h3>
+                    <ul className="finance-list compact">
+                      <li>
+                        <span>Phí ship thu khách</span>
+                        <strong>{formatCurrency(shippingGross)}</strong>
+                      </li>
+                      <li>
+                        <span>Tài xế nhận</span>
+                        <strong>{formatCurrency(driverShipping)}</strong>
+                      </li>
+                      <li>
+                        <span>Phí dịch vụ tài xế</span>
+                        <strong>{formatCurrency(driverServiceFeeTotal)}</strong>
+                      </li>
+                    </ul>
                   </div>
                 </div>
 

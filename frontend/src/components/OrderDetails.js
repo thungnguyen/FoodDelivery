@@ -169,7 +169,15 @@ function OrderDetails() {
 
   const costSummary = useMemo(() => {
     if (!order) {
-      return { itemsTotal: 0, shippingFee: 0, totalPrice: 0 };
+      return {
+        itemsTotal: 0,
+        itemsNet: 0,
+        vatAmount: 0,
+        shippingFee: 0,
+        serviceFee: 0,
+        driverNet: 0,
+        totalPrice: 0,
+      };
     }
     const items = Array.isArray(order.items) ? order.items : [];
     const derivedItemsTotal = roundCurrency(
@@ -186,6 +194,27 @@ function OrderDetails() {
         ? Number(order.shippingFee)
         : computeShippingFee(items)
     );
+    const summary = order.financialSummary || {};
+    const vatAmount = roundCurrency(
+      Number.isFinite(Number(summary.vatAmount))
+        ? Number(summary.vatAmount)
+        : Number.isFinite(Number(summary.taxLiability))
+        ? Number(summary.taxLiability)
+        : 0
+    );
+    const itemsNet = roundCurrency(
+      Number.isFinite(Number(summary.itemsNet))
+        ? Number(summary.itemsNet)
+        : roundCurrency(derivedItemsTotal - vatAmount)
+    );
+    const serviceFee = roundCurrency(
+      Number.isFinite(Number(summary.driverServiceFee))
+        ? Number(summary.driverServiceFee)
+        : 0
+    );
+    const driverNet = roundCurrency(
+      Number.isFinite(Number(summary.driverPayout)) ? Number(summary.driverPayout) : 0
+    );
     const derivedTotal = roundCurrency(
       Number.isFinite(Number(order.totalPrice))
         ? Number(order.totalPrice)
@@ -194,7 +223,11 @@ function OrderDetails() {
 
     return {
       itemsTotal: derivedItemsTotal,
+      itemsNet,
+      vatAmount,
       shippingFee: derivedShipping,
+      serviceFee,
+      driverNet,
       totalPrice: derivedTotal,
     };
   }, [order]);
@@ -299,9 +332,13 @@ function OrderDetails() {
     doc.setFontSize(13);
     doc.setTextColor(80, 80, 80);
     doc.setFont('Roboto', 'normal', 'Identity-H');
-    doc.text(`Tạm tính: ${formatCurrency(costSummary.itemsTotal)}`, marginX, currentY);
+    doc.text(`Giá món (chưa VAT): ${formatCurrency(costSummary.itemsNet)}`, marginX, currentY);
+    currentY += 8;
+    doc.text(`VAT: ${formatCurrency(costSummary.vatAmount)}`, marginX, currentY);
     currentY += 8;
     doc.text(`Phí giao hàng: ${formatCurrency(costSummary.shippingFee)}`, marginX, currentY);
+    currentY += 8;
+    doc.text(`Phí dịch vụ: ${formatCurrency(costSummary.serviceFee)}`, marginX, currentY);
     currentY += 8;
     doc.setTextColor(30, 90, 200);
     doc.setFont('Roboto', 'bold', 'Identity-H');
@@ -434,12 +471,20 @@ function OrderDetails() {
 
             <div className="bg-light rounded-3 p-3 mt-4">
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <span className="text-muted">Tạm tính</span>
-                <span className="fw-semibold">{formatCurrency(costSummary.itemsTotal)}</span>
+                <span className="text-muted">Giá món (chưa VAT)</span>
+                <span className="fw-semibold">{formatCurrency(costSummary.itemsNet)}</span>
+              </div>
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <span className="text-muted">VAT</span>
+                <span className="fw-semibold">{formatCurrency(costSummary.vatAmount)}</span>
               </div>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <span className="text-muted">Phí giao hàng</span>
                 <span className="fw-semibold">{formatCurrency(costSummary.shippingFee)}</span>
+              </div>
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <span className="text-muted">Phí dịch vụ</span>
+                <span className="fw-semibold">{formatCurrency(costSummary.serviceFee)}</span>
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <span className="text-muted">Tổng cộng</span>

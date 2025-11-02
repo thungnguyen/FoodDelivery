@@ -570,6 +570,21 @@ function DeliveryCard({
   const orderTotal = formatCurrency(
     delivery.orderTotal || delivery.totalPrice || 0
   );
+  const financials = delivery.orderFinancials || {};
+  const shippingGrossRaw = Number(financials.shippingFee ?? 0);
+  const driverNetRaw = Number(
+    financials.driverNet ??
+      financials.driverPayout ??
+      delivery.totalEarnings ??
+      0
+  );
+  const driverServiceFeeRaw =
+    financials.driverServiceFee != null
+      ? Number(financials.driverServiceFee)
+      : Math.max(0, shippingGrossRaw - driverNetRaw);
+  const shippingGross = formatCurrency(shippingGrossRaw);
+  const driverNetShipping = formatCurrency(driverNetRaw);
+  const driverServiceFee = formatCurrency(driverServiceFeeRaw);
   const customerPhone = formatPhoneNumber(delivery.customerPhone);
   const earningsLabel = isHistory ? "Thu nhập thực nhận" : "Thu nhập dự kiến";
 
@@ -607,6 +622,9 @@ function DeliveryCard({
         <div>
           <h4>Tài chính</h4>
           <p>Tổng đơn: {orderTotal}</p>
+          <p>Phí ship gộp: {shippingGross}</p>
+          <p>Phí dịch vụ tài xế: {driverServiceFee}</p>
+          <p>Thu nhập ship ròng: {driverNetShipping}</p>
           <p>
             {earningsLabel}: {earnings}
           </p>

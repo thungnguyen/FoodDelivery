@@ -8,6 +8,7 @@ import {
 import {
   updateOrderStatus,
   fetchAwaitingOrders,
+  fetchOrdersByIds,
 } from "../utils/orderServiceClient.js";
 
 const STATUS_TRANSITIONS = {
@@ -30,6 +31,7 @@ const ORDER_STATUS_MAPPING = {
 };
 
 const TERMINAL_STATUSES = new Set(["delivered", "failed", "cancelled"]);
+const DRIVER_SHIPPING_SHARE = 0.9;
 
 const appendHistory = (delivery, status, note) => {
   delivery.statusHistory.push({
@@ -222,11 +224,49 @@ export const createDelivery = async (req, res) => {
 export const getDriverDeliveries = async (req, res) => {
   try {
     const driverId = req.driver;
-    const deliveries = await Delivery.find({ driver: driverId }).sort({
+    const deliveries = await Delivery.find({ driver: driverId })
+      .sort({
       createdAt: -1,
-    });
+    })
+      .lean();
+
     const stats = buildStats(deliveries);
-    res.status(200).json({ success: true, deliveries, stats });
+
+    const ordersMap = await fetchOrdersByIds(
+      deliveries.map((delivery) => delivery.orderId),
+      driverId
+    );
+
+    const enriched = deliveries.map((delivery) => {
+      const order = delivery.orderId ? ordersMap[delivery.orderId] || null : null;
+      const summary = order?.financialSummary || {};
+      const rawShippingFee =
+        Number(order?.shippingFee ?? summary?.shippingFee ?? 0) || 0;
+      const driverNet =
+        Number(summary?.driverPayout ?? delivery.totalEarnings ?? 0) || 0;
+      const driverServiceFee =
+        rawShippingFee > 0
+          ? Math.max(0, Math.round((rawShippingFee - driverNet) * 100) / 100)
+          : 0;
+
+      return {
+        ...delivery,
+        orderFinancials: {
+          fundSource: summary?.fundSource || null,
+          shippingFee: rawShippingFee,
+          driverNet,
+          driverServiceFee,
+          vatAmount: Number(summary?.vatAmount || 0),
+          vatRate:
+            typeof summary?.vatRate === "number" ? summary.vatRate : null,
+          commissionAmount: Number(summary?.commissionAmount || 0),
+          maintenanceFee: Number(summary?.maintenanceFee || 0),
+        },
+        financialSummary: summary && Object.keys(summary).length ? summary : undefined,
+      };
+    });
+
+    res.status(200).json({ success: true, deliveries: enriched, stats });
   } catch (error) {
     console.error("🚨 Get deliveries error:", error);
     res
@@ -308,11 +348,20 @@ export const getAvailableDeliveries = async (req, res) => {
         const restaurant = order.restaurantId
           ? restaurantMap[order.restaurantId]
           : null;
-        const totalPrice = Number(order.totalPrice || 0);
-        const estimatedPayout = Math.max(
-          15000,
-          Math.round(totalPrice * 0.12)
-        );
+        const summary = order.financialSummary || {};
+        const shippingFee = Number(order.shippingFee || summary.shippingFee || 0) || 0;
+        const driverNet =
+          Number(summary.driverPayout || 0) ||
+          (shippingFee > 0 ? Math.round(shippingFee * DRIVER_SHIPPING_SHARE) : 0);
+        const driverServiceFee =
+          shippingFee > 0
+            ? Math.max(0, Math.round((shippingFee - driverNet) * 100) / 100)
+            : 0;
+        const estimatedPayout = Math.max(driverNet, 0);
+        const fundSource =
+          summary.fundSource ||
+          ((order.paymentMethod || "").toLowerCase() === "card" ? "online" : "cod");
+
         return {
           id: order._id || order.id,
           orderId: order._id || order.id,
@@ -328,6 +377,15 @@ export const getAvailableDeliveries = async (req, res) => {
           status: order.status,
           createdAt: order.createdAt,
           estimatedPayout,
+          orderFinancials: {
+            fundSource,
+            shippingFee,
+            driverNet,
+            driverServiceFee,
+            vatAmount: Number(summary.vatAmount || 0),
+            vatRate:
+              typeof summary.vatRate === "number" ? summary.vatRate : null,
+          },
         };
       });
 
@@ -346,16 +404,49 @@ export const getAvailableDeliveries = async (req, res) => {
 
 export const getDelivery = async (req, res) => {
   try {
-    const delivery = await Delivery.findById(req.params.id);
+    const delivery = await Delivery.findById(req.params.id).lean();
     if (!delivery) {
       return res
         .status(404)
         .json({ success: false, message: "Delivery not found" });
     }
 
+    const orderData =
+      delivery.orderId &&
+      (await fetchOrdersByIds([delivery.orderId], req.driver))[delivery.orderId];
+    const summary = orderData?.financialSummary || {};
+    const shippingFee =
+      Number(orderData?.shippingFee || summary.shippingFee || 0) || 0;
+    const driverNet =
+      Number(summary?.driverPayout || 0) ||
+      (shippingFee > 0 ? Math.round(shippingFee * DRIVER_SHIPPING_SHARE) : 0);
+    const driverServiceFee =
+      shippingFee > 0
+        ? Math.max(0, Math.round((shippingFee - driverNet) * 100) / 100)
+        : 0;
+
     res.json({
       success: true,
-      delivery,
+      delivery: {
+        ...delivery,
+        orderFinancials: {
+          fundSource:
+            summary?.fundSource ||
+            ((orderData?.paymentMethod || "").toLowerCase() === "card"
+              ? "online"
+              : "cod"),
+          shippingFee,
+          driverNet,
+          driverServiceFee,
+          vatAmount: Number(summary?.vatAmount || 0),
+          vatRate:
+            typeof summary?.vatRate === "number" ? summary.vatRate : null,
+          commissionAmount: Number(summary?.commissionAmount || 0),
+          maintenanceFee: Number(summary?.maintenanceFee || 0),
+        },
+        financialSummary:
+          summary && Object.keys(summary).length ? summary : undefined,
+      },
     });
   } catch (error) {
     console.error("🚨 Get delivery error:", error);
@@ -466,7 +557,7 @@ export const updateDeliveryStatus = async (req, res) => {
 export const getDeliveryByOrderId = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const delivery = await Delivery.findOne({ orderId });
+    const delivery = await Delivery.findOne({ orderId }).lean();
 
     if (!delivery) {
       return res
@@ -474,9 +565,42 @@ export const getDeliveryByOrderId = async (req, res) => {
         .json({ success: false, message: "Delivery not found by order ID" });
     }
 
+    const orderData =
+      orderId &&
+      (await fetchOrdersByIds([orderId], req.driver))[orderId];
+    const summary = orderData?.financialSummary || {};
+    const shippingFee =
+      Number(orderData?.shippingFee || summary.shippingFee || 0) || 0;
+    const driverNet =
+      Number(summary?.driverPayout || 0) ||
+      (shippingFee > 0 ? Math.round(shippingFee * DRIVER_SHIPPING_SHARE) : 0);
+    const driverServiceFee =
+      shippingFee > 0
+        ? Math.max(0, Math.round((shippingFee - driverNet) * 100) / 100)
+        : 0;
+
     res.json({
       success: true,
-      delivery,
+      delivery: {
+        ...delivery,
+        orderFinancials: {
+          fundSource:
+            summary?.fundSource ||
+            ((orderData?.paymentMethod || "").toLowerCase() === "card"
+              ? "online"
+              : "cod"),
+          shippingFee,
+          driverNet,
+          driverServiceFee,
+          vatAmount: Number(summary?.vatAmount || 0),
+          vatRate:
+            typeof summary?.vatRate === "number" ? summary.vatRate : null,
+          commissionAmount: Number(summary?.commissionAmount || 0),
+          maintenanceFee: Number(summary?.maintenanceFee || 0),
+        },
+        financialSummary:
+          summary && Object.keys(summary).length ? summary : undefined,
+      },
     });
   } catch (error) {
     console.error("🚨 Get delivery by order ID error:", error);

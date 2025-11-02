@@ -6,6 +6,7 @@ import connectDB from "./config/db.js";
 import cors from "cors";
 import orderRoutes from "./routes/orderRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import financeRoutes from "./routes/financeRoutes.js";
 
 dotenv.config();
 connectDB();
@@ -25,6 +26,7 @@ app.use(express.json());
 // Routes
 app.use("/api/orders", orderRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/orders/finance", financeRoutes);
 
 
 // WebSocket Connection

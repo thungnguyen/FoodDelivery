@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { FUND_SOURCES, LEDGER_ENTRY_TYPES } from "../config/financeConfig.js";
+import { FUND_SOURCES, LEDGER_ENTRY_TYPES, LEDGER_TRANSACTION_TYPES } from "../config/financeConfig.js";
 
 const ledgerEntrySchema = new mongoose.Schema(
     {
@@ -17,6 +17,11 @@ const ledgerEntrySchema = new mongoose.Schema(
             type: String,
             enum: Object.values(LEDGER_ENTRY_TYPES),
             required: true
+        },
+        transactionType: {
+            type: String,
+            enum: Object.values(LEDGER_TRANSACTION_TYPES),
+            default: LEDGER_TRANSACTION_TYPES.CAPTURE
         },
         dedupKey: {
             type: String,

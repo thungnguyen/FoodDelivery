@@ -272,7 +272,7 @@ router.post('/onboarding/verify', async (req, res) => {
       restaurant.onboardingOtpHash = undefined;
       restaurant.onboardingOtpExpiresAt = undefined;
       restaurant.onboardingPasswordMustChange = true;
-      await restaurant.save();
+      await restaurant.save({ validateBeforeSave: false });
       return res.status(410).json({
         message: 'Mã OTP đã hết hạn. Vui lòng liên hệ Super Admin để được cấp lại thông tin đăng nhập.',
       });
@@ -292,7 +292,7 @@ router.post('/onboarding/verify', async (req, res) => {
     restaurant.onboardingOtpExpiresAt = undefined;
     restaurant.onboardingOtpVerifiedAt = new Date();
     restaurant.onboardingPasswordMustChange = true;
-    await restaurant.save();
+    await restaurant.save({ validateBeforeSave: false });
 
     const resetToken = jwt.sign(
       {
@@ -328,6 +328,12 @@ router.post('/onboarding/resend', async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy tài khoản nhà hàng.' });
     }
 
+    if (!restaurant.admin || typeof restaurant.admin !== 'object') {
+      restaurant.admin = { email: normalisedEmail };
+    } else if (!restaurant.admin.email) {
+      restaurant.admin.email = normalisedEmail;
+    }
+
     if (restaurant.approvalStatus !== 'approved') {
       return res.status(403).json({ message: 'Hồ sơ nhà hàng chưa được duyệt.' });
     }
@@ -344,13 +350,14 @@ router.post('/onboarding/resend', async (req, res) => {
     const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     restaurant.admin.password = temporaryPassword;
+    restaurant.markModified('admin');
     restaurant.onboardingOtpHash = otpHash;
     restaurant.onboardingOtpExpiresAt = otpExpiresAt;
     restaurant.onboardingOtpVerifiedAt = null;
     restaurant.onboardingPasswordMustChange = true;
     restaurant.onboardingEmailSentAt = new Date();
 
-    await restaurant.save();
+    await restaurant.save({ validateBeforeSave: false });
 
     const activationUrl = process.env.RESTAURANT_ONBOARDING_URL || 'http://localhost:3000/restaurant/activate';
     const expiryMinutes = Math.max(1, Math.round(OTP_TTL_MS / 60000));
@@ -438,7 +445,7 @@ router.post('/onboarding/set-password', async (req, res) => {
 
     restaurant.admin.password = newPassword;
     restaurant.onboardingPasswordMustChange = false;
-    await restaurant.save();
+    await restaurant.save({ validateBeforeSave: false });
 
     return res.status(200).json({
       message: 'Đổi mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới.',

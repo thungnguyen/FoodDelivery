@@ -1208,6 +1208,115 @@ body {
   margin: 24px 0 12px;
 }
 
+.finance-card.balance,
+.finance-card.statement,
+.finance-card.shipping {
+  border-radius: 16px;
+  padding: 20px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.finance-card.balance {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.16), rgba(59, 130, 246, 0.12));
+  border: none;
+  color: #0f172a;
+}
+
+.finance-card.balance.positive {
+  border-left: 4px solid #22c55e;
+}
+
+.finance-card.balance.negative {
+  border-left: 4px solid #ef4444;
+}
+
+.finance-card.balance.even {
+  border-left: 4px solid #38bdf8;
+}
+
+.balance-amount {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.status-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.finance-card.statement h3,
+.finance-card.shipping h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.finance-list.statement {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.finance-list.statement li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  color: #1f2937;
+}
+
+.finance-list.statement li strong {
+  font-weight: 700;
+}
+
+.finance-list.statement li.negative strong,
+.finance-list.statement li.negative span {
+  color: #ef4444;
+}
+
+.finance-list.statement li.positive strong,
+.finance-list.statement li.positive span {
+  color: #16a34a;
+}
+
+.finance-list.statement li.info strong,
+.finance-list.statement li.info span {
+  color: #2563eb;
+}
+
+.finance-list.statement li.highlight {
+  font-weight: 700;
+  border-top: 1px dashed rgba(15, 23, 42, 0.16);
+  padding-top: 6px;
+}
+
+.finance-list.statement li.subtotal span {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.finance-card.shipping .finance-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+}
+
+.finance-card.shipping .finance-list li strong {
+  font-weight: 700;
+}
+
 .finance-card.flow {
   border-radius: 16px;
   padding: 20px;

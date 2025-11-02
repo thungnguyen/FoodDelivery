@@ -624,6 +624,22 @@ function Orders() {
           ? Number(order.totalPrice)
           : itemsTotal + shippingFee
       );
+      const summary = order.financialSummary || {};
+      const vatAmount = roundCurrency(
+        Number.isFinite(Number(summary.vatAmount))
+          ? Number(summary.vatAmount)
+          : Number.isFinite(Number(summary.taxLiability))
+          ? Number(summary.taxLiability)
+          : 0
+      );
+      const itemsNet = roundCurrency(
+        Number.isFinite(Number(summary.itemsNet))
+          ? Number(summary.itemsNet)
+          : itemsTotal - vatAmount
+      );
+      const serviceFee = roundCurrency(
+        Number.isFinite(Number(summary.driverServiceFee)) ? Number(summary.driverServiceFee) : 0
+      );
 
       return (
         <div key={order._id} className="bg-white rounded-3 shadow-sm p-4 mb-4 border border-light">
@@ -663,7 +679,7 @@ function Orders() {
             <div>
               <div className="fw-bold fs-5">Tổng cộng: {formatCurrency(grandTotal)}</div>
               <div className="text-muted small">
-                Tạm tính {formatCurrency(itemsTotal)} • Phí vận chuyển {formatCurrency(shippingFee)}
+                Giá món (chưa VAT) {formatCurrency(itemsNet)} • VAT {formatCurrency(vatAmount)} • Phí vận chuyển {formatCurrency(shippingFee)} • Phí dịch vụ {formatCurrency(serviceFee)}
               </div>
             </div>
             <div className="d-flex gap-2">

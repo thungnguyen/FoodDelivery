@@ -7,9 +7,11 @@ import {
     DRIVER_POOL_OWNER_ID,
     FUND_SOURCES,
     LEDGER_ENTRY_TYPES,
+    LEDGER_TRANSACTION_TYPES,
     PLATFORM_OWNER_ID,
     SHIPPING_SHARES,
-    WALLET_TYPES
+    WALLET_TYPES,
+    DEFAULT_VAT_RATE
 } from "../config/financeConfig.js";
 
 const WALLET_NORMAL_BALANCE = {
@@ -38,6 +40,37 @@ const splitShippingFee = (shippingFee) => {
     return {
         driverShare,
         restaurantShare
+    };
+};
+
+const resolveVatRate = (profile) => {
+    if (profile && typeof profile.vatRate === "number" && profile.vatRate >= 0) {
+        return profile.vatRate;
+    }
+    return DEFAULT_VAT_RATE;
+};
+
+const computeVatBreakdown = (grossAmount, vatRateInput) => {
+    const gross = roundCurrency(grossAmount);
+    const rate = typeof vatRateInput === "number" && vatRateInput >= 0 ? vatRateInput : DEFAULT_VAT_RATE;
+    if (!gross || rate === 0) {
+        return {
+            vatRate: rate,
+            itemsNet: gross,
+            vatAmount: 0
+        };
+    }
+    const divisor = 1 + rate;
+    let itemsNet = roundCurrency(gross / divisor);
+    let vatAmount = roundCurrency(gross - itemsNet);
+    const reconciliation = roundCurrency(itemsNet + vatAmount);
+    if (reconciliation !== gross) {
+        itemsNet = roundCurrency(gross - vatAmount);
+    }
+    return {
+        vatRate: rate,
+        itemsNet,
+        vatAmount
     };
 };
 
@@ -94,6 +127,7 @@ const recordLedgerEntry = async ({
     orderId,
     fundSource,
     entryType,
+    transactionType = LEDGER_TRANSACTION_TYPES.CAPTURE,
     dedupKey = "primary",
     amount,
     debitWalletType,
@@ -119,6 +153,7 @@ const recordLedgerEntry = async ({
                     orderId,
                     fundSource,
                     entryType,
+                    transactionType,
                     dedupKey,
                     amount: rounded,
                     debitWallet: debitWallet._id,
@@ -212,6 +247,7 @@ const applyMaintenanceIfDue = async ({ order, profile, fundSource, session }) =>
         orderId: order._id,
         fundSource,
         entryType: LEDGER_ENTRY_TYPES.MAINTENANCE_FEE,
+        transactionType: LEDGER_TRANSACTION_TYPES.SUBSCRIPTION_FEE,
         dedupKey,
         amount: maintenanceFee,
         debitWalletType: WALLET_TYPES.RESTAURANT_LIABILITY,
@@ -284,60 +320,97 @@ const processOnlineCompletion = async ({ order, profile, session }) => {
     const summary = {
         fundSource,
         grossItems: roundCurrency(order.itemsTotal || 0),
+        itemsNet: 0,
+        vatRate: 0,
+        vatAmount: 0,
+        taxLiability: 0,
         shippingFee: roundCurrency(order.shippingFee || 0),
         commissionAmount: 0,
         maintenanceFee: 0,
         driverPayout: 0,
+        driverServiceFee: 0,
         restaurantShippingShare: 0,
         netRestaurant: 0,
+        restaurantWalletBalance: 0,
+        totalHeld: 0,
         settlementDirection: "payable_to_restaurant"
     };
 
+    const vatDetails = computeVatBreakdown(summary.grossItems, resolveVatRate(profile));
+    summary.itemsNet = vatDetails.itemsNet;
+    summary.vatAmount = vatDetails.vatAmount;
+    summary.vatRate = vatDetails.vatRate;
+    summary.taxLiability = vatDetails.vatAmount;
+
     let restaurantWallet = null;
 
-    if (summary.grossItems > 0) {
+    if (summary.itemsNet > 0) {
         const capture = await recordLedgerEntry({
             orderId: order._id,
             fundSource,
             entryType: LEDGER_ENTRY_TYPES.ONLINE_ITEM_CAPTURE,
+            transactionType: LEDGER_TRANSACTION_TYPES.CAPTURE,
             dedupKey: "items",
-            amount: summary.grossItems,
+            amount: summary.itemsNet,
             debitWalletType: WALLET_TYPES.PLATFORM_MAIN,
             debitOwnerId: PLATFORM_OWNER_ID,
             creditWalletType: WALLET_TYPES.RESTAURANT_LIABILITY,
             creditOwnerId: order.restaurantId,
-            description: "Online order items captured",
+            description: "Online order items captured (net of VAT)",
             metadata: {
-                restaurantId: order.restaurantId
+                restaurantId: order.restaurantId,
+                vatRate: summary.vatRate
             },
             session
         });
         restaurantWallet = capture.creditWallet || restaurantWallet;
     }
 
+    if (summary.vatAmount > 0) {
+        const vatCapture = await recordLedgerEntry({
+            orderId: order._id,
+            fundSource,
+            entryType: LEDGER_ENTRY_TYPES.ONLINE_VAT_CAPTURE,
+            transactionType: LEDGER_TRANSACTION_TYPES.VAT,
+            dedupKey: "items:vat",
+            amount: summary.vatAmount,
+            debitWalletType: WALLET_TYPES.PLATFORM_MAIN,
+            debitOwnerId: PLATFORM_OWNER_ID,
+            creditWalletType: WALLET_TYPES.RESTAURANT_LIABILITY,
+            creditOwnerId: order.restaurantId,
+            description: "VAT liability captured for restaurant",
+            metadata: {
+                restaurantId: order.restaurantId,
+                vatRate: summary.vatRate
+            },
+            session
+        });
+        restaurantWallet = vatCapture.creditWallet || restaurantWallet;
+    }
+
     if (summary.shippingFee > 0) {
         const { driverShare, restaurantShare } = splitShippingFee(summary.shippingFee);
+        summary.driverPayout = driverShare;
+        summary.driverServiceFee = roundCurrency(summary.shippingFee - driverShare);
 
         if (driverShare > 0) {
-            const shippingDriver = await recordLedgerEntry({
+            await recordLedgerEntry({
                 orderId: order._id,
                 fundSource,
                 entryType: LEDGER_ENTRY_TYPES.ONLINE_SHIPPING_CAPTURE,
+                transactionType: LEDGER_TRANSACTION_TYPES.SHIPPING,
                 dedupKey: "shipping:driver",
                 amount: driverShare,
                 debitWalletType: WALLET_TYPES.PLATFORM_MAIN,
                 debitOwnerId: PLATFORM_OWNER_ID,
                 creditWalletType: WALLET_TYPES.DRIVER_LIABILITY,
                 creditOwnerId: DRIVER_POOL_OWNER_ID,
-                description: "Online order shipping fee paid to driver",
+                description: "Online order shipping fee allocated to driver",
                 metadata: {
                     restaurantId: order.restaurantId
                 },
                 session
             });
-            if (shippingDriver.creditWallet) {
-                summary.driverPayout = driverShare;
-            }
         }
 
         if (restaurantShare > 0) {
@@ -345,6 +418,7 @@ const processOnlineCompletion = async ({ order, profile, session }) => {
                 orderId: order._id,
                 fundSource,
                 entryType: LEDGER_ENTRY_TYPES.ONLINE_SHIPPING_RESTAURANT_SHARE,
+                transactionType: LEDGER_TRANSACTION_TYPES.SHIPPING,
                 dedupKey: "shipping:restaurant",
                 amount: restaurantShare,
                 debitWalletType: WALLET_TYPES.PLATFORM_MAIN,
@@ -360,14 +434,17 @@ const processOnlineCompletion = async ({ order, profile, session }) => {
             summary.restaurantShippingShare = restaurantShare;
             restaurantWallet = shippingRestaurant.creditWallet || restaurantWallet;
         }
+    } else {
+        summary.driverServiceFee = 0;
     }
 
-    const commissionAmount = computeCommissionAmount(summary.grossItems, profile.commissionRate);
+    const commissionAmount = computeCommissionAmount(summary.itemsNet, profile.commissionRate);
     if (commissionAmount > 0) {
         const commission = await recordLedgerEntry({
             orderId: order._id,
             fundSource,
             entryType: LEDGER_ENTRY_TYPES.ONLINE_COMMISSION,
+            transactionType: LEDGER_TRANSACTION_TYPES.COMMISSION,
             dedupKey: "commission",
             amount: commissionAmount,
             debitWalletType: WALLET_TYPES.RESTAURANT_LIABILITY,
@@ -393,21 +470,21 @@ const processOnlineCompletion = async ({ order, profile, session }) => {
     });
     summary.maintenanceFee = maintenanceFee;
 
-    if (!restaurantWallet) {
-        restaurantWallet = await ensureWallet({
-            walletType: WALLET_TYPES.RESTAURANT_LIABILITY,
-            ownerId: order.restaurantId,
-            session
-        });
-    }
+    restaurantWallet = await ensureWallet({
+        walletType: WALLET_TYPES.RESTAURANT_LIABILITY,
+        ownerId: order.restaurantId,
+        session
+    });
 
-    summary.netRestaurant = roundCurrency(
-        summary.grossItems - summary.commissionAmount - summary.maintenanceFee + summary.restaurantShippingShare
-    );
-
+    summary.netRestaurant = roundCurrency(summary.itemsNet - summary.commissionAmount - summary.maintenanceFee);
     summary.restaurantWalletBalance = roundCurrency(restaurantWallet.balance);
+    summary.totalHeld = summary.restaurantWalletBalance;
     summary.settlementDirection =
-        summary.netRestaurant > 0 ? "payable_to_restaurant" : summary.netRestaurant < 0 ? "collect_from_restaurant" : "even";
+        summary.restaurantWalletBalance > 0
+            ? "payable_to_restaurant"
+            : summary.restaurantWalletBalance < 0
+            ? "collect_from_restaurant"
+            : "even";
 
     return summary;
 };
@@ -417,32 +494,48 @@ const processCodCompletion = async ({ order, profile, session }) => {
     const summary = {
         fundSource,
         grossItems: roundCurrency(order.itemsTotal || 0),
+        itemsNet: 0,
+        vatRate: 0,
+        vatAmount: 0,
+        taxLiability: 0,
         shippingFee: roundCurrency(order.shippingFee || 0),
         commissionAmount: 0,
         maintenanceFee: 0,
         driverPayout: 0,
+        driverServiceFee: 0,
         restaurantShippingShare: 0,
         netRestaurant: 0,
+        restaurantWalletBalance: 0,
+        totalHeld: 0,
         settlementDirection: "collect_from_restaurant"
     };
 
-    const { driverShare: driverShippingShare, restaurantShare: restaurantShippingShare } =
-        splitShippingFee(summary.shippingFee);
-    summary.driverPayout = driverShippingShare;
-    summary.restaurantShippingShare = restaurantShippingShare;
+    const vatDetails = computeVatBreakdown(summary.grossItems, resolveVatRate(profile));
+    summary.itemsNet = vatDetails.itemsNet;
+    summary.vatAmount = vatDetails.vatAmount;
+    summary.vatRate = vatDetails.vatRate;
+    summary.taxLiability = vatDetails.vatAmount;
 
-    const commissionAmount = computeCommissionAmount(summary.grossItems, profile.commissionRate);
+    if (summary.shippingFee > 0) {
+        const { driverShare, restaurantShare } = splitShippingFee(summary.shippingFee);
+        summary.driverPayout = driverShare;
+        summary.driverServiceFee = roundCurrency(summary.shippingFee - driverShare);
+        summary.restaurantShippingShare = restaurantShare;
+    }
+
     let restaurantWallet = await ensureWallet({
         walletType: WALLET_TYPES.RESTAURANT_LIABILITY,
         ownerId: order.restaurantId,
         session
     });
 
+    const commissionAmount = computeCommissionAmount(summary.itemsNet, profile.commissionRate);
     if (commissionAmount > 0) {
         const commission = await recordLedgerEntry({
             orderId: order._id,
             fundSource,
             entryType: LEDGER_ENTRY_TYPES.COD_COMMISSION,
+            transactionType: LEDGER_TRANSACTION_TYPES.COMMISSION,
             dedupKey: "commission",
             amount: commissionAmount,
             debitWalletType: WALLET_TYPES.RESTAURANT_LIABILITY,
@@ -468,19 +561,21 @@ const processCodCompletion = async ({ order, profile, session }) => {
     });
     summary.maintenanceFee = maintenanceFee;
 
-    summary.netRestaurant = roundCurrency(
-        summary.grossItems - summary.commissionAmount - summary.maintenanceFee + summary.restaurantShippingShare
-    );
-
     restaurantWallet = await ensureWallet({
         walletType: WALLET_TYPES.RESTAURANT_LIABILITY,
         ownerId: order.restaurantId,
         session
     });
 
+    summary.netRestaurant = roundCurrency(summary.itemsNet - summary.commissionAmount - summary.maintenanceFee);
     summary.restaurantWalletBalance = roundCurrency(restaurantWallet.balance);
+    summary.totalHeld = summary.restaurantWalletBalance;
     summary.settlementDirection =
-        summary.restaurantWalletBalance > 0 ? "payable_to_restaurant" : summary.restaurantWalletBalance < 0 ? "collect_from_restaurant" : "even";
+        summary.restaurantWalletBalance > 0
+            ? "payable_to_restaurant"
+            : summary.restaurantWalletBalance < 0
+            ? "collect_from_restaurant"
+            : "even";
 
     await ensureCodSettlementInvoice({
         restaurantId: order.restaurantId,
@@ -558,6 +653,7 @@ export const createRestaurantPayout = async ({
         orderId: referenceOrderId,
         fundSource: FUND_SOURCES.ONLINE,
         entryType: LEDGER_ENTRY_TYPES.RESTAURANT_PAYOUT,
+        transactionType: LEDGER_TRANSACTION_TYPES.PAYOUT,
         dedupKey: `payout:${Date.now()}`,
         amount: rounded,
         debitWalletType: WALLET_TYPES.RESTAURANT_LIABILITY,

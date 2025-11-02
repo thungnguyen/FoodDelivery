@@ -73,13 +73,19 @@ const orderSchema = new mongoose.Schema(
                 type: String,
                 enum: ["online", "cod"]
             },
+            vatRate: { type: Number, default: 0 },
             grossItems: { type: Number, default: 0 },
+            itemsNet: { type: Number, default: 0 },
+            vatAmount: { type: Number, default: 0 },
             shippingFee: { type: Number, default: 0 },
             commissionAmount: { type: Number, default: 0 },
             maintenanceFee: { type: Number, default: 0 },
             driverPayout: { type: Number, default: 0 },
+            driverServiceFee: { type: Number, default: 0 },
             restaurantShippingShare: { type: Number, default: 0 },
             netRestaurant: { type: Number, default: 0 },
+            taxLiability: { type: Number, default: 0 },
+            totalHeld: { type: Number, default: 0 },
             settlementDirection: {
                 type: String,
                 enum: ["payable_to_restaurant", "collect_from_restaurant", "even"]

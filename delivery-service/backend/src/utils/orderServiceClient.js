@@ -66,3 +66,48 @@ export const fetchAwaitingOrders = async (driverId) => {
     return [];
   }
 };
+
+export const fetchOrdersByIds = async (orderIds = [], driverId) => {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return {};
+  }
+
+  const uniqueIds = Array.from(
+    new Set(
+      orderIds
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter((id) => id.length)
+    )
+  );
+  if (uniqueIds.length === 0) {
+    return {};
+  }
+
+  const token = signDriverToken(driverId || "driver-service");
+  const results = await Promise.all(
+    uniqueIds.map(async (id) => {
+      try {
+        const response = await axios.get(`${ORDER_SERVICE_URL}/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 10_000,
+        });
+        if (response.data) {
+          return [id, response.data];
+        }
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to fetch order ${id} for delivery enrichment:`,
+          error.response?.data || error.message
+        );
+      }
+      return null;
+    })
+  );
+
+  return results.reduce((acc, entry) => {
+    if (entry) {
+      acc[entry[0]] = entry[1];
+    }
+    return acc;
+  }, {});
+};
