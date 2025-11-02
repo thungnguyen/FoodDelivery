@@ -464,6 +464,143 @@ const normalizeDrivers = (raw = []) => {
     });
 };
 
+const DEFAULT_FINANCE_RULES = {
+  vatRate: 0.1,
+  commissionRate: 0.2,
+  restaurantShippingShare: 0.1,
+  driverShippingShare: 0.9,
+};
+
+const roundCurrency = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.round(numeric * 100) / 100;
+};
+
+const toNumeric = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const hasMeaningfulFinanceValue = (summary = {}) => {
+  return Object.entries(summary).some(([key, value]) => {
+    if (['fundSource', 'settlementDirection', 'processedAt'].includes(key)) {
+      return value !== null && value !== undefined && value !== '';
+    }
+    return typeof value === 'number' && value !== 0;
+  });
+};
+
+const deriveFinancialSummaryFromOrder = (order = {}) => {
+  const grossItems = roundCurrency(
+    toNumeric(order.itemsTotal ?? order.total ?? order.grossItems, 0)
+  );
+  const shippingFee = roundCurrency(
+    toNumeric(order.shippingFee ?? order.deliveryFee ?? order.shipping ?? 0, 0)
+  );
+
+  if (!grossItems && !shippingFee) {
+    return null;
+  }
+
+  const fundSource =
+    typeof order.paymentMethod === 'string' &&
+    ['cod', 'cash', 'cash_on_delivery'].includes(order.paymentMethod.toLowerCase())
+      ? 'cod'
+      : 'online';
+
+  const vatRate =
+    Number.isFinite(order.vatRate) && order.vatRate >= 0
+      ? order.vatRate
+      : DEFAULT_FINANCE_RULES.vatRate;
+  const commissionRate =
+    Number.isFinite(order.commissionRate) && order.commissionRate >= 0
+      ? order.commissionRate
+      : DEFAULT_FINANCE_RULES.commissionRate;
+
+  const divisor = 1 + vatRate;
+  const itemsNet = divisor > 0 ? roundCurrency(grossItems / divisor) : grossItems;
+  const vatAmount = roundCurrency(grossItems - itemsNet);
+  const commissionAmount = roundCurrency(itemsNet * commissionRate);
+  const maintenanceFee = roundCurrency(
+    toNumeric(order.maintenanceFee ?? order.financialSummary?.maintenanceFee, 0)
+  );
+
+  const restaurantShippingShare = roundCurrency(
+    shippingFee * DEFAULT_FINANCE_RULES.restaurantShippingShare
+  );
+  const driverPayout = roundCurrency(
+    shippingFee * DEFAULT_FINANCE_RULES.driverShippingShare
+  );
+
+  const netRestaurant = roundCurrency(
+    itemsNet - commissionAmount - maintenanceFee + restaurantShippingShare
+  );
+
+  return {
+    fundSource,
+    vatRate,
+    grossItems,
+    itemsNet,
+    vatAmount,
+    shippingFee,
+    commissionAmount,
+    maintenanceFee,
+    driverPayout,
+    driverServiceFee: 0,
+    restaurantShippingShare,
+    netRestaurant,
+    taxLiability: roundCurrency(toNumeric(order.taxLiability, 0)),
+    totalHeld: 0,
+    settlementDirection: null,
+    restaurantWalletBalance: 0,
+    processedAt: order.updatedAt || order.completedAt || order.deliveredAt || null,
+  };
+};
+
+const normalizeFinancialSummary = (rawSummary, order) => {
+  if (!rawSummary || typeof rawSummary !== 'object') {
+    const derived = deriveFinancialSummaryFromOrder(order);
+    return hasMeaningfulFinanceValue(derived) ? derived : null;
+  }
+
+  const summary =
+    rawSummary.financialSummary && typeof rawSummary.financialSummary === 'object'
+      ? rawSummary.financialSummary
+      : rawSummary;
+
+  const resolved = {
+    fundSource: summary.fundSource || summary.source || null,
+    vatRate: Number.isFinite(Number(summary.vatRate)) ? Number(summary.vatRate) : 0,
+    grossItems: toNumeric(summary.grossItems ?? summary.itemsTotal),
+    itemsNet: toNumeric(summary.itemsNet),
+    vatAmount: toNumeric(summary.vatAmount),
+    shippingFee: toNumeric(summary.shippingFee ?? order?.shippingFee),
+    commissionAmount: toNumeric(summary.commissionAmount ?? summary.commission),
+    maintenanceFee: toNumeric(summary.maintenanceFee ?? summary.maintenance),
+    driverPayout: toNumeric(summary.driverPayout ?? summary.driverShare),
+    driverServiceFee: toNumeric(summary.driverServiceFee),
+    restaurantShippingShare: toNumeric(
+      summary.restaurantShippingShare ?? summary.restaurantShare
+    ),
+    netRestaurant: toNumeric(summary.netRestaurant ?? summary.restaurantNet),
+    taxLiability: toNumeric(summary.taxLiability),
+    totalHeld: toNumeric(summary.totalHeld),
+    settlementDirection: summary.settlementDirection || summary.settlementStatus || null,
+    restaurantWalletBalance: toNumeric(summary.restaurantWalletBalance),
+    processedAt: summary.processedAt || summary.updatedAt || summary.calculatedAt || null,
+  };
+
+  if (hasMeaningfulFinanceValue(resolved)) {
+    return resolved;
+  }
+
+  const derived = deriveFinancialSummaryFromOrder(order);
+  return hasMeaningfulFinanceValue(derived) ? derived : null;
+};
+
 const normalizeOrders = (raw = []) => {
   const list = arrayFromPayload(raw, ['orders']);
   return list
@@ -488,6 +625,28 @@ const normalizeOrders = (raw = []) => {
         item.assignedDriver ||
         item.driverDetails ||
         {};
+
+      const itemsList = Array.isArray(item.items) ? item.items : [];
+      const computedItemsTotal = itemsList.reduce((sum, entry) => {
+        const quantity = toNumeric(entry?.quantity, 0);
+        const price = toNumeric(entry?.price ?? entry?.itemPrice, 0);
+        return sum + quantity * price;
+      }, 0);
+
+      const itemsTotal = roundCurrency(
+        toNumeric(
+          item.itemsTotal ??
+            item.totalItems ??
+            item.grossItems ??
+            computedItemsTotal ??
+            0,
+          0
+        )
+      );
+
+      const shippingFee = roundCurrency(
+        toNumeric(item.shippingFee ?? item.deliveryFee ?? item.shipping ?? 0, 0)
+      );
 
       const customerId =
         item.customerId ||
@@ -566,11 +725,23 @@ const normalizeOrders = (raw = []) => {
           '',
         driverStatus: driverRef.status || item.driverStatus || '',
         status,
-        total: item.total || item.grandTotal || item.totalPrice || item.amount || 0,
+        total: roundCurrency(
+          toNumeric(item.total ?? item.grandTotal ?? item.totalPrice ?? item.amount, 0)
+        ),
+        itemsTotal,
+        shippingFee,
         paymentMethod,
         paymentStatus,
         createdAt: item.createdAt || item.placedAt || item.created || null,
         updatedAt: item.updatedAt || item.modifiedAt || null,
+        financialSummary: normalizeFinancialSummary(
+          item.financialSummary ||
+            item.financeSummary ||
+            item.financials ||
+            item.finance ||
+            null,
+          item
+        ),
       };
     });
 };
