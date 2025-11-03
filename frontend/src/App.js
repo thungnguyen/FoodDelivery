@@ -32,6 +32,7 @@ import CustomerHome from "./pages/customer/customerHome";
 import RestaurentDetails from "./pages/customer/customerHome";
 import FoodItemList from "./pages/customer/foodItemList";
 import AddToCartPage from "./pages/customer/AddToCartPage";
+import FoodDetailPage from "./pages/customer/FoodDetailPage";
 
 // restaurant management
 import SuperAdminRegister from './pages/restaurant/components/SuperAdminRegister';
@@ -94,6 +95,7 @@ function App() {
           <Route path="/customer/home" element={<CustomerHome />} />
           <Route path="/customer/restaurant/:id" element={<RestaurentDetails />} />
           <Route path="/customer/restaurant/:restaurantId/foods" element={<FoodItemList />} />
+          <Route path="/customer/restaurant/:restaurantId/foods/:foodId" element={<FoodDetailPage />} />
           <Route path="/customer/cart" element={<AddToCartPage />} />
           <Route path="/customer/orders" element={<Orders />} />
 

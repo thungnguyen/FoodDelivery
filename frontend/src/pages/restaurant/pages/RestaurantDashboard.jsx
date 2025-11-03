@@ -7,6 +7,8 @@ import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTok
 const FALLBACK_IMAGE =
   'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="%23eceff1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2399a1a7" font-family="Arial" font-size="14">No Image</text></svg>';
 
+const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+
 const useFilePreview = (file) => {
   const [preview, setPreview] = useState('');
 
@@ -94,6 +96,15 @@ function RestaurantDashboard() {
   const [editFoodItem, setEditFoodItem] = useState(null); // For editing food items
   const [editProfile, setEditProfile] = useState(false); // For editing profile
   const [editableProfile, setEditableProfile] = useState(null); // For editable profile data
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState({ type: '', message: '' });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState({ type: '', message: '' });
   const API_BASE = RESTAURANT_SERVICE_URL;
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -1117,15 +1128,21 @@ function RestaurantDashboard() {
       profilePictureFile: null,
       profileImageMode: restaurant.profilePicture ? 'url' : 'file',
     }); // Copy current profile data
+    setProfileFeedback({ type: '', message: '' });
     setEditProfile(true); // Show the edit form
   };
 
   const handleCancelEdit = () => {
     setEditProfile(false); // Hide the edit form
     setEditableProfile(null); // Reset editable profile data
+    setProfileFeedback({ type: '', message: '' });
   };
 
   const handleEditProfile = async (updatedProfile) => {
+    if (profileSaving) {
+      return;
+    }
+    setProfileFeedback({ type: '', message: '' });
     const trimmedName = updatedProfile.name?.trim();
     const trimmedOwner = updatedProfile.ownerName?.trim();
     const trimmedLocation = updatedProfile.location?.trim();
@@ -1133,17 +1150,28 @@ function RestaurantDashboard() {
     const trimmedUrl = updatedProfile.profilePictureUrl?.trim() || '';
 
     if (!trimmedName || !trimmedOwner || !trimmedLocation || !trimmedContact) {
-      alert('Please complete all profile fields before saving.');
+      setProfileFeedback({
+        type: 'error',
+        message: 'Vui lòng điền đầy đủ thông tin bắt buộc của nhà hàng trước khi lưu.',
+      });
       return;
     }
 
     if (updatedProfile.profileImageMode === 'url' && !trimmedUrl) {
-      alert('Please provide a valid image URL.');
+      setProfileFeedback({
+        type: 'error',
+        message: 'Vui lòng cung cấp đường dẫn hình ảnh hợp lệ.',
+      });
       return;
     }
 
     try {
+      setProfileSaving(true);
       const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      if (!token) {
+        handleUnauthorizedError();
+        return;
+      }
       const formData = new FormData();
 
       // Append fields to FormData
@@ -1168,16 +1196,140 @@ function RestaurantDashboard() {
         body: formData, // Send FormData
       });
 
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
+
       const data = await res.json();
       if (res.ok) {
-        alert('Profile updated successfully!');
-        fetchRestaurantProfile(); // Refresh profile details
+        const updatedRestaurant = data?.restaurant;
+        if (updatedRestaurant) {
+          setRestaurant(updatedRestaurant);
+        }
+        fetchRestaurantProfile();
+        setProfileFeedback({
+          type: 'success',
+          message: data?.message || 'Cập nhật thông tin nhà hàng thành công.',
+        });
+        setEditableProfile(null);
         setEditProfile(false); // Close edit profile form
       } else {
-        alert(data.message || 'Failed to update profile');
+        setProfileFeedback({
+          type: 'error',
+          message: data?.message || 'Không thể cập nhật thông tin nhà hàng.',
+        });
       }
     } catch (err) {
-      alert('Error updating profile');
+      setProfileFeedback({
+        type: 'error',
+        message: 'Có lỗi xảy ra khi cập nhật thông tin nhà hàng.',
+      });
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handlePasswordFieldChange = (field) => (event) => {
+    const value = event.target.value;
+    setPasswordForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    if (passwordSaving) {
+      return;
+    }
+    setPasswordFeedback({ type: '', message: '' });
+
+    const currentPassword = passwordForm.currentPassword.trim();
+    const newPassword = passwordForm.newPassword.trim();
+    const confirmPassword = passwordForm.confirmPassword.trim();
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordFeedback({
+        type: 'error',
+        message: 'Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới.',
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordFeedback({
+        type: 'error',
+        message: 'Xác nhận mật khẩu mới không khớp.',
+      });
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      setPasswordFeedback({
+        type: 'error',
+        message: 'Mật khẩu mới phải khác mật khẩu hiện tại.',
+      });
+      return;
+    }
+
+    if (!PASSWORD_PATTERN.test(newPassword)) {
+      setPasswordFeedback({
+        type: 'error',
+        message: 'Mật khẩu mới phải có tối thiểu 6 ký tự và bao gồm chữ, số, ký tự đặc biệt.',
+      });
+      return;
+    }
+
+    try {
+      setPasswordSaving(true);
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      if (!token) {
+        handleUnauthorizedError();
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/api/restaurants/password`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+        }),
+      });
+
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
+
+      const data = await res.json();
+      if (res.ok) {
+        setPasswordFeedback({
+          type: 'success',
+          message: data?.message || 'Đổi mật khẩu thành công.',
+        });
+        setPasswordForm({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: '',
+        });
+      } else {
+        setPasswordFeedback({
+          type: 'error',
+          message: data?.message || 'Không thể đổi mật khẩu. Vui lòng thử lại.',
+        });
+      }
+    } catch (err) {
+      setPasswordFeedback({
+        type: 'error',
+        message: 'Có lỗi khi đổi mật khẩu. Vui lòng thử lại sau.',
+      });
+    } finally {
+      setPasswordSaving(false);
     }
   };
   const toggleAvailability = async () => {
@@ -1248,6 +1400,21 @@ function RestaurantDashboard() {
                 </button>
               )}
             </div>
+            {!editProfile && profileFeedback.message && (
+              <div
+                style={{
+                  marginBottom: '18px',
+                  padding: '14px 18px',
+                  borderRadius: '16px',
+                  backgroundColor:
+                    profileFeedback.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(248,113,113,0.15)',
+                  color: profileFeedback.type === 'success' ? '#166534' : '#b91c1c',
+                  fontWeight: 600,
+                }}
+              >
+                {profileFeedback.message}
+              </div>
+            )}
             {editProfile && editableProfile ? (
               <form
                 className="form-card profile-form"
@@ -1256,6 +1423,23 @@ function RestaurantDashboard() {
                   handleEditProfile(editableProfile);
                 }}
               >
+                {profileFeedback.message && (
+                  <div
+                    style={{
+                      marginBottom: '16px',
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      backgroundColor:
+                        profileFeedback.type === 'success'
+                          ? 'rgba(34,197,94,0.12)'
+                          : 'rgba(248,113,113,0.15)',
+                      color: profileFeedback.type === 'success' ? '#166534' : '#b91c1c',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {profileFeedback.message}
+                  </div>
+                )}
                 <div className="profile-form-grid">
                   <div className="profile-media-field">
                     <span className="field-label">Ảnh đại diện</span>
@@ -1379,10 +1563,15 @@ function RestaurantDashboard() {
                   </div>
                 </div>
                 <div className="form-actions">
-                  <button type="submit" className="form-primary">
-                    Lưu thay đổi
+                  <button type="submit" className="form-primary" disabled={profileSaving}>
+                    {profileSaving ? 'Đang lưu...' : 'Lưu thay đổi'}
                   </button>
-                  <button type="button" className="form-secondary" onClick={handleCancelEdit}>
+                  <button
+                    type="button"
+                    className="form-secondary"
+                    onClick={handleCancelEdit}
+                    disabled={profileSaving}
+                  >
                     Hủy
                   </button>
                 </div>
@@ -1418,6 +1607,83 @@ function RestaurantDashboard() {
                 </div>
               </div>
             )}
+            <div
+              style={{
+                marginTop: '24px',
+                maxWidth: '520px',
+                width: '100%',
+              }}
+            >
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: '20px',
+                  padding: '24px',
+                  boxShadow: '0 12px 32px rgba(15,23,42,0.08)',
+                }}
+              >
+                <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#1f2937', marginBottom: '6px' }}>
+                  Đổi mật khẩu
+                </h3>
+                <p style={{ color: '#64748b', marginBottom: '18px' }}>
+                  Nên đặt mật khẩu mạnh và thay đổi định kỳ để bảo vệ tài khoản quản trị nhà hàng.
+                </p>
+                {passwordFeedback.message && (
+                  <div
+                    style={{
+                      marginBottom: '16px',
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      backgroundColor:
+                        passwordFeedback.type === 'success'
+                          ? 'rgba(34,197,94,0.12)'
+                          : 'rgba(248,113,113,0.15)',
+                      color: passwordFeedback.type === 'success' ? '#166534' : '#b91c1c',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {passwordFeedback.message}
+                  </div>
+                )}
+                <form onSubmit={handleChangePassword} style={{ display: 'grid', gap: '16px' }}>
+                  <label>
+                    <span className="field-label">Mật khẩu hiện tại</span>
+                    <input
+                      type="password"
+                      className="text-input"
+                      placeholder="Nhập mật khẩu hiện tại"
+                      value={passwordForm.currentPassword}
+                      onChange={handlePasswordFieldChange('currentPassword')}
+                    />
+                  </label>
+                  <label>
+                    <span className="field-label">Mật khẩu mới</span>
+                    <input
+                      type="password"
+                      className="text-input"
+                      placeholder="Ít nhất 6 ký tự, gồm chữ, số, ký tự đặc biệt"
+                      value={passwordForm.newPassword}
+                      onChange={handlePasswordFieldChange('newPassword')}
+                    />
+                  </label>
+                  <label>
+                    <span className="field-label">Xác nhận mật khẩu mới</span>
+                    <input
+                      type="password"
+                      className="text-input"
+                      placeholder="Nhập lại mật khẩu mới"
+                      value={passwordForm.confirmPassword}
+                      onChange={handlePasswordFieldChange('confirmPassword')}
+                    />
+                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button type="submit" className="form-primary" disabled={passwordSaving}>
+                      {passwordSaving ? 'Đang đổi mật khẩu...' : 'Đổi mật khẩu'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
         )}
 
