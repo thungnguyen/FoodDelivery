@@ -470,7 +470,69 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
 // Update restaurant details
 router.put('/update', authMiddleware, upload.single('profilePicture'), async (req, res) => {
-  const { name, ownerName, location, contactNumber, profilePictureUrl } = req.body;
+  const { name, ownerName, location, contactNumber, profilePictureUrl } = req.body || {};
+
+  const updates = {};
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  const trimmedOwner = typeof ownerName === 'string' ? ownerName.trim() : '';
+  const trimmedLocation = typeof location === 'string' ? location.trim() : '';
+  const trimmedContact = typeof contactNumber === 'string' ? contactNumber.trim() : '';
+  const trimmedImageUrl = typeof profilePictureUrl === 'string' ? profilePictureUrl.trim() : '';
+
+  if (trimmedName) updates.name = trimmedName;
+  if (trimmedOwner) updates.ownerName = trimmedOwner;
+  if (trimmedLocation) updates.location = trimmedLocation;
+  if (trimmedContact) updates.contactNumber = trimmedContact;
+
+  if (req.file) {
+    updates.profilePicture = `/uploads/${req.file.filename}`;
+  } else if (trimmedImageUrl) {
+    updates.profilePicture = trimmedImageUrl;
+  }
+
+  if (!Object.keys(updates).length) {
+    return res.status(400).json({ message: 'Không có thông tin nào được cập nhật.' });
+  }
+
+  try {
+    const updatedRestaurant = await Restaurant.findByIdAndUpdate(
+      req.user.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedRestaurant) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+
+    res.status(200).json({ message: 'Profile updated successfully', restaurant: updatedRestaurant });
+  } catch (err) {
+    console.error('[restaurant:update] Failed to update profile', err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+// Update restaurant admin password
+router.put('/password', authMiddleware, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+    return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ mật khẩu hiện tại và mật khẩu mới.' });
+  }
+
+  if (currentPassword.trim().length === 0 || newPassword.trim().length === 0) {
+    return res.status(400).json({ message: 'Mật khẩu không được để trống.' });
+  }
+
+  if (currentPassword === newPassword) {
+    return res.status(400).json({ message: 'Mật khẩu mới phải khác mật khẩu hiện tại.' });
+  }
+
+  if (!PASSWORD_POLICY_REGEX.test(newPassword)) {
+    return res.status(400).json({
+      message: 'Mật khẩu mới phải từ 6 ký tự và bao gồm chữ, số và ký tự đặc biệt.',
+    });
+  }
 
   try {
     const restaurant = await Restaurant.findById(req.user.id);
@@ -478,23 +540,19 @@ router.put('/update', authMiddleware, upload.single('profilePicture'), async (re
       return res.status(404).json({ message: 'Restaurant not found' });
     }
 
-    // Update fields if provided
-    if (name) restaurant.name = name;
-    if (ownerName) restaurant.ownerName = ownerName;
-    if (location) restaurant.location = location;
-    if (contactNumber) restaurant.contactNumber = contactNumber;
-
-    // Update profile picture if a file is uploaded
-    if (req.file) {
-      restaurant.profilePicture = `/uploads/${req.file.filename}`;
-    } else if (typeof profilePictureUrl === 'string') {
-      restaurant.profilePicture = profilePictureUrl.trim();
+    const isMatch = await restaurant.compareAdminPassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Mật khẩu hiện tại không chính xác.' });
     }
 
-    await restaurant.save();
-    res.status(200).json({ message: 'Profile updated successfully', restaurant });
+    restaurant.admin.password = newPassword;
+    restaurant.onboardingPasswordMustChange = false;
+    restaurant.markModified('admin');
+    await restaurant.save({ validateBeforeSave: false });
+
+    return res.status(200).json({ message: 'Đổi mật khẩu thành công.' });
   } catch (err) {
-    console.error(err);
+    console.error('[restaurant:password] Failed to update password', err);
     res.status(500).json({ message: 'Server Error' });
   }
 });

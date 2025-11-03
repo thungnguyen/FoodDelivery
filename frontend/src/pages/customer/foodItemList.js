@@ -60,6 +60,16 @@ function FoodItemList() {
     navigate("/customer/cart");
   };
 
+  const handleViewDetails = (food) => {
+    navigate(`/customer/restaurant/${restaurantId}/foods/${food._id}`, {
+      state: {
+        food,
+        restaurantName,
+        foods,
+      },
+    });
+  };
+
   return (
     <div
       style={{
@@ -160,6 +170,7 @@ function FoodItemList() {
                 e.currentTarget.style.boxShadow =
                   "0 4px 12px rgba(0, 0, 0, 0.1)";
               }}
+              onClick={() => handleViewDetails(food)}
             >
               <img
                 src={
@@ -214,7 +225,10 @@ function FoodItemList() {
 
               {/* Favorite Button */}
               <div
-                onClick={() => toggleFavorite(food._id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleFavorite(food._id);
+                }}
                 style={{
                   position: "absolute",
                   top: "10px",
@@ -233,7 +247,10 @@ function FoodItemList() {
 
               {/* Add to Cart Button */}
               <div
-                onClick={() => handleAddToCart(food)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleAddToCart(food);
+                }}
                 style={{
                   position: "absolute",
                   bottom: "10px",

@@ -42,6 +42,13 @@ export default function CustomerProfile() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState({ type: "", message: "" });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -85,6 +92,103 @@ export default function CustomerProfile() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handlePasswordFieldChange = (field) => (event) => {
+    const value = event.target.value;
+    setPasswordForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handlePasswordSubmit = async (event) => {
+    event.preventDefault();
+    if (passwordSaving) return;
+    setPasswordFeedback({ type: "", message: "" });
+
+    const current = passwordForm.currentPassword.trim();
+    const next = passwordForm.newPassword.trim();
+    const confirm = passwordForm.confirmPassword.trim();
+
+    if (!current || !next || !confirm) {
+      setPasswordFeedback({
+        type: "error",
+        message: "Vui lòng nhập đầy đủ các trường mật khẩu.",
+      });
+      return;
+    }
+
+    if (next !== confirm) {
+      setPasswordFeedback({
+        type: "error",
+        message: "Xác nhận mật khẩu mới không khớp.",
+      });
+      return;
+    }
+
+    if (next === current) {
+      setPasswordFeedback({
+        type: "error",
+        message: "Mật khẩu mới phải khác mật khẩu hiện tại.",
+      });
+      return;
+    }
+
+    if (next.length < 6) {
+      setPasswordFeedback({
+        type: "error",
+        message: "Mật khẩu mới phải có tối thiểu 6 ký tự.",
+      });
+      return;
+    }
+
+    try {
+      setPasswordSaving(true);
+      const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+      if (!token) {
+        setPasswordFeedback({
+          type: "error",
+          message: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+        });
+        navigate("/auth/login");
+        return;
+      }
+
+      await axios.patch(
+        `${AUTH_SERVICE_URL}/api/auth/customer/password`,
+        {
+          currentPassword: current,
+          newPassword: next,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      setPasswordFeedback({
+        type: "success",
+        message: "Cập nhật mật khẩu thành công.",
+      });
+      setPasswordForm({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+    } catch (err) {
+      const message =
+        err.response?.data?.message ||
+        "Đổi mật khẩu thất bại, vui lòng thử lại.";
+      setPasswordFeedback({
+        type: "error",
+        message,
+      });
+      if (err.response?.status === 401) {
+        navigate("/auth/login");
+      }
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const hasChanges = useMemo(() => {
@@ -357,6 +461,102 @@ export default function CustomerProfile() {
                 </button>
               </div>
             </form>
+            <div
+              style={{
+                marginTop: "36px",
+                padding: "26px 24px 30px",
+                borderRadius: "22px",
+                background: "#ffffff",
+                boxShadow: "0 18px 36px rgba(15,23,42,0.08)",
+                display: "grid",
+                gap: "18px",
+              }}
+            >
+              <div>
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: "24px",
+                    color: "#0f172a",
+                    fontWeight: 700,
+                  }}
+                >
+                  Bảo mật tài khoản
+                </h2>
+                <p style={{ margin: "6px 0 0", color: "#475569", fontSize: "15px" }}>
+                  Đổi mật khẩu định kỳ giúp tài khoản của bạn an toàn hơn.
+                </p>
+              </div>
+              {passwordFeedback.message && (
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderRadius: "14px",
+                    background:
+                      passwordFeedback.type === "success"
+                        ? "rgba(74,222,128,0.14)"
+                        : "rgba(248,113,113,0.12)",
+                    color: passwordFeedback.type === "success" ? "#047857" : "#b91c1c",
+                    fontWeight: 600,
+                    fontSize: "14px",
+                  }}
+                >
+                  {passwordFeedback.message}
+                </div>
+              )}
+              <form onSubmit={handlePasswordSubmit} style={{ display: "grid", gap: "18px" }}>
+                <label>
+                  <span style={labelStyle}>Mật khẩu hiện tại</span>
+                  <input
+                    type="password"
+                    style={inputStyle}
+                    placeholder="Nhập mật khẩu đang dùng"
+                    value={passwordForm.currentPassword}
+                    onChange={handlePasswordFieldChange("currentPassword")}
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Mật khẩu mới</span>
+                  <input
+                    type="password"
+                    style={inputStyle}
+                    placeholder="Ít nhất 6 ký tự"
+                    value={passwordForm.newPassword}
+                    onChange={handlePasswordFieldChange("newPassword")}
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Xác nhận mật khẩu mới</span>
+                  <input
+                    type="password"
+                    style={inputStyle}
+                    placeholder="Nhập lại mật khẩu mới"
+                    value={passwordForm.confirmPassword}
+                    onChange={handlePasswordFieldChange("confirmPassword")}
+                  />
+                </label>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="submit"
+                    disabled={passwordSaving}
+                    style={{
+                      padding: "12px 28px",
+                      borderRadius: "999px",
+                      border: "none",
+                      background: "linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)",
+                      color: "white",
+                      fontWeight: 700,
+                      cursor: passwordSaving ? "not-allowed" : "pointer",
+                      boxShadow: "0 16px 32px rgba(124,58,237,0.28)",
+                      opacity: passwordSaving ? 0.6 : 1,
+                      transition: "transform 0.2s ease, box-shadow 0.2s ease",
+                    }}
+                  >
+                    {passwordSaving ? "Đang cập nhật..." : "Đổi mật khẩu"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       </div>

@@ -497,9 +497,10 @@ export const updateOrderStatus = async (req, res) => {
 export const getRestaurantProductReviews = async (req, res) => {
     try {
         const role = req.user?.role;
-        let { restaurantId } = req.query || {};
+        const { restaurantId: queryRestaurantId, foodId: queryFoodId } = req.query || {};
 
-        if (role === "restaurant") {
+        let restaurantId = queryRestaurantId;
+        if (!restaurantId && role === "restaurant") {
             restaurantId = req.user?.restaurantId || req.user?.id || restaurantId;
         }
 
@@ -507,7 +508,13 @@ export const getRestaurantProductReviews = async (req, res) => {
             return res.status(400).json({ message: "Restaurant identifier is required." });
         }
 
-        const normalizedRestaurantId = String(restaurantId);
+        const normalizedRestaurantId = String(restaurantId).trim();
+        if (!normalizedRestaurantId) {
+            return res.status(400).json({ message: "Restaurant identifier is required." });
+        }
+        const normalizedFoodId =
+            typeof queryFoodId === "string" && queryFoodId.trim().length ? queryFoodId.trim() : null;
+
         const orders = await Order.find({
             restaurantId: normalizedRestaurantId,
             "orderFeedback.rating": { $exists: true, $ne: null }
@@ -519,6 +526,7 @@ export const getRestaurantProductReviews = async (req, res) => {
             return res.status(200).json({
                 restaurantId: normalizedRestaurantId,
                 restaurantName: null,
+                ...(normalizedFoodId ? { foodId: normalizedFoodId } : {}),
                 totalOrdersWithFeedback: 0,
                 totalReviews: 0,
                 averageRating: null,
@@ -573,20 +581,49 @@ export const getRestaurantProductReviews = async (req, res) => {
             });
         });
 
-        const averageRating =
+        const restaurantAverageRating =
             ratedOrderCount > 0 ? Math.round((ratingSum / ratedOrderCount) * 10) / 10 : null;
 
-        res.status(200).json({
+        let effectiveReviews = reviews;
+        if (normalizedFoodId) {
+            effectiveReviews = reviews.filter((review) => {
+                if (!review?.foodId) {
+                    return false;
+                }
+                return String(review.foodId) === normalizedFoodId;
+            });
+        }
+
+        const effectiveReviewCount = effectiveReviews.length;
+        const matchedRatingSum = effectiveReviews.reduce((sum, review) => {
+            const numeric = Number(review?.rating);
+            return Number.isFinite(numeric) ? sum + numeric : sum;
+        }, 0);
+        const effectiveAverageRating =
+            effectiveReviewCount > 0
+                ? Math.round((matchedRatingSum / effectiveReviewCount) * 10) / 10
+                : null;
+
+        const responsePayload = {
             restaurantId: normalizedRestaurantId,
             restaurantName: orders[0]?.restaurantName || null,
-            totalOrdersWithFeedback: ratedOrderCount,
-            totalReviews: reviews.length,
-            averageRating,
-            reviews: reviews.map((review) => ({
+            totalOrdersWithFeedback: normalizedFoodId ? effectiveReviewCount : ratedOrderCount,
+            totalReviews: effectiveReviewCount,
+            averageRating: normalizedFoodId ? effectiveAverageRating : restaurantAverageRating,
+            reviews: effectiveReviews.map((review) => ({
                 ...review,
                 ratedAt: review.ratedAt ? new Date(review.ratedAt).toISOString() : null
             }))
-        });
+        };
+
+        if (normalizedFoodId) {
+            responsePayload.foodId = normalizedFoodId;
+            responsePayload.restaurantAverageRating = restaurantAverageRating;
+            responsePayload.restaurantTotalReviews = reviews.length;
+            responsePayload.restaurantTotalOrdersWithFeedback = ratedOrderCount;
+        }
+
+        res.status(200).json(responsePayload);
     } catch (error) {
         console.error("Error fetching restaurant feedback:", error);
         res.status(500).json({ error: "Server Error" });

@@ -222,6 +222,51 @@ exports.updateProfile = async (req, res, next) => {
   }
 };
 
+// @desc    Update customer password
+// @route   PATCH /api/auth/customer/password
+// @access  Private (customer)
+exports.updatePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+      return res.status(400).json({ message: "Vui lòng cung cấp mật khẩu hiện tại và mật khẩu mới." });
+    }
+
+    if (!currentPassword.trim() || !newPassword.trim()) {
+      return res.status(400).json({ message: "Mật khẩu không được để trống." });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: "Mật khẩu mới phải khác mật khẩu hiện tại." });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Mật khẩu mới phải có tối thiểu 6 ký tự." });
+    }
+
+    const customer = await Customer.findById(req.userId).select("+password");
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
+
+    const isMatch = await customer.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Mật khẩu hiện tại không chính xác." });
+    }
+
+    customer.password = newPassword;
+    await customer.save();
+
+    res.json({
+      status: "success",
+      message: "Cập nhật mật khẩu thành công.",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // Admin endpoints
 exports.adminListCustomers = async (_req, res, next) => {
   try {

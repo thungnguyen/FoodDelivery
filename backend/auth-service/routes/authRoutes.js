@@ -17,4 +17,6 @@ router
   .get(protect, authController.getProfile)
   .patch(protect, authController.updateProfile);
 
+router.patch("/customer/password", protect, authController.updatePassword);
+
 module.exports = router;

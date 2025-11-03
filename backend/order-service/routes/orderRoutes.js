@@ -22,7 +22,7 @@ router.get("/", protect, authorizeRoles("customer", "restaurant", "driver", "adm
 router.get(
     "/feedback/restaurant",
     protect,
-    authorizeRoles("restaurant", "admin", "superAdmin"),
+    authorizeRoles("customer", "restaurant", "admin", "superAdmin"),
     getRestaurantProductReviews
 );
 router.get("/:id", protect, authorizeRoles("customer", "restaurant", "driver", "admin", "superAdmin"), getOrderById);
