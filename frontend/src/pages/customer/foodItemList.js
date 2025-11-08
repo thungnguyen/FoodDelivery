@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { CartContext } from "../contexts/CartContext";
 import { RESTAURANT_SERVICE_URL } from "../../utils/serviceUrls";
+import CustomerLayout from "../../components/customer/CustomerLayout";
 import { FaHome } from "react-icons/fa"; 
 
 function FoodItemList() {
@@ -71,13 +72,14 @@ function FoodItemList() {
   };
 
   return (
-    <div
-      style={{
-        padding: "30px",
-        background: "linear-gradient(to bottom right, #f0f4f8, #d9e2ec)",
-        minHeight: "100vh",
-      }}
-    >
+    <CustomerLayout>
+      <div
+        style={{
+          padding: "30px",
+          background: "linear-gradient(to bottom right, #f0f4f8, #d9e2ec)",
+          minHeight: "100vh",
+        }}
+      >
       {/* Home Icon */}
       <div style={{ marginBottom: "20px" }}>
         <button
@@ -281,7 +283,8 @@ function FoodItemList() {
           ))
         )}
       </div>
-    </div>
+      </div>
+    </CustomerLayout>
   );
 }
 

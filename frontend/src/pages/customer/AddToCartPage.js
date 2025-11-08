@@ -1,6 +1,7 @@
 import React, { useContext, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { CartContext } from "../contexts/CartContext";
+import CustomerLayout from "../../components/customer/CustomerLayout";
 import { FaArrowLeft } from "react-icons/fa";
 
 function AddToCartPage() {
@@ -25,14 +26,15 @@ function AddToCartPage() {
   );
 
   return (
-    <div
-      style={{
-        padding: "30px",
-        backgroundColor: "#f0f2f5",
-        minHeight: "100vh",
-        position: "relative",
-      }}
-    >
+    <CustomerLayout>
+      <div
+        style={{
+          padding: "30px",
+          backgroundColor: "#f0f2f5",
+          minHeight: "100vh",
+          position: "relative",
+        }}
+      >
       {/* Back Arrow Icon Button */}
       <div style={{ marginBottom: "20px" }}>
         <button
@@ -293,7 +295,8 @@ function AddToCartPage() {
           </button>
         </>
       )}
-    </div>
+      </div>
+    </CustomerLayout>
   );
 }
 

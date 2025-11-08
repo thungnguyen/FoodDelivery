@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { FaArrowLeft, FaStar, FaShoppingCart } from "react-icons/fa";
 import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL } from "../../utils/serviceUrls";
+import CustomerLayout from "../../components/customer/CustomerLayout";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { CartContext } from "../contexts/CartContext";
 
@@ -260,13 +261,14 @@ const FoodDetailPage = () => {
   };
 
   return (
-    <div
-      style={{
-        padding: "32px",
-        background: "linear-gradient(180deg, #f5f7fb 0%, #e9edf5 100%)",
-        minHeight: "100vh",
-      }}
-    >
+    <CustomerLayout>
+      <div
+        style={{
+          padding: "32px",
+          background: "linear-gradient(180deg, #f5f7fb 0%, #e9edf5 100%)",
+          minHeight: "100vh",
+        }}
+      >
       <button
         type="button"
         onClick={handleBack}
@@ -717,7 +719,8 @@ const FoodDetailPage = () => {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </CustomerLayout>
   );
 };
 
