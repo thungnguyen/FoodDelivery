@@ -253,46 +253,58 @@ function AddToCartPage() {
           <div
             style={{
               position: "fixed",
-              bottom: "30px",
-              right: "200px",
-              backgroundColor: "#fff",
-              padding: "14px 24px",
-              borderRadius: "8px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              fontWeight: "600",
-              fontSize: "16px",
+              bottom: "20px",
+              right: "20px",
+              display: "flex",
+              alignItems: "center",
+              gap: "16px",
+              zIndex: 99,
             }}
           >
-            Total: Rs. {cartTotal}
+            <div
+              style={{
+                backgroundColor: "#fff",
+                borderRadius: "16px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+                padding: "14px 22px",
+                minWidth: "180px",
+                fontSize: "16px",
+                fontWeight: 600,
+                color: "#111827",
+              }}
+            >
+              Total: {cartTotal} VND
+            </div>
+            <button
+              onClick={handleProceed}
+              style={{
+                backgroundColor: "#ff7f50",
+                color: "white",
+                padding: "12px 20px",
+                borderRadius: "12px",
+                border: "none",
+                fontSize: "16px",
+                fontWeight: "600",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+                transition: "background-color 0.3s, transform 0.3s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#ff5722";
+                e.currentTarget.style.transform = "translateY(-2px)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "#ff7f50";
+                e.currentTarget.style.transform = "translateY(0)";
+              }}
+            >
+              Proceed to Order <span role="img" aria-label="cart">🛒</span>
+            </button>
           </div>
-          <button
-            onClick={handleProceed}
-            style={{
-              position: "fixed",
-              bottom: "30px",
-              right: "30px",
-              backgroundColor: "#ff7f50",
-              color: "white",
-              padding: "14px 24px",
-              borderRadius: "8px",
-              border: "none",
-              fontSize: "16px",
-              fontWeight: "600",
-              cursor: "pointer",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-              transition: "background-color 0.3s, transform 0.3s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#ff5722";
-              e.currentTarget.style.transform = "scale(1.05)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "#ff7f50";
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-          >
-            Proceed to Order 🛒
-          </button>
         </>
       )}
       </div>

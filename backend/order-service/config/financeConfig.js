@@ -1,7 +1,10 @@
 export const PLATFORM_OWNER_ID = "platform";
 export const DRIVER_POOL_OWNER_ID = "driver_pool";
 
-export const DEFAULT_COMMISSION_RATE = 0.2; // 20% commission on food items
+const parsedCommissionRate = Number(process.env.PLATFORM_COMMISSION_RATE);
+export const DEFAULT_COMMISSION_RATE = Number.isFinite(parsedCommissionRate)
+    ? parsedCommissionRate
+    : 0.2; // 20% commission on food items (overridden by env)
 export const DEFAULT_MAINTENANCE_FEE = 150000; // VND, configurable per restaurant
 export const DEFAULT_MAINTENANCE_INTERVAL_DAYS = 30;
 export const DEFAULT_VAT_RATE = 0.1; // 10% VAT

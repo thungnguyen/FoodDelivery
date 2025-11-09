@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, useStripe, useElements, CardNumberElement, CardExpiryElement, CardCvcElement } from "@stripe/react-stripe-js";
 import axios from "axios";
@@ -6,6 +6,46 @@ import "../../styles/checkout.css";
 import { PAYMENT_SERVICE_URL } from "../../utils/serviceUrls";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
+
+const PAYMENT_METHODS = [
+  { key: "card", label: "Thẻ quốc tế / Visa / Master" },
+  { key: "vietqr", label: "Chuyển khoản ngân hàng (VietQR)" },
+];
+
+const BANKS = [
+  {
+    code: "VCB",
+    name: "Vietcombank",
+    shortName: "VCB",
+    accountNumber: "00123456789",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh Hà Nội",
+  },
+  {
+    code: "ACB",
+    name: "ACB - Ngân hàng Á Châu",
+    shortName: "ACB",
+    accountNumber: "8686868686",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh TP.HCM",
+  },
+  {
+    code: "BIDV",
+    name: "BIDV",
+    shortName: "BIDV",
+    accountNumber: "1234567890",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh Bình Thạnh",
+  },
+  {
+    code: "TCB",
+    name: "Techcombank",
+    shortName: "TCB",
+    accountNumber: "1900123456788",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh Phú Mỹ Hưng",
+  },
+];
 
 const CheckoutForm = () => {
   const stripe = useStripe();
@@ -16,24 +56,30 @@ const CheckoutForm = () => {
   const [message, setMessage] = useState("");
   const [cardType, setCardType] = useState("");
   const [disablePayment, setDisablePayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("card");
+  const [selectedBank, setSelectedBank] = useState(BANKS[0]);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const API_BASE_URL = PAYMENT_SERVICE_URL;
 
-  // Example order data – in production this comes dynamically from your Order Service.
+  // Example order data – real app should fetch from Order Service.
   const orderData = {
     orderId: "ORDER00036",
     userId: "USER67890",
-    amount: 43,
-    currency: "usd",
-    firstName: "John",
-    lastName: "Doe",
-    email: "tharankaruchira18@gmail.com",
-    phone: "+94752504856",
+    amount: 430000, // VND
+    currency: "vnd",
+    firstName: "Nguyen",
+    lastName: "Van A",
+    email: "customer@example.com",
+    phone: "+84901234567",
   };
 
   useEffect(() => {
-    createPaymentIntent();
-  }, []);
+    if (paymentMethod === "card" && !clientSecret && !disablePayment) {
+      createPaymentIntent();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethod, clientSecret, disablePayment]);
 
   const createPaymentIntent = async () => {
     try {
@@ -120,29 +166,142 @@ const CheckoutForm = () => {
     setLoading(false);
   };
 
+  const formatCurrency = (value) =>
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(value || 0);
+
+  const vietQrUrl = useMemo(() => {
+    const addInfo = encodeURIComponent(orderData.orderId || "SKYDISH");
+    return `https://img.vietqr.io/image/${selectedBank.shortName}-${selectedBank.accountNumber}-compact2.png?amount=${orderData.amount}&addInfo=${addInfo}`;
+  }, [selectedBank, orderData.amount, orderData.orderId]);
+
+  const handleCopy = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(value);
+      setTimeout(() => setCopyStatus(""), 2000);
+    } catch (err) {
+      console.error("Không thể sao chép", err);
+    }
+  };
+
+  const handleConfirmTransfer = () => {
+    setMessage("✅ Cảm ơn bạn! Đơn hàng sẽ được xác nhận ngay khi tiền tới tài khoản.");
+    setError(null);
+  };
+
   return (
     <div className="checkout-container">
-      <h2 className="checkout-title">Secure Payment</h2>
-      <form onSubmit={handleSubmit} className="checkout-form">
-        <div className="input-group">
-          <label>Card Number</label>
-          <CardNumberElement className="stripe-input" onChange={handleCardChange} />
-          {cardType && <span className={`card-icon ${cardType}`}></span>}
+      <h2 className="checkout-title">Thanh toán đơn hàng</h2>
+      <div className="summary-box">
+        <div>
+          <p className="summary-label">Mã đơn:</p>
+          <strong>{orderData.orderId}</strong>
         </div>
-        <div className="input-group">
-          <label>Expiry Date</label>
-          <CardExpiryElement className="stripe-input" onChange={handleCardChange} />
+        <div>
+          <p className="summary-label">Tổng tiền:</p>
+          <strong>{formatCurrency(orderData.amount)}</strong>
         </div>
-        <div className="input-group">
-          <label>CVC</label>
-          <CardCvcElement className="stripe-input" onChange={handleCardChange} />
+      </div>
+
+      <div className="payment-method-tabs">
+        {PAYMENT_METHODS.map((method) => (
+          <button
+            key={method.key}
+            type="button"
+            className={`payment-method-btn ${paymentMethod === method.key ? "active" : ""}`}
+            onClick={() => setPaymentMethod(method.key)}
+          >
+            {method.label}
+          </button>
+        ))}
+      </div>
+
+      {paymentMethod === "card" ? (
+        <form onSubmit={handleSubmit} className="checkout-form">
+          <div className="input-group">
+            <label>Số thẻ</label>
+            <CardNumberElement className="stripe-input" onChange={handleCardChange} />
+            {cardType && <span className={`card-icon ${cardType}`}></span>}
+          </div>
+          <div className="input-row">
+            <div className="input-group">
+              <label>Expiry</label>
+              <CardExpiryElement className="stripe-input" onChange={handleCardChange} />
+            </div>
+            <div className="input-group">
+              <label>CVC</label>
+              <CardCvcElement className="stripe-input" onChange={handleCardChange} />
+            </div>
+          </div>
+          <button type="submit" disabled={!stripe || loading || disablePayment} className="checkout-btn">
+            {loading ? <span className="spinner"></span> : "Thanh toán"}
+          </button>
+        </form>
+      ) : (
+        <div className="vietqr-section">
+          <p className="section-title">Chọn ngân hàng chuyển khoản</p>
+          <div className="bank-grid">
+            {BANKS.map((bank) => (
+              <button
+                key={bank.code}
+                type="button"
+                className={`bank-card ${selectedBank.code === bank.code ? "active" : ""}`}
+                onClick={() => setSelectedBank(bank)}
+              >
+                <div className="bank-name">{bank.name}</div>
+                <div className="bank-account">{bank.accountNumber}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="qr-wrapper">
+            <img src={vietQrUrl} alt={`QR ${selectedBank.name}`} className="qr-image" />
+            <div className="bank-details">
+              <div className="detail-row">
+                <span>Ngân hàng</span>
+                <strong>{selectedBank.name}</strong>
+              </div>
+              <div className="detail-row">
+                <span>Số tài khoản</span>
+                <div className="detail-value">
+                  <strong>{selectedBank.accountNumber}</strong>
+                  <button type="button" className="copy-btn" onClick={() => handleCopy(selectedBank.accountNumber)}>
+                    Sao chép
+                  </button>
+                  {copyStatus === selectedBank.accountNumber && <span className="copy-done">Đã sao chép</span>}
+                </div>
+              </div>
+              <div className="detail-row">
+                <span>Tên thụ hưởng</span>
+                <strong>{selectedBank.accountName}</strong>
+              </div>
+              <div className="detail-row">
+                <span>Nội dung</span>
+                <div className="detail-value">
+                  <strong>{orderData.orderId}</strong>
+                  <button type="button" className="copy-btn" onClick={() => handleCopy(orderData.orderId)}>
+                    Sao chép
+                  </button>
+                  {copyStatus === orderData.orderId && <span className="copy-done">Đã sao chép</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <ul className="vietqr-note">
+            <li>Số tiền: <strong>{formatCurrency(orderData.amount)}</strong></li>
+            <li>Sử dụng ứng dụng ngân hàng quét QR để tránh sai sót.</li>
+            <li>Vui lòng giữ nguyên nội dung chuyển khoản là mã đơn hàng.</li>
+          </ul>
+
+          <button type="button" className="checkout-btn secondary" onClick={handleConfirmTransfer}>
+            Tôi đã chuyển khoản
+          </button>
         </div>
-        <button type="submit" disabled={!stripe || loading || disablePayment} className="checkout-btn">
-          {loading ? <span className="spinner"></span> : "Pay"}
-        </button>
-        {error && <div className="checkout-error">{error}</div>}
-        {message && <div className="checkout-success">{message}</div>}
-      </form>
+      )}
+
+      {error && <div className="checkout-error">{error}</div>}
+      {message && <div className="checkout-success">{message}</div>}
     </div>
   );
 };

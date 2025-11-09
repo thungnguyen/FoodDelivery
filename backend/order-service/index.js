@@ -7,6 +7,8 @@ import cors from "cors";
 import orderRoutes from "./routes/orderRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import financeRoutes from "./routes/financeRoutes.js";
+import { startOrderEventConsumers } from "./events/index.js";
+import { connectRabbitMQ } from "./src/rabbitmq.js";
 
 dotenv.config();
 connectDB();
@@ -43,6 +45,12 @@ io.on("connection", (socket) => {
         console.log("A user disconnected:", socket.id);
     });
 });
+
+connectRabbitMQ()
+    .then(() => startOrderEventConsumers())
+    .catch((error) => {
+        console.error("[order-service] Failed to initialize RabbitMQ:", error.message);
+    });
 
 const PORT = process.env.PORT || 5005;
 app.listen(PORT, () => console.log(`Order Service running on port ${PORT}`));

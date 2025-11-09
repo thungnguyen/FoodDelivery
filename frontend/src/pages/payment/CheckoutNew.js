@@ -1,10 +1,17 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
-import { Elements, useStripe, useElements, CardNumberElement, CardExpiryElement, CardCvcElement } from "@stripe/react-stripe-js";
+import {
+  Elements,
+  useStripe,
+  useElements,
+  CardNumberElement,
+  CardExpiryElement,
+  CardCvcElement,
+} from "@stripe/react-stripe-js";
 import axios from "axios";
-import { Button, Spinner } from "react-bootstrap";
-import { BsArrowLeftCircle, BsCreditCard, BsCash } from "react-icons/bs";
+import { Spinner } from "react-bootstrap";
+import { BsArrowLeftCircle, BsCreditCard, BsQrCode } from "react-icons/bs";
 import "../../styles/checkout.css";
 import { PAYMENT_SERVICE_URL, ORDER_SERVICE_URL } from "../../utils/serviceUrls";
 import { CartContext } from "../contexts/CartContext";
@@ -13,6 +20,50 @@ import { computeShippingFee, roundCurrency } from "../../utils/pricing";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
+const PAYMENT_METHODS = [
+  { key: "card", label: "Thẻ quốc tế (Visa/Mastercard)", icon: <BsCreditCard size={18} /> },
+  { key: "vietqr", label: "Chuyển khoản VietQR", icon: <BsQrCode size={18} /> },
+  { key: "cash", label: "Thanh toán tiền mặt", icon: <span role="img" aria-label="cash">💵</span> },
+];
+
+const BANKS = [
+  {
+    code: "VCB",
+    name: "Vietcombank",
+    shortName: "VCB",
+    accountNumber: "00123456789",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh Hà Nội",
+  },
+  {
+    code: "ACB",
+    name: "Ngân hàng ACB",
+    shortName: "ACB",
+    accountNumber: "8686868686",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh TP.HCM",
+  },
+  {
+    code: "BIDV",
+    name: "BIDV",
+    shortName: "BIDV",
+    accountNumber: "1234567890",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh Bình Thạnh",
+  },
+  {
+    code: "TCB",
+    name: "Techcombank",
+    shortName: "TCB",
+    accountNumber: "1900123456788",
+    accountName: "CONG TY SKYDISH",
+    branch: "Chi nhánh Phú Mỹ Hưng",
+  },
+];
+
+const formatCurrency = (value = 0) =>
+  new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(value);
+
 const CheckoutFormInner = () => {
   const stripe = useStripe();
   const elements = useElements();
@@ -20,89 +71,105 @@ const CheckoutFormInner = () => {
   const { clearCart } = useContext(CartContext);
 
   const [orderData, setOrderData] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState("card"); // "card" or "cash"
+  const [paymentMethod, setPaymentMethod] = useState("card");
   const [clientSecret, setClientSecret] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [message, setMessage] = useState("");
+  const [selectedBank, setSelectedBank] = useState(BANKS[0]);
+  const [copyStatus, setCopyStatus] = useState("");
 
   useEffect(() => {
-    // Load pending order from localStorage
     const pendingOrder = localStorage.getItem("pendingOrder");
     if (!pendingOrder) {
-      alert("No order found. Please create an order first.");
+      alert("Không tìm thấy đơn hàng. Vui lòng đặt hàng lại.");
       navigate("/customer/home");
       return;
     }
     try {
       const parsed = JSON.parse(pendingOrder);
       const items = Array.isArray(parsed.items) ? parsed.items : [];
-      const derivedItemsTotal = roundCurrency(
+      const derivedItemsTotal =
         parsed.itemsTotal ??
-          items.reduce(
-            (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
-            0
-          )
-      );
-      const derivedShipping = roundCurrency(
-        parsed.shippingFee ?? computeShippingFee(items)
-      );
-      const derivedTotal = roundCurrency(
-        parsed.totalPrice ?? derivedItemsTotal + derivedShipping
-      );
+        items.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
+      const derivedShipping = parsed.shippingFee ?? computeShippingFee(items);
+      const derivedTotal = parsed.totalPrice ?? derivedItemsTotal + derivedShipping;
+
       setOrderData({
         ...parsed,
-        items: items,
-        itemsTotal: derivedItemsTotal,
-        shippingFee: derivedShipping,
-        totalPrice: derivedTotal,
+        items,
+        itemsTotal: roundCurrency(derivedItemsTotal),
+        shippingFee: roundCurrency(derivedShipping),
+        totalPrice: roundCurrency(derivedTotal),
       });
     } catch (err) {
       console.error("Failed to parse pending order from storage", err);
       localStorage.removeItem("pendingOrder");
-      alert("Order data is corrupted. Please recreate your order.");
+      alert("Dữ liệu đơn hàng lỗi. Vui lòng tạo lại đơn hàng.");
       navigate("/customer/home");
     }
   }, [navigate]);
 
-  // Create payment intent for card payment
+  const totals = useMemo(() => {
+    if (!orderData) {
+      return { items: 0, shipping: 0, grand: 0 };
+    }
+    const items = roundCurrency(
+      orderData.itemsTotal ??
+        orderData.items.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
+    );
+    const shipping = roundCurrency(orderData.shippingFee ?? computeShippingFee(orderData.items));
+    return {
+      items,
+      shipping,
+      grand: roundCurrency(items + shipping),
+    };
+  }, [orderData]);
+
+  const qrUrl = useMemo(() => {
+    if (!orderData) return "";
+    const addInfo = encodeURIComponent(orderData.orderId || `SKYDISH-${orderData.customerId || ""}`);
+    return `https://img.vietqr.io/image/${selectedBank.shortName}-${selectedBank.accountNumber}-compact2.png?amount=${totals.grand}&addInfo=${addInfo}`;
+  }, [orderData, selectedBank, totals.grand]);
+
   const createPaymentIntent = async () => {
     if (!orderData) return;
-
     try {
+      const fullName = (orderData.customerName || "").trim();
+      const [first = "Khach", ...rest] = fullName.length ? fullName.split(" ") : ["Khach"];
+      const last = rest.length ? rest.join(" ") : first;
+
       const paymentData = {
         orderId: `ORD${Date.now()}`,
         userId: orderData.customerId,
         amount: orderData.totalPrice,
         currency: "usd",
-        firstName: orderData.customerName.split(" ")[0],
-        lastName: orderData.customerName.split(" ").slice(1).join(" "),
+        firstName: first,
+        lastName: last,
         email: orderData.customerEmail,
         phone: orderData.customerPhone,
       };
 
       const response = await axios.post(`${PAYMENT_SERVICE_URL}/api/payment/process`, paymentData);
-
       if (response.data.clientSecret) {
         setClientSecret(response.data.clientSecret);
       } else {
-        setError("⚠️ No valid payment secret found.");
+        setError("⚠️ Không nhận được khóa thanh toán hợp lệ.");
       }
     } catch (err) {
       console.error("Error creating PaymentIntent", err);
-      setError("❌ Failed to create payment. Please try again.");
+      setError("❌ Không thể tạo thanh toán. Vui lòng thử lại.");
     }
   };
 
-  // Handle card payment
   const handleCardPayment = async () => {
     if (!stripe || !elements || !clientSecret) {
-      setError("⚠️ Payment not ready.");
+      setError("⚠️ Thanh toán chưa sẵn sàng.");
       return false;
     }
 
     const cardElement = elements.getElement(CardNumberElement);
-    const { error, paymentMethod: pm } = await stripe.createPaymentMethod({
+    const { error: pmError, paymentMethod: pm } = await stripe.createPaymentMethod({
       type: "card",
       card: cardElement,
       billing_details: {
@@ -111,8 +178,8 @@ const CheckoutFormInner = () => {
       },
     });
 
-    if (error) {
-      setError(error.message);
+    if (pmError) {
+      setError(pmError.message);
       return false;
     }
 
@@ -125,48 +192,35 @@ const CheckoutFormInner = () => {
       return false;
     }
 
-    if (paymentIntent.status === "succeeded") {
-      return true;
-    }
-
-    return false;
+    return paymentIntent.status === "succeeded";
   };
 
-  // Handle order submission
+  const handleCopy = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(value);
+      setTimeout(() => setCopyStatus(""), 2000);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
+
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      let paymentSuccess = false;
-
-      // If card payment, process stripe payment first
+      let paymentSuccess = true;
       if (paymentMethod === "card") {
         paymentSuccess = await handleCardPayment();
         if (!paymentSuccess) {
           setLoading(false);
           return;
         }
-      } else {
-        // Cash payment - no need to process payment
-        paymentSuccess = true;
       }
 
-      // Create order in backend
       const token = getAuthToken(AUTH_ROLES.CUSTOMER);
-      const itemsTotal = roundCurrency(
-        orderData.itemsTotal ??
-          orderData.items.reduce(
-            (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
-            0
-          )
-      );
-      const shippingFee = roundCurrency(
-        orderData.shippingFee ?? computeShippingFee(orderData.items)
-      );
-      const calculatedTotal = roundCurrency(itemsTotal + shippingFee);
-
       const paymentStatusValue = paymentMethod === "card" ? "Paid" : "Pending";
 
       const orderPayload = {
@@ -177,182 +231,225 @@ const CheckoutFormInner = () => {
         restaurantId: orderData.restaurantId,
         restaurantName: orderData.restaurantName,
         items: orderData.items,
-        itemsTotal,
-        shippingFee,
-        totalPrice: calculatedTotal,
+        itemsTotal: totals.items,
+        shippingFee: totals.shipping,
+        totalPrice: totals.grand,
         deliveryAddress: orderData.deliveryAddress,
-        paymentMethod: paymentMethod,
+        paymentMethod,
         paymentStatus: paymentStatusValue,
-        status: "Pending", // Initial order status
+        status: "Pending",
       };
 
-      const response = await axios.post(`${ORDER_SERVICE_URL}/api/orders`, orderPayload, {
+      await axios.post(`${ORDER_SERVICE_URL}/api/orders`, orderPayload, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Clear cart and pending order
       clearCart();
       localStorage.removeItem("pendingOrder");
-
-      setMessage("✅ Order placed successfully!");
-
-      setTimeout(() => {
-        navigate("/customer/orders");
-      }, 2000);
-
-    } catch (error) {
-      console.error("Error creating order:", error);
-      setError(error.response?.data?.message || "Failed to create order. Please try again.");
+      setMessage("✅ Đặt hàng thành công! Hệ thống sẽ xác nhận sớm nhất.");
+      setTimeout(() => navigate("/customer/orders"), 2000);
+    } catch (err) {
+      console.error("Error creating order:", err);
+      setError(err.response?.data?.message || "Không thể tạo đơn hàng. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Trigger payment intent creation when switching to card
   useEffect(() => {
     if (paymentMethod === "card" && orderData && !clientSecret) {
       createPaymentIntent();
     }
-  }, [paymentMethod, orderData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethod, orderData, clientSecret]);
 
   if (!orderData) {
     return (
       <div style={{ padding: "40px", textAlign: "center" }}>
         <Spinner animation="border" />
-        <p>Loading order...</p>
+        <p>Đang tải dữ liệu đơn hàng...</p>
       </div>
     );
   }
 
-  const displayItemsTotal = roundCurrency(
-    orderData.itemsTotal ??
-      orderData.items.reduce(
-        (sum, item) => sum + (item.price || 0) * (item.quantity || 1),
-        0
-      )
-  );
-  const displayShippingFee = roundCurrency(
-    orderData.shippingFee ?? computeShippingFee(orderData.items)
-  );
-  const displayGrandTotal = roundCurrency(displayItemsTotal + displayShippingFee);
-
   return (
-    <div className="container" style={{ padding: "20px", backgroundColor: "#f0f4f8", minHeight: "100vh" }}>
-      {/* Back Button */}
-      <Button
-        variant="link"
-        onClick={() => navigate("/orders/new")}
-        style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "16px", color: "#333", marginBottom: "20px", textDecoration: "none" }}
-      >
-        <BsArrowLeftCircle size={22} /> Back to Order Summary
-      </Button>
+    <div className="checkout-page">
+      <button className="back-link" type="button" onClick={() => navigate("/orders/new")}>
+        <BsArrowLeftCircle size={18} /> Quay lại giỏ hàng
+      </button>
 
-      <div style={{ maxWidth: "800px", margin: "0 auto", backgroundColor: "white", padding: "30px", borderRadius: "8px", boxShadow: "0 4px 10px rgba(0, 0, 0, 0.1)" }}>
-        <h2 style={{ textAlign: "center", marginBottom: "30px", color: "#333" }}>💳 Checkout</h2>
+      <div className="checkout-container">
+        <div className="summary-box">
+          <div>
+            <p className="summary-label">Mã đơn tạm</p>
+            <strong>{orderData.orderId || "Chưa tạo"}</strong>
+          </div>
+          <div>
+            <p className="summary-label">Tổng thanh toán</p>
+            <strong>{formatCurrency(totals.grand)}</strong>
+          </div>
+        </div>
 
-        {/* Order Summary */}
-        <div style={{ marginBottom: "30px", padding: "15px", backgroundColor: "#f8f9fa", borderRadius: "6px" }}>
-          <h5 style={{ marginBottom: "15px", color: "#555" }}>📦 Order Summary</h5>
-          {orderData.items.map((item, index) => (
-            <div key={index} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}>
-              <span>
-                {item.foodName} <span style={{ color: "#666", fontSize: "0.9rem" }}>x {item.quantity || 1}</span>
-              </span>
-              <span>Rs. {(item.price || 0) * (item.quantity || 1)}</span>
+        <div className="order-breakdown">
+          <h4>Chi tiết món</h4>
+          {(orderData.items || []).map((item, index) => (
+            <div key={`${item.foodId}-${index}`} className="order-item">
+              <div>
+                <p className="item-name">{item.foodName}</p>
+                <p className="item-qty">x{item.quantity || 1}</p>
+              </div>
+              <p className="item-price">
+                {formatCurrency((item.price || 0) * (item.quantity || 1))}
+              </p>
             </div>
           ))}
-          <hr />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", marginBottom: "6px" }}>
-            <span>Subtotal:</span>
-            <span>Rs. {displayItemsTotal}</span>
+          <div className="order-total-row">
+            <span>Tạm tính</span>
+            <strong>{formatCurrency(totals.items)}</strong>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", marginBottom: "6px" }}>
-            <span>Shipping:</span>
-            <span>Rs. {displayShippingFee}</span>
+          <div className="order-total-row">
+            <span>Phí giao hàng</span>
+            <strong>{formatCurrency(totals.shipping)}</strong>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "18px" }}>
-            <span>Total:</span>
-            <span>Rs. {displayGrandTotal}</span>
-          </div>
-        </div>
-
-        {/* Payment Method Selection */}
-        <div style={{ marginBottom: "25px" }}>
-          <h5 style={{ marginBottom: "15px", color: "#555" }}>Select Payment Method</h5>
-          <div style={{ display: "flex", gap: "15px" }}>
-            <Button
-              variant={paymentMethod === "card" ? "primary" : "outline-primary"}
-              onClick={() => setPaymentMethod("card")}
-              style={{ flex: 1, padding: "15px", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}
-            >
-              <BsCreditCard size={20} /> Credit/Debit Card
-            </Button>
-            <Button
-              variant={paymentMethod === "cash" ? "success" : "outline-success"}
-              onClick={() => setPaymentMethod("cash")}
-              style={{ flex: 1, padding: "15px", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}
-            >
-              <BsCash size={20} /> Cash on Delivery
-            </Button>
+          <div className="order-total-row grand">
+            <span>Tổng thanh toán</span>
+            <strong>{formatCurrency(totals.grand)}</strong>
           </div>
         </div>
 
-        {/* Card Payment Form */}
+        <div className="payment-method-tabs">
+          {PAYMENT_METHODS.map((method) => (
+            <button
+              key={method.key}
+              type="button"
+              className={`payment-method-btn ${paymentMethod === method.key ? "active" : ""}`}
+              onClick={() => setPaymentMethod(method.key)}
+            >
+              {method.icon}
+              <span>{method.label}</span>
+            </button>
+          ))}
+        </div>
+
         {paymentMethod === "card" && (
-          <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>Card Number</label>
-              <div style={{ padding: "12px", border: "1px solid #ddd", borderRadius: "4px" }}>
-                <CardNumberElement />
+          <form onSubmit={handleSubmit} className="checkout-form">
+            <div className="input-group">
+              <label>Số thẻ</label>
+              <CardNumberElement className="stripe-input" />
+            </div>
+            <div className="input-row">
+              <div className="input-group">
+                <label>Expiry</label>
+                <CardExpiryElement className="stripe-input" />
+              </div>
+              <div className="input-group">
+                <label>CVC</label>
+                <CardCvcElement className="stripe-input" />
               </div>
             </div>
-            <div style={{ display: "flex", gap: "15px", marginBottom: "20px" }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>Expiry Date</label>
-                <div style={{ padding: "12px", border: "1px solid #ddd", borderRadius: "4px" }}>
-                  <CardExpiryElement />
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>CVC</label>
-                <div style={{ padding: "12px", border: "1px solid #ddd", borderRadius: "4px" }}>
-                  <CardCvcElement />
-                </div>
-              </div>
-            </div>
-            <Button type="submit" disabled={!stripe || loading} style={{ width: "100%", padding: "14px", fontSize: "18px", fontWeight: "600" }}>
-              {loading ? <><Spinner animation="border" size="sm" /> Processing...</> : "Place Order & Pay"}
-            </Button>
+            <button type="submit" disabled={!stripe || loading} className="checkout-btn">
+              {loading ? "Đang xử lý..." : "Thanh toán & đặt hàng"}
+            </button>
           </form>
         )}
 
-        {/* Cash Payment */}
-        {paymentMethod === "cash" && (
-          <div>
-            <div style={{ padding: "20px", backgroundColor: "#fff3cd", borderRadius: "6px", marginBottom: "20px" }}>
-              <p style={{ margin: 0, color: "#856404" }}>
-                <strong>Note:</strong> Please prepare exact change. Payment will be collected upon delivery.
-              </p>
+        {paymentMethod === "vietqr" && (
+          <div className="vietqr-section">
+            <p className="section-title">Chọn ngân hàng chuyển khoản</p>
+            <div className="bank-grid">
+              {BANKS.map((bank) => (
+                <button
+                  key={bank.code}
+                  type="button"
+                  className={`bank-card ${selectedBank.code === bank.code ? "active" : ""}`}
+                  onClick={() => setSelectedBank(bank)}
+                >
+                  <div className="bank-name">{bank.name}</div>
+                  <div className="bank-account">{bank.accountNumber}</div>
+                </button>
+              ))}
             </div>
-            <Button onClick={handleSubmit} disabled={loading} style={{ width: "100%", padding: "14px", fontSize: "18px", fontWeight: "600", backgroundColor: "#28a745", borderColor: "#28a745" }}>
-              {loading ? <><Spinner animation="border" size="sm" /> Processing...</> : "Place Order (Cash on Delivery)"}
-            </Button>
+
+            <div className="qr-wrapper">
+              {qrUrl && <img src={qrUrl} alt="VietQR" className="qr-image" />}
+              <div className="bank-details">
+                <div className="detail-row">
+                  <span>Ngân hàng</span>
+                  <strong>{selectedBank.name}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Số tài khoản</span>
+                  <div className="detail-value">
+                    <strong>{selectedBank.accountNumber}</strong>
+                    <button type="button" className="copy-btn" onClick={() => handleCopy(selectedBank.accountNumber)}>
+                      Sao chép
+                    </button>
+                    {copyStatus === selectedBank.accountNumber && <span className="copy-done">Đã sao chép</span>}
+                  </div>
+                </div>
+                <div className="detail-row">
+                  <span>Tên thụ hưởng</span>
+                  <strong>{selectedBank.accountName}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Nội dung</span>
+                  <div className="detail-value">
+                    <strong>{orderData.orderId || `DH-${orderData.customerId || ""}`}</strong>
+                    <button
+                      type="button"
+                      className="copy-btn"
+                      onClick={() => handleCopy(orderData.orderId || `DH-${orderData.customerId || ""}`)}
+                    >
+                      Sao chép
+                    </button>
+                    {copyStatus === (orderData.orderId || `DH-${orderData.customerId || ""}`) && (
+                      <span className="copy-done">Đã sao chép</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <ul className="vietqr-note">
+              <li>Số tiền: <strong>{formatCurrency(totals.grand)}</strong></li>
+              <li>Quét mã bằng app ngân hàng hoặc nhập thông tin ở trên.</li>
+              <li>Giữ nguyên nội dung chuyển khoản để hệ thống đối soát.</li>
+            </ul>
+
+            <button type="button" className="checkout-btn secondary" onClick={handleSubmit} disabled={loading}>
+              {loading ? "Đang xác nhận..." : "Tôi đã chuyển khoản"}
+            </button>
           </div>
         )}
 
-        {error && <div style={{ color: "red", marginTop: "15px", textAlign: "center" }}>{error}</div>}
-        {message && <div style={{ color: "green", marginTop: "15px", textAlign: "center", fontWeight: "bold" }}>{message}</div>}
+        {paymentMethod === "cash" && (
+          <div className="vietqr-section">
+            <div className="cash-note">
+              <p>
+                <strong>Thanh toán tiền mặt khi nhận hàng</strong>
+              </p>
+              <ul>
+                <li>Chuẩn bị sẵn số tiền: <strong>{formatCurrency(totals.grand)}</strong></li>
+                <li>Tài xế sẽ liên hệ trước khi giao để xác nhận thời gian, vui lòng chuẩn bị tiền lẻ.</li>
+              </ul>
+            </div>
+            <button type="button" className="checkout-btn secondary" onClick={handleSubmit} disabled={loading}>
+              {loading ? "Đang xác nhận..." : "Đặt hàng & trả tiền mặt"}
+            </button>
+          </div>
+        )}
+
+        {error && <div className="checkout-error">{error}</div>}
+        {message && <div className="checkout-success">{message}</div>}
       </div>
     </div>
   );
 };
 
-const CheckoutNew = () => {
-  return (
-    <Elements stripe={stripePromise}>
-      <CheckoutFormInner />
-    </Elements>
-  );
-};
+const CheckoutNew = () => (
+  <Elements stripe={stripePromise}>
+    <CheckoutFormInner />
+  </Elements>
+);
 
 export default CheckoutNew;

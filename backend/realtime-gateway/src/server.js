@@ -5,6 +5,8 @@ import cors from 'cors';
 import { Server as SocketIOServer } from 'socket.io';
 import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
+import { startRealtimeConsumers } from './events/index.js';
+import { connectRabbitMQ } from './rabbitmq.js';
 
 const {
   PORT = 5050,
@@ -72,6 +74,12 @@ redisSubscriber.on('message', (_channel, message) => {
     console.error('[realtime-gateway] Failed to parse Redis message', error);
   }
 });
+
+connectRabbitMQ()
+  .then(() => startRealtimeConsumers(emitToClients))
+  .catch((error) => {
+    console.error('[realtime-gateway] Failed to start RabbitMQ consumers:', error.message);
+  });
 
 io.use((socket, next) => {
   try {
