@@ -65,12 +65,12 @@ function CustomerHome() {
 
   const categories = useMemo(
     () => [
-      "Món Việt",
-      "Mì & Phở",
-      "Cà phê & Trà sữa",
-      "Đồ ăn nhanh",
-      "Tráng miệng",
-      "Ăn sáng nhanh",
+      "Tiệm Phở của Anh Hai",
+      "Cơm Tấm Sà Bì Chưởng",
+      "Cơm Quê Dượng Bầu",
+      "Bánh Tằm Bì Thầy Giáo Ba",
+      "Mì cay Chú Ba Duy",
+      "The Coffee House",
     ],
     []
   );

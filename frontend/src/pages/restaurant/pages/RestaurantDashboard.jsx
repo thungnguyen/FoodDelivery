@@ -250,7 +250,7 @@ function RestaurantDashboard() {
 
   const handleLogout = () => {
     clearAuthToken(AUTH_ROLES.RESTAURANT);
-    window.location.href = '/restaurant/homes';
+    window.location.href = '/';
   };
 
   const handleUnauthorizedError = useCallback(() => {

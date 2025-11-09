@@ -10,7 +10,11 @@ import {
 import { CartContext } from "../../pages/contexts/CartContext";
 import { clearAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 
-function CustomerLayout({ customerName = "Khách hàng thân thiết", children }) {
+function CustomerLayout({
+  customerName = "Khách hàng thân thiết",
+  badgeImageSrc = "/hungdaifood-delivery.png",
+  children,
+}) {
   const navigate = useNavigate();
   const { cartItems } = useContext(CartContext);
 
@@ -18,6 +22,20 @@ function CustomerLayout({ customerName = "Khách hàng thân thiết", children 
     () => cartItems.reduce((count, item) => count + (item.quantity || 1), 0),
     [cartItems]
   );
+
+  const fallbackInitials = useMemo(() => {
+    const trimmed = customerName?.trim();
+    if (!trimmed) {
+      return "FF";
+    }
+    const initials = trimmed
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("");
+    return initials || "FF";
+  }, [customerName]);
 
   const handleLogout = useCallback(() => {
     clearAuthToken(AUTH_ROLES.CUSTOMER);
@@ -130,25 +148,40 @@ function CustomerLayout({ customerName = "Khách hàng thân thiết", children 
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <div
-              style={{
-                width: "44px",
-                height: "44px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, #fb923c, #ef4444)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 700,
-                fontSize: "16px",
-                color: "#fff",
-              }}
-            >
-              FF
-            </div>
+            {badgeImageSrc ? (
+              <img
+                src={badgeImageSrc}
+                alt="Customer badge"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  borderRadius: "12px",
+                  objectFit: "cover",
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  boxShadow: "0 10px 20px rgba(15,23,42,0.45)",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  borderRadius: "12px",
+                  background: "linear-gradient(135deg, #fb923c, #ef4444)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                  fontSize: "16px",
+                  color: "#fff",
+                }}
+              >
+                {fallbackInitials}
+              </div>
+            )}
             <div>
               <p style={{ margin: 0, fontSize: "13px", letterSpacing: "0.08em", opacity: 0.75 }}>
-                FoodieFlow Customer
+                HungDaiFoodie Customer
               </p>
               <h2 style={{ margin: "4px 0 0", fontSize: "20px", fontWeight: 600 }}>
                 Xin chào, {customerName}!

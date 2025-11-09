@@ -91,7 +91,7 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
 
                                         <p style="color: #555; font-size: 16px;">Thank you for choosing our service. If you have any questions, feel free to reply to this email.</p>
 
-                                        <p style="margin-top: 32px; color: #888; font-size: 14px;">— SkyDish Food Delivery Team</p>
+                                        <p style="margin-top: 32px; color: #888; font-size: 14px;">— HungDai Food Delivery Team</p>
                                     </div>
                                     `;
                 const emailText = `Dear Customer, Your payment for Order ${payment.orderId} was successful! Thank you for your order.`;
