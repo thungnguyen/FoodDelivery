@@ -7,6 +7,8 @@ const swaggerUi = require("swagger-ui-express");
 
 const paymentRoutes = require("./routes/paymentRoutes");
 const webhookRoutes = require("./routes/webhookRoutes");
+const { startPaymentEventConsumers } = require("./events/orderCreatedConsumer");
+const { connectRabbitMQ } = require("./src/rabbitmq");
 
 // Connect to MongoDB
 connectDB();
@@ -53,3 +55,9 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 module.exports = app;
+
+connectRabbitMQ()
+  .then(() => startPaymentEventConsumers())
+  .catch((error) => {
+    console.error("[payment-service] Failed to initialize RabbitMQ:", error.message);
+  });
