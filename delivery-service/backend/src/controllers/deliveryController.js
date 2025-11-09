@@ -10,6 +10,8 @@ import {
   fetchAwaitingOrders,
   fetchOrdersByIds,
 } from "../utils/orderServiceClient.js";
+import { publish as publishRabbit } from "../rabbitmq.js";
+import buildDeliveryRooms from "../utils/realtimeRooms.js";
 
 const STATUS_TRANSITIONS = {
   assigned: ["accepted", "cancelled"],
@@ -532,6 +534,30 @@ export const updateDeliveryStatus = async (req, res) => {
     }
 
     await delivery.save();
+
+    if (status === "delivered") {
+      const completionPayload = {
+        orderId: delivery.orderId,
+        deliveryId: delivery._id.toString(),
+        driverId: delivery.driver?.toString?.() || delivery.driver,
+        customerId: delivery.customerId,
+        restaurantId: delivery.restaurantId,
+        deliveredAt,
+        totalEarnings: delivery.totalEarnings,
+        status: "Delivered",
+        paymentStatus: null,
+      };
+
+      await publishRabbit("delivery.completed", {
+        ...completionPayload,
+        rooms: buildDeliveryRooms({
+          orderId: delivery.orderId,
+          customerId: delivery.customerId,
+          restaurantId: delivery.restaurantId,
+          driverId: delivery.driver,
+        }),
+      });
+    }
 
     if (ORDER_STATUS_MAPPING[status]) {
       await updateOrderStatus(

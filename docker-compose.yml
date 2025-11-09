@@ -8,44 +8,46 @@ services:
     networks:
       - appnet
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: unless-stopped
+    networks:
+      - appnet
+
   auth-service:
-    image: node:20-alpine
+    build:
+      context: ./backend/auth-service
     container_name: auth-service
-    working_dir: /usr/src/app
-    command: sh -c "npm install && node server.js"
-    volumes:
-      - ./backend/auth-service:/usr/src/app
-      - /usr/src/app/node_modules
     env_file:
       - .env
     environment:
-      PORT: ${AUTH_PORT:-4000}
+      PORT: ${AUTH_PORT:-5000}
       MONGO_URI: ${AUTH_MONGO_URI}
       AUTH_DB_NAME: ${AUTH_DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
-      NODE_ENV: development
+      NODE_ENV: production
     ports:
-      - "${AUTH_PORT:-4000}:${AUTH_PORT:-4000}"
+      - "${AUTH_PORT:-5000}:${AUTH_PORT:-5000}"
     restart: unless-stopped
     networks:
       - appnet
 
   restaurant-service:
-    image: node:20-alpine
+    build:
+      context: ./backend/restaurant-service
     container_name: restaurant-service
-    working_dir: /usr/src/app
-    command: sh -c "npm install && node src/server.js"
-    volumes:
-      - ./backend/restaurant-service:/usr/src/app
-      - /usr/src/app/node_modules
     env_file:
       - .env
     environment:
       PORT: ${REST_PORT:-5002}
       MONGO_URI: ${RESTAURANT_MONGO_URI}
       RESTAURANT_DB_NAME: ${RESTAURANT_DB_NAME}
-      NODE_ENV: development
+      NODE_ENV: production
     ports:
       - "${REST_PORT:-5002}:${REST_PORT:-5002}"
     restart: unless-stopped
@@ -53,36 +55,31 @@ services:
       - appnet
 
   order-service:
-    image: node:20-alpine
+    build:
+      context: ./backend/order-service
     container_name: order-service
-    working_dir: /usr/src/app
-    command: sh -c "npm install && node index.js"
-    volumes:
-      - ./backend/order-service:/usr/src/app
-      - /usr/src/app/node_modules
     env_file:
       - .env
     environment:
       PORT: ${ORDER_PORT:-5005}
       MONGO_URI: ${ORDER_MONGO_URI}
       ORDER_DB_NAME: ${ORDER_DB_NAME}
-      NODE_ENV: development
+      NODE_ENV: production
       REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
       SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
+      RABBITMQ_URL: amqp://rabbitmq:5672
     ports:
       - "${ORDER_PORT:-5005}:${ORDER_PORT:-5005}"
+    depends_on:
+      - rabbitmq
     restart: unless-stopped
     networks:
       - appnet
 
   delivery-service:
-    image: node:20-alpine
+    build:
+      context: ./delivery-service/backend
     container_name: delivery-service
-    working_dir: /usr/src/app
-    command: sh -c "npm install && node src/server.js"
-    volumes:
-      - ./delivery-service/backend:/usr/src/app
-      - /usr/src/app/node_modules
     env_file:
       - .env
     environment:
@@ -90,23 +87,22 @@ services:
       MONGO_URI: ${DELIVERY_MONGO_URI}
       DELIVERY_DB_NAME: ${DELIVERY_DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
-      NODE_ENV: development
+      NODE_ENV: production
       REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
       SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
+      RABBITMQ_URL: amqp://rabbitmq:5672
     ports:
       - "${DELIVERY_PORT:-5003}:${DELIVERY_PORT:-5003}"
+    depends_on:
+      - rabbitmq
     restart: unless-stopped
     networks:
       - appnet
 
   payment-service:
-    image: node:20-alpine
+    build:
+      context: ./backend/payment-service
     container_name: payment-service
-    working_dir: /usr/src/app
-    command: sh -c "npm install && node server.js"
-    volumes:
-      - ./backend/payment-service:/usr/src/app
-      - /usr/src/app/node_modules
     env_file:
       - .env
     environment:
@@ -119,71 +115,49 @@ services:
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
       RESEND_API_KEY: ${RESEND_API_KEY}
-      NODE_ENV: development
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://rabbitmq:5672
     ports:
       - "${PAY_PORT:-5004}:${PAY_PORT:-5004}"
+    depends_on:
+      - rabbitmq
     restart: unless-stopped
     networks:
       - appnet
 
   frontend:
-    image: node:20-alpine
+    build:
+      context: ./frontend
     container_name: frontend
-    working_dir: /usr/src/app
-    command: sh -c "npm install && npm start"
-    volumes:
-      - ./frontend:/usr/src/app
-      - /usr/src/app/node_modules
-    env_file:
-      - frontend/.env
-    environment:
-      PORT: 3000
-      HOST: 0.0.0.0
-      CI: "false"
-      CHOKIDAR_USEPOLLING: "true"
-      WATCHPACK_POLLING: "true"
     depends_on:
       - auth-service
+      - restaurant-service
+      - order-service
+      - payment-service
+      - delivery-service
+      - realtime-gateway
     ports:
-      - "3000:3000"
+      - "3000:80"
     restart: unless-stopped
-    stdin_open: true
-    tty: true
     networks:
       - appnet
 
   delivery-frontend:
-    image: node:20-alpine
+    build:
+      context: ./delivery-service/frontend
     container_name: delivery-frontend
-    working_dir: /usr/src/app
-    command: sh -c "npm install && npm start"
-    volumes:
-      - ./delivery-service/frontend:/usr/src/app
-      - /usr/src/app/node_modules
-    environment:
-      PORT: 3001
-      HOST: 0.0.0.0
-      CI: "false"
-      CHOKIDAR_USEPOLLING: "true"
-      WATCHPACK_POLLING: "true"
     depends_on:
       - delivery-service
     ports:
-      - "3001:3001"
+      - "3001:80"
     restart: unless-stopped
-    stdin_open: true
-    tty: true
     networks:
       - appnet
 
   realtime-gateway:
-    image: node:20-alpine
+    build:
+      context: ./backend/realtime-gateway
     container_name: realtime-gateway
-    working_dir: /usr/src/app
-    command: sh -c "npm install && node src/server.js"
-    volumes:
-      - ./backend/realtime-gateway:/usr/src/app
-      - /usr/src/app/node_modules
     env_file:
       - .env
     environment:
@@ -191,9 +165,11 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
-      NODE_ENV: development
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://rabbitmq:5672
     depends_on:
       - redis
+      - rabbitmq
     ports:
       - "${REALTIME_PORT:-5050}:${REALTIME_PORT:-5050}"
     restart: unless-stopped

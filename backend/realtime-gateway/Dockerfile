@@ -8,6 +8,6 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-EXPOSE 5004
+EXPOSE 5050
 
 CMD ["npm", "start"]

@@ -1,5 +1,7 @@
 import Order from "../models/orderModel.js";
 import emitEvent from "../utils/eventBus.js";
+import { publish as publishRabbitEvent } from "../src/rabbitmq.js";
+import buildOrderRooms from "../utils/realtimeRooms.js";
 import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed"];
@@ -124,37 +126,6 @@ const recalculateOrderTotals = (orderDoc) => {
     orderDoc.totalPrice = Math.round((orderDoc.itemsTotal + orderDoc.shippingFee) * 100) / 100;
 };
 
-const toRoomId = (prefix, rawValue) => {
-    if (!rawValue) {
-        return null;
-    }
-    try {
-        const value = typeof rawValue === "string" ? rawValue : rawValue.toString();
-        if (!value || value === "[object Object]") {
-            return null;
-        }
-        return `${prefix}${value}`;
-    } catch (err) {
-        return null;
-    }
-};
-
-const buildOrderRooms = ({ orderId, customerId, restaurantId }) => {
-    const rooms = new Set();
-    const orderRoom = toRoomId("order:", orderId);
-    if (orderRoom) rooms.add(orderRoom);
-    rooms.add("role:superAdmin");
-    const customerRoom = toRoomId("customer:", customerId);
-    if (customerRoom) rooms.add(customerRoom);
-    const customerUserRoom = toRoomId("user:", customerId);
-    if (customerUserRoom) rooms.add(customerUserRoom);
-    const restaurantRoom = toRoomId("restaurant:", restaurantId);
-    if (restaurantRoom) rooms.add(restaurantRoom);
-    const restaurantUserRoom = toRoomId("user:", restaurantId);
-    if (restaurantUserRoom) rooms.add(restaurantUserRoom);
-    return Array.from(rooms);
-};
-
 // @desc Create new order
 // @route POST /api/orders
 export const createOrder = async (req, res) => {
@@ -226,6 +197,26 @@ export const createOrder = async (req, res) => {
 
         recalculateOrderTotals(order);
         await order.save();
+        const orderEventPayload = {
+            orderId: order._id.toString(),
+            customerId,
+            customerName,
+            customerEmail,
+            customerPhone,
+            restaurantId,
+            restaurantName,
+            items: normalizedItems,
+            itemsTotal: order.itemsTotal,
+            shippingFee: order.shippingFee,
+            totalPrice: order.totalPrice,
+            paymentMethod: normalizedPaymentMethod,
+            paymentStatus: normalizedPaymentStatus,
+            status: order.status,
+            deliveryAddress,
+            createdAt: order.createdAt,
+            updatedAt: order.updatedAt
+        };
+        await publishRabbitEvent("order.created", orderEventPayload);
         emitEvent({
             event: "order.created",
             payload: {
