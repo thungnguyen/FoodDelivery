@@ -26,22 +26,16 @@ const orderSchema = new mongoose.Schema(
         status: {
             type: String,
             enum: [
-                "Pending Confirmation",
                 "Pending",
                 "Confirmed",
                 "Preparing",
-                "Awaiting Driver",
-                "Ready for Delivery",
-                "Out for Delivery",
-                "Delivered",
+                "Delivering",
                 "Completed",
                 "Cancelled",
-                "Canceled",
                 "Failed",
-                "Failed/Undeliverable",
                 "Refunded"
             ],
-            default: "Pending Confirmation"
+            default: "Pending"
         },
         deliveryAddress: { type: String, required: true },
         deliveryFeedback: {

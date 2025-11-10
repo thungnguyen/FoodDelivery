@@ -8,12 +8,10 @@ import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed"];
 
 const CANONICAL_STATUSES = [
-    "Pending Confirmation",
+    "Pending",
     "Confirmed",
     "Preparing",
-    "Awaiting Driver",
-    "Out for Delivery",
-    "Delivered",
+    "Delivering",
     "Completed",
     "Cancelled",
     "Failed",
@@ -21,14 +19,15 @@ const CANONICAL_STATUSES = [
 ];
 
 const STATUS_ALIASES = {
-    pending: "Pending Confirmation",
-    "pending confirmation": "Pending Confirmation",
+    pending: "Pending",
+    "pending confirmation": "Pending",
     confirmed: "Confirmed",
     preparing: "Preparing",
-    "awaiting driver": "Awaiting Driver",
-    "ready for delivery": "Awaiting Driver",
-    "out for delivery": "Out for Delivery",
-    delivered: "Delivered",
+    "awaiting driver": "Delivering",
+    "ready for delivery": "Delivering",
+    "out for delivery": "Delivering",
+    delivering: "Delivering",
+    delivered: "Delivering",
     completed: "Completed",
     cancelled: "Cancelled",
     canceled: "Cancelled",
@@ -38,19 +37,14 @@ const STATUS_ALIASES = {
 };
 
 const CLOSED_STATUSES = new Set(["Completed", "Cancelled", "Failed", "Refunded"]);
-const RATEABLE_STATUSES = new Set(["Delivered", "Completed"]);
+const RATEABLE_STATUSES = new Set(["Completed"]);
 
 const STATUS_TRANSITIONS = {
     restaurant: {
-        "Pending Confirmation": ["Confirmed", "Cancelled"],
-        "Confirmed": ["Preparing", "Cancelled"],
-        "Preparing": ["Awaiting Driver", "Cancelled"],
-        "Awaiting Driver": ["Cancelled"]
-    },
-    driver: {
-        "Awaiting Driver": ["Out for Delivery", "Failed"],
-        "Out for Delivery": ["Delivered", "Failed"],
-        "Delivered": []
+        Pending: ["Confirmed", "Cancelled"],
+        Confirmed: ["Preparing", "Cancelled"],
+        Preparing: ["Delivering", "Cancelled"],
+        Delivering: []
     }
 };
 
@@ -125,6 +119,20 @@ const recalculateOrderTotals = (orderDoc) => {
     orderDoc.itemsTotal = Math.round(itemsTotal * 100) / 100;
     orderDoc.shippingFee = parseAmount(orderDoc.shippingFee, 0);
     orderDoc.totalPrice = Math.round((orderDoc.itemsTotal + orderDoc.shippingFee) * 100) / 100;
+};
+
+const buildOrderCompletedPayload = (orderDoc) => {
+    if (!orderDoc) {
+        return null;
+    }
+    const orderId =
+        typeof orderDoc._id?.toString === "function" ? orderDoc._id.toString() : String(orderDoc._id);
+    return {
+        orderId,
+        userId: orderDoc.customerId,
+        restaurantId: orderDoc.restaurantId,
+        total: orderDoc.totalPrice
+    };
 };
 
 // @desc Create new order
@@ -202,7 +210,7 @@ export const createOrder = async (req, res) => {
             (value) => value.toLowerCase() === (paymentStatus || "").toLowerCase()
         ) || "Pending";
 
-        const normalizedStatus = canonicalizeStatus(status) || "Pending Confirmation";
+        const normalizedStatus = canonicalizeStatus(status) || "Pending";
 
         const normalizedPaymentMethod = (paymentMethod || "cash").toLowerCase() === "card" ? "card" : "cash";
 
@@ -287,10 +295,7 @@ export const getOrders = async (req, res) => {
             if (customerId) {
                 query.customerId = customerId;
             }
-        } else if (req.user?.role === "driver") {
-            query.status = { $in: ["Awaiting Driver", "Out for Delivery", "Delivered", "Failed"] };
         }
-
         const requestedStatus = canonicalizeStatus(req.query?.status);
         if (requestedStatus) {
             query.status = requestedStatus;
@@ -412,6 +417,7 @@ export const updateOrderStatus = async (req, res) => {
     let raisedError = null;
     let orderResponse = null;
     let eventPayload = null;
+    let completionPayload = null;
 
     try {
         await session.withTransaction(async () => {
@@ -477,6 +483,10 @@ export const updateOrderStatus = async (req, res) => {
 
             await order.save({ session });
 
+            if (order.status === "Completed" && previousStatus !== "Completed") {
+                completionPayload = buildOrderCompletedPayload(order);
+            }
+
             orderResponse = toOrderResponse(order);
             eventPayload = {
                 event: "order.status.changed",
@@ -510,6 +520,118 @@ export const updateOrderStatus = async (req, res) => {
 
     if (eventPayload) {
         emitEvent(eventPayload);
+    }
+
+    if (completionPayload) {
+        await publishRabbitEvent("order.completed", completionPayload);
+    }
+
+    return res.status(200).json(orderResponse);
+};
+
+// @desc Customer confirms delivery and completes order
+// @route PATCH /api/orders/:id/received
+export const markOrderAsReceived = async (req, res) => {
+    const role = req.user?.role;
+    if (role !== "customer") {
+        return res.status(403).json({ message: "Only customers can confirm delivery." });
+    }
+
+    const customerId = req.user?.customerId || req.user?.id;
+    if (!customerId) {
+        return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const session = await Order.startSession();
+    let raisedError = null;
+    let orderResponse = null;
+    let eventPayload = null;
+    let completionPayload = null;
+
+    try {
+        await session.withTransaction(async () => {
+            const order = await Order.findById(req.params.id).session(session);
+            if (!order) {
+                const notFoundError = new Error("Order not found");
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
+
+            if (order.customerId && order.customerId !== customerId) {
+                const ownershipError = new Error("You can only confirm delivery for your own orders.");
+                ownershipError.statusCode = 403;
+                throw ownershipError;
+            }
+
+            const currentStatus = normalizeOrderStatusInPlace(order);
+            const previousStatus = currentStatus;
+
+            if (currentStatus === "Completed") {
+                orderResponse = toOrderResponse(order);
+                return;
+            }
+
+            if (currentStatus !== "Delivering") {
+                const invalidStatusError = new Error("Order must be in Delivering status before it can be completed.");
+                invalidStatusError.statusCode = 400;
+                throw invalidStatusError;
+            }
+
+            order.status = "Completed";
+
+            const financeSummary = await handleOrderStatusFinancials({
+                order,
+                previousStatus,
+                session
+            });
+
+            if (financeSummary) {
+                order.financialSummary = {
+                    ...(order.financialSummary || {}),
+                    ...financeSummary
+                };
+            }
+
+            await order.save({ session });
+
+            orderResponse = toOrderResponse(order);
+            completionPayload = buildOrderCompletedPayload(order);
+            eventPayload = {
+                event: "order.status.changed",
+                payload: {
+                    orderId: order._id,
+                    status: orderResponse.status,
+                    updatedBy: req.user?.id || customerId,
+                    role
+                },
+                rooms: buildOrderRooms({
+                    orderId: order._id,
+                    customerId: order.customerId,
+                    restaurantId: order.restaurantId
+                })
+            };
+        });
+    } catch (error) {
+        raisedError = error;
+    } finally {
+        await session.endSession();
+    }
+
+    if (raisedError) {
+        const statusCode = raisedError.statusCode || 500;
+        if (statusCode >= 500) {
+            console.error("Error marking order as received:", raisedError);
+            return res.status(500).json({ error: "Server Error" });
+        }
+        return res.status(statusCode).json({ message: raisedError.message });
+    }
+
+    if (eventPayload) {
+        emitEvent(eventPayload);
+    }
+
+    if (completionPayload) {
+        await publishRabbitEvent("order.completed", completionPayload);
     }
 
     return res.status(200).json(orderResponse);
@@ -693,7 +815,7 @@ export const submitOrderFeedback = async (req, res) => {
 
         const currentStatus = normalizeOrderStatusInPlace(order);
         if (!RATEABLE_STATUSES.has(currentStatus)) {
-            return res.status(400).json({ message: "Order must be delivered or completed before submitting feedback." });
+            return res.status(400).json({ message: "Order must be completed before submitting feedback." });
         }
 
         const { orderRating, orderComment, driverRating, driverComment } = req.body || {};
@@ -770,13 +892,13 @@ export const cancelOrder = async (req, res) => {
             if (customerId && order.customerId !== customerId) {
                 return res.status(403).json({ message: "Access denied: Cannot cancel other customer orders." });
             }
-            canCancel = currentStatus === "Pending Confirmation";
+            canCancel = currentStatus === "Pending";
         } else if (role === "restaurant") {
             const restaurantId = req.user?.restaurantId || req.user?.id;
             if (restaurantId && order.restaurantId !== restaurantId) {
                 return res.status(403).json({ message: "Access denied: Cannot cancel other restaurant orders." });
             }
-            canCancel = ["Pending Confirmation", "Confirmed", "Preparing", "Awaiting Driver"].includes(currentStatus);
+            canCancel = ["Pending", "Confirmed", "Preparing", "Delivering"].includes(currentStatus);
         } else if (role === "admin") {
             canCancel = true;
         }

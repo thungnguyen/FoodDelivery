@@ -798,18 +798,27 @@
   font-size: 13px;
 }
 
-.sa-chip.status-pending-confirmation,
-.sa-chip.status-awaiting-driver {
+.sa-chip.status-pending {
   background: rgba(250, 204, 21, 0.22);
   color: #92400e;
 }
 
-.sa-chip.status-out-for-delivery {
+.sa-chip.status-confirmed {
   background: rgba(59, 130, 246, 0.18);
   color: #1d4ed8;
 }
 
-.sa-chip.status-delivered {
+.sa-chip.status-preparing {
+  background: rgba(99, 102, 241, 0.2);
+  color: #3730a3;
+}
+
+.sa-chip.status-delivering {
+  background: rgba(6, 182, 212, 0.2);
+  color: #115e59;
+}
+
+.sa-chip.status-completed {
   background: rgba(34, 197, 94, 0.2);
   color: #166534;
 }
@@ -817,6 +826,16 @@
 .sa-chip.status-cancelled {
   background: rgba(248, 113, 113, 0.22);
   color: #b91c1c;
+}
+
+.sa-chip.status-failed {
+  background: rgba(239, 68, 68, 0.25);
+  color: #7f1d1d;
+}
+
+.sa-chip.status-refunded {
+  background: rgba(196, 181, 253, 0.3);
+  color: #5b21b6;
 }
 
 .sa-number {
@@ -979,7 +998,7 @@
   color: #b91c1c;
 }
 
-.sa-status.badge.pending-confirmation {
+.sa-status.badge.pending {
   background: rgba(250, 204, 21, 0.2);
   color: #92400e;
 }
@@ -990,13 +1009,12 @@
   color: #1d4ed8;
 }
 
-.sa-status.badge.awaiting-driver,
-.sa-status.badge.out-for-delivery {
-  background: rgba(14, 165, 233, 0.18);
-  color: #0369a1;
+.sa-status.badge.delivering {
+  background: rgba(6, 182, 212, 0.18);
+  color: #0f766e;
 }
 
-.sa-status.badge.delivered {
+.sa-status.badge.completed {
   background: rgba(34, 197, 94, 0.18);
   color: #15803d;
 }
@@ -1005,6 +1023,11 @@
 .sa-status.badge.failed {
   background: rgba(248, 113, 113, 0.2);
   color: #b91c1c;
+}
+
+.sa-status.badge.refunded {
+  background: rgba(196, 181, 253, 0.25);
+  color: #5b21b6;
 }
 
 .sa-actions {
