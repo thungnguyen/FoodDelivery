@@ -17,6 +17,7 @@ import { PAYMENT_SERVICE_URL, ORDER_SERVICE_URL } from "../../utils/serviceUrls"
 import { CartContext } from "../contexts/CartContext";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { computeShippingFee, roundCurrency } from "../../utils/pricing";
+import CustomerLayout from "../../components/customer/CustomerLayout";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
@@ -79,6 +80,14 @@ const CheckoutFormInner = () => {
   const [message, setMessage] = useState("");
   const [selectedBank, setSelectedBank] = useState(BANKS[0]);
   const [copyStatus, setCopyStatus] = useState("");
+
+  const customerDisplayName = useMemo(() => {
+    const explicitName = (orderData?.customerName || "").trim();
+    if (explicitName) {
+      return explicitName;
+    }
+    return orderData?.customerEmail || undefined;
+  }, [orderData]);
 
   useEffect(() => {
     const pendingOrder = localStorage.getItem("pendingOrder");
@@ -345,15 +354,18 @@ const CheckoutFormInner = () => {
 
   if (!orderData) {
     return (
-      <div style={{ padding: "40px", textAlign: "center" }}>
-        <Spinner animation="border" />
-        <p>Đang tải dữ liệu đơn hàng...</p>
-      </div>
+      <CustomerLayout customerName={customerDisplayName}>
+        <div style={{ padding: "40px", textAlign: "center" }}>
+          <Spinner animation="border" />
+          <p>Đang tải dữ liệu đơn hàng...</p>
+        </div>
+      </CustomerLayout>
     );
   }
 
   return (
-    <div className="checkout-page">
+    <CustomerLayout customerName={customerDisplayName}>
+      <div className="checkout-page">
       <button className="back-link" type="button" onClick={() => navigate("/orders/new")}>
         <BsArrowLeftCircle size={18} /> Quay lại giỏ hàng
       </button>
@@ -522,7 +534,8 @@ const CheckoutFormInner = () => {
         {error && <div className="checkout-error">{error}</div>}
         {message && <div className="checkout-success">{message}</div>}
       </div>
-    </div>
+      </div>
+    </CustomerLayout>
   );
 };
 

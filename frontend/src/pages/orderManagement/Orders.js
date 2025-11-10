@@ -12,6 +12,7 @@ import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { io } from "socket.io-client";
 import { BsStar, BsStarFill } from "react-icons/bs";
 import { computeShippingFee, roundCurrency } from "../../utils/pricing";
+import CustomerLayout from "../../components/customer/CustomerLayout";
 
 const formatCurrency = (value) => {
   if (typeof value !== "number") return "0 VND";
@@ -113,6 +114,17 @@ function Orders() {
   useEffect(() => {
     ordersRef.current = orders;
   }, [orders]);
+
+  const customerDisplayName = useMemo(() => {
+    if (!currentCustomer) {
+      return "";
+    }
+    const fullName = `${currentCustomer.firstName || ""} ${currentCustomer.lastName || ""}`.trim();
+    if (fullName) {
+      return fullName;
+    }
+    return currentCustomer.email || "Khách hàng thân thiết";
+  }, [currentCustomer]);
 
   useEffect(() => {
     setFeedbackDrafts((prev) => {
@@ -832,7 +844,8 @@ function Orders() {
   }
 
   return (
-    <div className="container py-4">
+    <CustomerLayout customerName={customerDisplayName}>
+      <div className="container py-4">
       <div
         className="rounded-4 p-4 p-md-5 mb-4 text-white position-relative overflow-hidden"
         style={{
@@ -906,7 +919,8 @@ function Orders() {
           ? renderOrderList(activeOrders, "Bạn chưa có đơn hàng nào đang xử lý.")
           : renderOrderList(historyOrders, "Chưa có đơn hàng hoàn thành. Đặt món để trải nghiệm ngay nhé!")}
       </div>
-    </div>
+      </div>
+    </CustomerLayout>
   );
 }
 

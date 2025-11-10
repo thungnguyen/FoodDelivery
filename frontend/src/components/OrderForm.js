@@ -7,6 +7,7 @@ import { BsArrowLeftCircle } from "react-icons/bs";
 import { CartContext } from "../pages/contexts/CartContext";
 import { getAuthToken, AUTH_ROLES } from "../utils/authTokens";
 import { computeShippingFee, roundCurrency } from "../utils/pricing";
+import CustomerLayout from "./customer/CustomerLayout";
 
 function OrderForm({ addOrder }) {
   const { cartItems, clearCart } = useContext(CartContext);
@@ -124,24 +125,31 @@ function OrderForm({ addOrder }) {
     setLoading(false);
   };
 
+  const customerDisplayName = customerInfo
+    ? `${customerInfo.firstName || ""} ${customerInfo.lastName || ""}`.trim() || customerInfo.email
+    : undefined;
+
   if (!customerInfo) {
     return (
-      <div style={{ padding: "40px", textAlign: "center" }}>
-        <Spinner animation="border" />
-        <p>Loading customer information...</p>
-      </div>
+      <CustomerLayout customerName={customerDisplayName}>
+        <div style={{ padding: "40px", textAlign: "center" }}>
+          <Spinner animation="border" />
+          <p>Loading customer information...</p>
+        </div>
+      </CustomerLayout>
     );
   }
 
   return (
-    <div
-      className="container"
-      style={{
-        padding: "20px",
-        backgroundColor: "#f0f4f8",
-        minHeight: "100vh",
-      }}
-    >
+    <CustomerLayout customerName={customerDisplayName}>
+      <div
+        className="container"
+        style={{
+          padding: "20px",
+          backgroundColor: "#f0f4f8",
+          minHeight: "100vh",
+        }}
+      >
       {/* Back Button */}
       <Button
         variant="link"
@@ -306,7 +314,8 @@ function OrderForm({ addOrder }) {
           </Button>
         </Form>
       </div>
-    </div>
+      </div>
+    </CustomerLayout>
   );
 }
 

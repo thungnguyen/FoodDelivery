@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { AUTH_SERVICE_URL } from "../../utils/serviceUrls";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
+import CustomerLayout from "../../components/customer/CustomerLayout";
 const pageWrapperStyle = {
   minHeight: "100vh",
   background: "linear-gradient(140deg, #f6f8ff 0%, #fef9f2 100%)",
@@ -50,6 +51,13 @@ export default function CustomerProfile() {
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordFeedback, setPasswordFeedback] = useState({ type: "", message: "" });
   const navigate = useNavigate();
+  const customerDisplayName = useMemo(() => {
+    const fullName = `${formData.firstName || ""} ${formData.lastName || ""}`.trim();
+    if (fullName) {
+      return fullName;
+    }
+    return formData.email || "Khách hàng thân thiết";
+  }, [formData]);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -237,7 +245,8 @@ export default function CustomerProfile() {
   }
 
   return (
-    <div style={pageWrapperStyle}>
+    <CustomerLayout customerName={customerDisplayName}>
+      <div style={pageWrapperStyle}>
       <div style={{ width: "100%", maxWidth: "860px" }}>
         <button
           onClick={() => navigate("/customer/home")}
@@ -561,5 +570,6 @@ export default function CustomerProfile() {
         </div>
       </div>
     </div>
+    </CustomerLayout>
   );
 }
