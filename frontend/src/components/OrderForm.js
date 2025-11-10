@@ -81,28 +81,40 @@ function OrderForm({ addOrder }) {
       return;
     }
 
-    // Get restaurant ID from first cart item (assuming all items from same restaurant)
-    const restaurantId = cartItems[0]?.restaurant;
-    const restaurantName = cartItems[0]?.restaurantName || "";
+    const normalizedItems = cartItems.map(item => ({
+      foodId: item._id,
+      foodName: item.name,
+      restaurantId: item.restaurant || item.restaurantId,
+      restaurantName: item.restaurantName || "",
+      quantity: item.quantity || 1,
+      price: item.price || 0,
+    })).filter(item => item.foodId && item.restaurantId);
+
+    if (!normalizedItems.length) {
+      alert("Giỏ hàng không hợp lệ. Vui lòng thêm món lại.");
+      setLoading(false);
+      return;
+    }
+
+    const uniqueRestaurants = Array.from(new Set(normalizedItems.map(item => item.restaurantId))).filter(Boolean);
+    const singleRestaurant = uniqueRestaurants.length === 1;
+    const primaryRestaurantId = singleRestaurant ? normalizedItems[0].restaurantId : null;
+    const primaryRestaurantName = singleRestaurant ? normalizedItems[0].restaurantName : "";
 
     // Save order data to localStorage for checkout page
     const orderData = {
       customerId: customerInfo.id,
-      restaurantId: restaurantId,
-      items: cartItems.map(item => ({
-        foodId: item._id,
-        foodName: item.name,
-        quantity: item.quantity || 1,
-        price: item.price
-      })),
+      customerName: `${customerInfo.firstName} ${customerInfo.lastName}`,
+      customerEmail: customerInfo.email,
+      customerPhone: customerInfo.phone,
+      restaurantId: primaryRestaurantId,
+      restaurantName: primaryRestaurantName,
+      items: normalizedItems,
+      cartItems: normalizedItems,
       itemsTotal: roundedItemsTotal,
       shippingFee,
       totalPrice: grandTotal,
       deliveryAddress: deliveryAddress,
-      restaurantName,
-      customerName: `${customerInfo.firstName} ${customerInfo.lastName}`,
-      customerEmail: customerInfo.email,
-      customerPhone: customerInfo.phone,
     };
 
     localStorage.setItem("pendingOrder", JSON.stringify(orderData));

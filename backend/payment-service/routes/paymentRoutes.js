@@ -1,17 +1,88 @@
 const express = require("express");
 const router = express.Router();
 const Payment = require("../models/PaymentModel");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const crypto = require("crypto");
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
+const stripe = stripeSecretKey ? require("stripe")(stripeSecretKey) : null;
 require("dotenv").config();
 const { sendSmsNotification } = require("../utils/twilioService"); // Import Twilio service
 
+const normalizeCartItems = (cartItems = []) => {
+  return cartItems
+    .map((item) => {
+      const rawRestaurant =
+        item.restaurantId ||
+        item.restaurant ||
+        item.restaurant?._id ||
+        item.restaurant?.id ||
+        item.restaurant?.toString?.();
+      const restaurantId =
+        typeof rawRestaurant === "object"
+          ? rawRestaurant?._id || rawRestaurant?.id || rawRestaurant?.toString?.()
+          : rawRestaurant;
+      const foodId = item.foodId || item.id || item._id;
+      const quantity = Number(item.quantity);
+      const price = Number(item.price);
+      if (!restaurantId || !foodId || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price)) {
+        return null;
+      }
+      return {
+        foodId: foodId.toString(),
+        foodName: item.foodName || item.name || "",
+        restaurantId: restaurantId.toString(),
+        restaurantName: item.restaurantName || item.restaurant?.name || "",
+        quantity,
+        price,
+      };
+    })
+    .filter(Boolean);
+};
+
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeShippingMap = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return Object.entries(value).reduce((acc, [restaurantId, fee]) => {
+    const parsed = toNumber(fee, null);
+    if (parsed !== null && parsed >= 0) {
+      acc[restaurantId] = parsed;
+    }
+    return acc;
+  }, {});
+};
+
 router.post("/process", async (req, res) => {
   try {
-    const { orderId, userId, amount, currency, email, phone } = req.body; 
+    const {
+      orderId,
+      userId,
+      amount,
+      currency,
+      email,
+      phone,
+      customerName,
+      deliveryAddress,
+      cartItems = [],
+      itemsTotal,
+      shippingFee,
+      totalPrice,
+      perRestaurantShipping,
+      metadata,
+    } = req.body; 
 
-    // Validate required fields
-    if (!phone) {
-      return res.status(400).json({ error: "Phone number is required." });
+    const normalizedPhone = typeof phone === "string" && phone.trim().length ? phone.trim() : "+1000000000";
+    const normalizedEmail = typeof email === "string" && email.trim().length ? email.trim() : "unknown@example.com";
+    const normalizedCartItems = normalizeCartItems(cartItems);
+    if (!normalizedCartItems.length) {
+      console.warn("[payment-service] Payment processed without valid cart snapshot");
+    }
+    if (!deliveryAddress) {
+      console.warn("[payment-service] Payment processed without delivery address");
     }
 
     console.log(`Processing payment request for order ${orderId}`);
@@ -35,15 +106,24 @@ router.post("/process", async (req, res) => {
       });
     }
 
-    // Create a new PaymentIntent.
-    const amountInCents = Math.round(parseFloat(amount) * 100);
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amountInCents,
-      currency: currency || "usd",
-      metadata: { orderId, userId },
-      receipt_email: email,
-    });
-    console.log("✅ Created PaymentIntent:", paymentIntent);
+    let paymentIntentId = null;
+    let clientSecret = null;
+    if (stripe) {
+      const amountInCents = Math.round(parseFloat(amount) * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amountInCents,
+        currency: currency || "usd",
+        metadata: { orderId, userId },
+        receipt_email: normalizedEmail,
+      });
+      console.log("✅ Created PaymentIntent:", paymentIntent);
+      paymentIntentId = paymentIntent.id;
+      clientSecret = paymentIntent.client_secret;
+    } else {
+      paymentIntentId = `pi_mock_${Date.now()}`;
+      clientSecret = `pi_mock_secret_${crypto.randomUUID()}`;
+      console.warn("[payment-service] STRIPE_SECRET_KEY missing. Using mock payment intent.");
+    }
 
     // Create a new Payment record.
     payment = new Payment({
@@ -52,10 +132,23 @@ router.post("/process", async (req, res) => {
       amount,
       currency: currency || "usd",
       status: "Pending",
-      stripePaymentIntentId: paymentIntent.id, // store only the id (without secret)
-      stripeClientSecret: paymentIntent.client_secret, // store client secret for frontend
-      phone, // Use `phone` to match the schema
-      email,
+      paymentMethod: "card",
+      customerName,
+      deliveryAddress,
+      stripePaymentIntentId: paymentIntentId, // store only the id (without secret)
+      stripeClientSecret: clientSecret, // store client secret for frontend
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      orderSnapshot: {
+        cartItems: normalizedCartItems,
+        itemsTotal: toNumber(itemsTotal, amount),
+        shippingFee: toNumber(shippingFee, 0),
+        totalPrice: toNumber(totalPrice, amount),
+        deliveryAddress,
+        customerName,
+        perRestaurantShipping: normalizeShippingMap(perRestaurantShipping),
+        metadata: metadata || {},
+      },
     });
     await payment.save();
     console.log("Stored Payment Record:", payment);
@@ -65,9 +158,10 @@ router.post("/process", async (req, res) => {
     // await sendSmsNotification(phone, message);
 
     return res.json({
-      clientSecret: paymentIntent.client_secret,
+      clientSecret,
       paymentId: payment._id,
       disablePayment: false,
+      mock: stripe ? false : true,
     });
   } catch (error) {
     // If duplicate key error occurs, recover gracefully.

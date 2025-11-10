@@ -21,6 +21,14 @@ const BANKS = [
     accountName: "CONG TY SKYDISH",
     branch: "Chi nhánh Hà Nội",
   },
+    {
+    code: "TPBank",
+    name: "TPBank - Tiên Phong Bank",
+    shortName: "TPBank",
+    accountNumber: "60376640875",
+    accountName: "Nguyen Thanh Hung",
+    branch: "Chi nhánh TP.HCM",
+  },
   {
     code: "ACB",
     name: "ACB - Ngân hàng Á Châu",

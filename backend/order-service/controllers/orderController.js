@@ -3,6 +3,7 @@ import emitEvent from "../utils/eventBus.js";
 import { publish as publishRabbitEvent } from "../src/rabbitmq.js";
 import buildOrderRooms from "../utils/realtimeRooms.js";
 import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
+import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed"];
 
@@ -138,12 +139,39 @@ export const createOrder = async (req, res) => {
             restaurantId,
             restaurantName,
             items = [],
+            cartItems,
             deliveryAddress,
             paymentMethod,
             paymentStatus,
             status,
-            shippingFee
+            shippingFee,
+            paymentIntentId,
+            paymentId,
+            perRestaurantShipping
         } = req.body;
+
+        const normalizedCartItems = Array.isArray(cartItems) && cartItems.length ? cartItems : null;
+        if (normalizedCartItems) {
+            const shouldDeduplicate = Boolean(paymentIntentId || paymentId);
+            const createdOrders = await createOrdersFromCart({
+                cartItems: normalizedCartItems,
+                customerId,
+                customerName,
+                customerEmail,
+                customerPhone,
+                deliveryAddress,
+                paymentMethod,
+                paymentStatus,
+                status,
+                shippingFee,
+                perRestaurantShipping,
+                paymentIntentId,
+                paymentId,
+                skipDeduplication: !shouldDeduplicate
+            });
+            const response = createdOrders.map(toOrderResponse);
+            return res.status(201).json(response);
+        }
 
         if (!items.length) {
             return res.status(400).json({ message: "Order must contain at least one item." });
@@ -192,7 +220,9 @@ export const createOrder = async (req, res) => {
             deliveryAddress,
             paymentMethod: normalizedPaymentMethod,
             paymentStatus: normalizedPaymentStatus,
-            status: normalizedStatus
+            status: normalizedStatus,
+            paymentIntentId,
+            paymentId
         });
 
         recalculateOrderTotals(order);
@@ -213,6 +243,8 @@ export const createOrder = async (req, res) => {
             paymentStatus: normalizedPaymentStatus,
             status: order.status,
             deliveryAddress,
+            paymentIntentId,
+            paymentId,
             createdAt: order.createdAt,
             updatedAt: order.updatedAt
         };

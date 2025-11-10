@@ -2,10 +2,13 @@ import Order from "../models/orderModel.js";
 import emitEvent from "../utils/eventBus.js";
 import buildOrderRooms from "../utils/realtimeRooms.js";
 import { publish as publishRabbit, consume } from "../src/rabbitmq.js";
+import { handleStripePaymentSuccess } from "../src/events/stripePaymentSuccess.handler.js";
 import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
 
 const PAYMENT_QUEUE = process.env.RABBITMQ_PAYMENT_QUEUE || "order-service.payments";
 const DELIVERY_QUEUE = process.env.RABBITMQ_DELIVERY_QUEUE || "order-service.delivery";
+const STRIPE_QUEUE = process.env.RABBITMQ_STRIPE_QUEUE || "order-service.stripe-payments";
+const STRIPE_SUCCESS_ROUTING = process.env.RABBITMQ_STRIPE_SUCCESS_ROUTING || "stripe.payment.succeeded";
 
 const normalizePaymentMethod = (value) => {
     return value && value.toLowerCase() === "card" ? "card" : "cash";
@@ -127,4 +130,5 @@ const handleDeliveryCompleted = async (payload) => {
 export const startOrderEventConsumers = async () => {
     await consume(PAYMENT_QUEUE, ["payment.success", "payment.cod.pending"], handlePaymentEvent);
     await consume(DELIVERY_QUEUE, "delivery.completed", handleDeliveryCompleted);
+    await consume(STRIPE_QUEUE, STRIPE_SUCCESS_ROUTING, handleStripePaymentSuccess);
 };

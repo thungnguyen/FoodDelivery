@@ -4,7 +4,42 @@ const Payment = require("../models/PaymentModel");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { sendSmsNotification } = require("../utils/twilioService");
 const { sendEmailNotification } = require("../utils/emailService"); // Import the email service
+const { publish } = require("../src/rabbitmq");
 require("dotenv").config();
+
+const publishStripeSuccessEvent = async ({ payment, paymentIntentId }) => {
+    const snapshot = payment.orderSnapshot || {};
+    const cartItems = Array.isArray(snapshot.cartItems) ? snapshot.cartItems : [];
+    if (!cartItems.length) {
+        console.warn(`[payment-service] Missing cart snapshot for payment ${payment._id}`);
+        return;
+    }
+    const perRestaurantShipping = snapshot.perRestaurantShipping
+        ? Object.fromEntries(snapshot.perRestaurantShipping)
+        : undefined;
+
+    const payload = {
+        paymentId: payment._id.toString(),
+        paymentIntentId: paymentIntentId || payment.stripePaymentIntentId,
+        userId: payment.userId,
+        customerId: payment.userId,
+        customerName: payment.customerName || snapshot.customerName || "",
+        customerEmail: payment.email,
+        customerPhone: payment.phone,
+        cartItems,
+        deliveryAddress: payment.deliveryAddress || snapshot.deliveryAddress || "",
+        shippingFee: snapshot.shippingFee,
+        perRestaurantShipping,
+        itemsTotal: snapshot.itemsTotal,
+        totalPrice: snapshot.totalPrice || payment.amount,
+        paymentMethod: payment.paymentMethod || "card",
+        paymentStatus: "Paid",
+        status: "Pending",
+        metadata: snapshot.metadata || {}
+    };
+
+    await publish("stripe.payment.succeeded", payload);
+};
 
 router.post("/", express.raw({ type: "application/json" }), async (req, res) => {
     console.log("Webhook received");
@@ -56,25 +91,27 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
             console.warn(`⚠️ No phone number associated with Order ${payment.orderId}`);
         }
 
-        if (event.type === "payment_intent.succeeded" && payment.status !== "Paid") {
-            payment.status = "Paid";
-            await payment.save();
-            console.log(`✅ Payment for Order ${payment.orderId} updated to Paid.`);
+        const isSucceeded = event.type === "payment_intent.succeeded";
+        if (isSucceeded) {
+            if (payment.status !== "Paid") {
+                payment.status = "Paid";
+                await payment.save();
+                console.log(`✅ Payment for Order ${payment.orderId} updated to Paid.`);
 
-            // Send SMS notification (if phone exists)
-            if (customerPhone) {
-                const smsMessage = `Your payment for Order ${payment.orderId} was successful!`;
-                try {
-                    await sendSmsNotification(customerPhone, smsMessage);
-                } catch (smsError) {
-                    console.error(`❌ Twilio SMS error: ${smsError.message}`);
+                // Send SMS notification (if phone exists)
+                if (customerPhone) {
+                    const smsMessage = `Your payment for Order ${payment.orderId} was successful!`;
+                    try {
+                        await sendSmsNotification(customerPhone, smsMessage);
+                    } catch (smsError) {
+                        console.error(`❌ Twilio SMS error: ${smsError.message}`);
+                    }
                 }
-            }
 
-            // Send Email notification (if email exists)
-            if (customerEmail) {
-                const emailSubject = "Payment Confirmation for Your Order";
-                const emailHtml = ` <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; background-color: #f9f9f9; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);">
+                // Send Email notification (if email exists)
+                if (customerEmail) {
+                    const emailSubject = "Payment Confirmation for Your Order";
+                    const emailHtml = ` <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; background-color: #f9f9f9; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);">
                                         <h2 style="color: #333;">Payment Confirmation</h2>
 
                                         <p style="color: #555; font-size: 16px;">Dear Customer,</p>
@@ -95,12 +132,17 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
                                     </div>
                                     `;
                 const emailText = `Dear Customer, Your payment for Order ${payment.orderId} was successful! Thank you for your order.`;
-                try {
-                    await sendEmailNotification(customerEmail, emailSubject, emailHtml, emailText);
-                } catch (emailError) {
-                    console.error(`❌ Email sending error: ${emailError.message}`);
+                    try {
+                        await sendEmailNotification(customerEmail, emailSubject, emailHtml, emailText);
+                    } catch (emailError) {
+                        console.error(`❌ Email sending error: ${emailError.message}`);
+                    }
                 }
+            } else {
+                console.log(`Payment for Order ${payment.orderId} already updated to Paid.`);
             }
+
+            await publishStripeSuccessEvent({ payment, paymentIntentId });
         } else if (event.type === "payment_intent.payment_failed" && payment.status !== "Failed") {
             payment.status = "Failed";
             await payment.save();

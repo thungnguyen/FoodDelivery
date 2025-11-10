@@ -73,6 +73,7 @@ const CheckoutFormInner = () => {
   const [orderData, setOrderData] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [clientSecret, setClientSecret] = useState("");
+  const [paymentRecordId, setPaymentRecordId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [message, setMessage] = useState("");
@@ -88,16 +89,21 @@ const CheckoutFormInner = () => {
     }
     try {
       const parsed = JSON.parse(pendingOrder);
-      const items = Array.isArray(parsed.items) ? parsed.items : [];
+      const cartItems = Array.isArray(parsed.cartItems) && parsed.cartItems.length
+        ? parsed.cartItems
+        : Array.isArray(parsed.items)
+          ? parsed.items
+          : [];
       const derivedItemsTotal =
         parsed.itemsTotal ??
-        items.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
-      const derivedShipping = parsed.shippingFee ?? computeShippingFee(items);
+        cartItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
+      const derivedShipping = parsed.shippingFee ?? computeShippingFee(cartItems);
       const derivedTotal = parsed.totalPrice ?? derivedItemsTotal + derivedShipping;
 
       setOrderData({
         ...parsed,
-        items,
+        cartItems,
+        items: cartItems,
         itemsTotal: roundCurrency(derivedItemsTotal),
         shippingFee: roundCurrency(derivedShipping),
         totalPrice: roundCurrency(derivedTotal),
@@ -114,11 +120,16 @@ const CheckoutFormInner = () => {
     if (!orderData) {
       return { items: 0, shipping: 0, grand: 0 };
     }
+    const sourceItems = Array.isArray(orderData.cartItems) && orderData.cartItems.length
+      ? orderData.cartItems
+      : Array.isArray(orderData.items)
+        ? orderData.items
+        : [];
     const items = roundCurrency(
       orderData.itemsTotal ??
-        orderData.items.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
+        sourceItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
     );
-    const shipping = roundCurrency(orderData.shippingFee ?? computeShippingFee(orderData.items));
+    const shipping = roundCurrency(orderData.shippingFee ?? computeShippingFee(sourceItems));
     return {
       items,
       shipping,
@@ -139,33 +150,49 @@ const CheckoutFormInner = () => {
       const [first = "Khach", ...rest] = fullName.length ? fullName.split(" ") : ["Khach"];
       const last = rest.length ? rest.join(" ") : first;
 
+      const cartItemsForPayment = (orderData.cartItems || orderData.items || []).map((item) => ({
+        foodId: item.foodId || item._id,
+        foodName: item.foodName || item.name,
+        restaurantId: resolveRestaurantId(item),
+        restaurantName: item.restaurantName || item.restaurant?.name || "",
+        quantity: item.quantity || 1,
+        price: item.price || 0,
+      })).filter((item) => item.foodId && item.restaurantId);
+
       const paymentData = {
         orderId: `ORD${Date.now()}`,
         userId: orderData.customerId,
-        amount: orderData.totalPrice,
+        amount: totals.grand,
         currency: "usd",
         firstName: first,
         lastName: last,
         email: orderData.customerEmail,
         phone: orderData.customerPhone,
+        customerName: orderData.customerName,
+        deliveryAddress: orderData.deliveryAddress,
+        cartItems: cartItemsForPayment,
+        itemsTotal: totals.items,
+        shippingFee: totals.shipping,
+        totalPrice: totals.grand,
       };
 
       const response = await axios.post(`${PAYMENT_SERVICE_URL}/api/payment/process`, paymentData);
       if (response.data.clientSecret) {
         setClientSecret(response.data.clientSecret);
+        setPaymentRecordId(response.data.paymentId || null);
       } else {
         setError("⚠️ Không nhận được khóa thanh toán hợp lệ.");
       }
     } catch (err) {
       console.error("Error creating PaymentIntent", err);
-      setError("❌ Không thể tạo thanh toán. Vui lòng thử lại.");
+      setError(err.response?.data?.error || "❌ Không thể tạo thanh toán. Vui lòng thử lại.");
     }
   };
 
   const handleCardPayment = async () => {
     if (!stripe || !elements || !clientSecret) {
       setError("⚠️ Thanh toán chưa sẵn sàng.");
-      return false;
+      return { success: false };
     }
 
     const cardElement = elements.getElement(CardNumberElement);
@@ -180,7 +207,7 @@ const CheckoutFormInner = () => {
 
     if (pmError) {
       setError(pmError.message);
-      return false;
+      return { success: false };
     }
 
     const { paymentIntent, error: confirmError } = await stripe.confirmCardPayment(clientSecret, {
@@ -189,10 +216,13 @@ const CheckoutFormInner = () => {
 
     if (confirmError) {
       setError(confirmError.message);
-      return false;
+      return { success: false };
     }
 
-    return paymentIntent.status === "succeeded";
+    return {
+      success: paymentIntent.status === "succeeded",
+      paymentIntentId: paymentIntent.id,
+    };
   };
 
   const handleCopy = async (value) => {
@@ -205,23 +235,61 @@ const CheckoutFormInner = () => {
     }
   };
 
+  const handleSelectPaymentMethod = (methodKey) => {
+    setPaymentMethod(methodKey);
+    setError(null);
+    if (methodKey !== "card") {
+      setClientSecret("");
+      setPaymentRecordId(null);
+    }
+  };
+
+  const resolveRestaurantId = (item) => {
+    const raw =
+      item.restaurantId ||
+      item.restaurant ||
+      item.restaurant?._id ||
+      item.restaurant?.id ||
+      (typeof item.restaurant === "object" ? item.restaurant?.toString?.() : null);
+    if (!raw) {
+      return null;
+    }
+    if (typeof raw === "object") {
+      return raw._id || raw.id || raw.toString?.() || null;
+    }
+    return raw;
+  };
+
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      let paymentSuccess = true;
+      let paymentIntentId = null;
       if (paymentMethod === "card") {
-        paymentSuccess = await handleCardPayment();
-        if (!paymentSuccess) {
+        const paymentResult = await handleCardPayment();
+        if (!paymentResult.success) {
           setLoading(false);
           return;
         }
+        paymentIntentId = paymentResult.paymentIntentId || null;
       }
 
       const token = getAuthToken(AUTH_ROLES.CUSTOMER);
       const paymentStatusValue = paymentMethod === "card" ? "Paid" : "Pending";
+
+      const cartItemsPayload = (orderData.cartItems || orderData.items || []).map((item) => ({
+        foodId: item.foodId || item._id,
+        foodName: item.foodName || item.name,
+        restaurantId: resolveRestaurantId(item),
+        restaurantName: item.restaurantName || item.restaurant?.name || "",
+        quantity: item.quantity || 1,
+        price: item.price || 0,
+      })).filter((item) => item.foodId && item.restaurantId);
+      if (!cartItemsPayload.length) {
+        throw new Error("Không tìm thấy danh sách món ăn để tạo đơn.");
+      }
 
       const orderPayload = {
         customerId: orderData.customerId,
@@ -230,7 +298,8 @@ const CheckoutFormInner = () => {
         customerPhone: orderData.customerPhone,
         restaurantId: orderData.restaurantId,
         restaurantName: orderData.restaurantName,
-        items: orderData.items,
+        items: cartItemsPayload,
+        cartItems: cartItemsPayload,
         itemsTotal: totals.items,
         shippingFee: totals.shipping,
         totalPrice: totals.grand,
@@ -240,13 +309,24 @@ const CheckoutFormInner = () => {
         status: "Pending",
       };
 
+      if (paymentIntentId) {
+        orderPayload.paymentIntentId = paymentIntentId;
+      }
+      if (paymentRecordId) {
+        orderPayload.paymentId = paymentRecordId;
+      }
+
       await axios.post(`${ORDER_SERVICE_URL}/api/orders`, orderPayload, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       clearCart();
       localStorage.removeItem("pendingOrder");
-      setMessage("✅ Đặt hàng thành công! Hệ thống sẽ xác nhận sớm nhất.");
+      setMessage(
+        paymentMethod === "card"
+          ? "✅ Thanh toán thành công! Đã tạo đơn riêng cho từng nhà hàng."
+          : "✅ Đặt hàng thành công! Hệ thống đã tạo đơn theo từng nhà hàng."
+      );
       setTimeout(() => navigate("/customer/orders"), 2000);
     } catch (err) {
       console.error("Error creating order:", err);
@@ -323,7 +403,7 @@ const CheckoutFormInner = () => {
               key={method.key}
               type="button"
               className={`payment-method-btn ${paymentMethod === method.key ? "active" : ""}`}
-              onClick={() => setPaymentMethod(method.key)}
+              onClick={() => handleSelectPaymentMethod(method.key)}
             >
               {method.icon}
               <span>{method.label}</span>
