@@ -201,25 +201,25 @@ function CustomerHome() {
   const curatedCollections = useMemo(
     () => [
       {
-        title: "Giao nhanh 20'",
+        title: "Món ăn nóng hổi gần bạn ",
         description: "Món nóng hổi, ưu tiên giao trong khu vực của bạn.",
         accentIcon: <FaBolt size={18} color="#ffedd5" />,
         gradient: "linear-gradient(135deg, #f97316 0%, #fb923c 100%)",
-        query: "nhanh",
+        query: "Phở",
       },
       {
-        title: "Healthy Living",
-        description: "Salad, nước ép và những lựa chọn tốt cho sức khỏe.",
+        title: "Ăn như cơm nhà ngon lành sạch sẻ !",
+        description: "Những món cơm thơm ngon hấp dẫn gần gũi.",
         accentIcon: <FaLeaf size={18} color="#dcfce7" />,
         gradient: "linear-gradient(135deg, #10b981 0%, #34d399 100%)",
-        query: "healthy",
+        query: "Cơm",
       },
       {
-        title: "Cafe & Trà sữa",
+        title: "Thức uống tỉnh táo cả ngày",
         description: "Thức uống yêu thích để làm việc hiệu quả cả ngày.",
         accentIcon: <FaHeart size={18} color="#ffe4e6" />,
         gradient: "linear-gradient(135deg, #ec4899 0%, #fb7185 100%)",
-        query: "cafe",
+        query: "Coffee",
       },
       {
         title: "Ưu đãi hôm nay",

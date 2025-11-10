@@ -7,6 +7,7 @@ import { BsArrowLeftCircle } from "react-icons/bs";
 import { CartContext } from "../pages/contexts/CartContext";
 import { getAuthToken, AUTH_ROLES } from "../utils/authTokens";
 import { computeShippingFee, roundCurrency } from "../utils/pricing";
+import CustomerLayout from "./customer/CustomerLayout";
 
 function OrderForm({ addOrder }) {
   const { cartItems, clearCart } = useContext(CartContext);
@@ -81,28 +82,40 @@ function OrderForm({ addOrder }) {
       return;
     }
 
-    // Get restaurant ID from first cart item (assuming all items from same restaurant)
-    const restaurantId = cartItems[0]?.restaurant;
-    const restaurantName = cartItems[0]?.restaurantName || "";
+    const normalizedItems = cartItems.map(item => ({
+      foodId: item._id,
+      foodName: item.name,
+      restaurantId: item.restaurant || item.restaurantId,
+      restaurantName: item.restaurantName || "",
+      quantity: item.quantity || 1,
+      price: item.price || 0,
+    })).filter(item => item.foodId && item.restaurantId);
+
+    if (!normalizedItems.length) {
+      alert("Giỏ hàng không hợp lệ. Vui lòng thêm món lại.");
+      setLoading(false);
+      return;
+    }
+
+    const uniqueRestaurants = Array.from(new Set(normalizedItems.map(item => item.restaurantId))).filter(Boolean);
+    const singleRestaurant = uniqueRestaurants.length === 1;
+    const primaryRestaurantId = singleRestaurant ? normalizedItems[0].restaurantId : null;
+    const primaryRestaurantName = singleRestaurant ? normalizedItems[0].restaurantName : "";
 
     // Save order data to localStorage for checkout page
     const orderData = {
       customerId: customerInfo.id,
-      restaurantId: restaurantId,
-      items: cartItems.map(item => ({
-        foodId: item._id,
-        foodName: item.name,
-        quantity: item.quantity || 1,
-        price: item.price
-      })),
+      customerName: `${customerInfo.firstName} ${customerInfo.lastName}`,
+      customerEmail: customerInfo.email,
+      customerPhone: customerInfo.phone,
+      restaurantId: primaryRestaurantId,
+      restaurantName: primaryRestaurantName,
+      items: normalizedItems,
+      cartItems: normalizedItems,
       itemsTotal: roundedItemsTotal,
       shippingFee,
       totalPrice: grandTotal,
       deliveryAddress: deliveryAddress,
-      restaurantName,
-      customerName: `${customerInfo.firstName} ${customerInfo.lastName}`,
-      customerEmail: customerInfo.email,
-      customerPhone: customerInfo.phone,
     };
 
     localStorage.setItem("pendingOrder", JSON.stringify(orderData));
@@ -112,24 +125,31 @@ function OrderForm({ addOrder }) {
     setLoading(false);
   };
 
+  const customerDisplayName = customerInfo
+    ? `${customerInfo.firstName || ""} ${customerInfo.lastName || ""}`.trim() || customerInfo.email
+    : undefined;
+
   if (!customerInfo) {
     return (
-      <div style={{ padding: "40px", textAlign: "center" }}>
-        <Spinner animation="border" />
-        <p>Loading customer information...</p>
-      </div>
+      <CustomerLayout customerName={customerDisplayName}>
+        <div style={{ padding: "40px", textAlign: "center" }}>
+          <Spinner animation="border" />
+          <p>Loading customer information...</p>
+        </div>
+      </CustomerLayout>
     );
   }
 
   return (
-    <div
-      className="container"
-      style={{
-        padding: "20px",
-        backgroundColor: "#f0f4f8",
-        minHeight: "100vh",
-      }}
-    >
+    <CustomerLayout customerName={customerDisplayName}>
+      <div
+        className="container"
+        style={{
+          padding: "20px",
+          backgroundColor: "#f0f4f8",
+          minHeight: "100vh",
+        }}
+      >
       {/* Back Button */}
       <Button
         variant="link"
@@ -294,7 +314,8 @@ function OrderForm({ addOrder }) {
           </Button>
         </Form>
       </div>
-    </div>
+      </div>
+    </CustomerLayout>
   );
 }
 
