@@ -56,14 +56,20 @@ export const publish = async (routingKey, payload = {}) => {
     if (!routingKey) {
         throw new Error("routingKey is required when publishing to RabbitMQ");
     }
-    const ch = await ensureChannel();
-    const body = Buffer.from(JSON.stringify(payload));
-    const ok = ch.publish(EXCHANGE, routingKey, body, {
-        contentType: "application/json",
-        persistent: true
-    });
-    if (!ok) {
-        console.warn(`[rabbitmq] publish backpressure detected for ${routingKey}`);
+    try {
+        const ch = await ensureChannel();
+        const body = Buffer.from(JSON.stringify(payload));
+        const ok = ch.publish(EXCHANGE, routingKey, body, {
+            contentType: "application/json",
+            persistent: true
+        });
+        if (!ok) {
+            console.warn(`[rabbitmq] publish backpressure detected for ${routingKey}`);
+        }
+        return true;
+    } catch (error) {
+        console.error(`[rabbitmq] Failed to publish ${routingKey}:`, error.message);
+        return false;
     }
 };
 

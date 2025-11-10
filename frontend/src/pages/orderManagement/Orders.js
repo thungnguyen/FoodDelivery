@@ -7,7 +7,7 @@ import {
   REALTIME_SERVICE_URL,
 } from "../../utils/serviceUrls";
 import { Link, useNavigate } from "react-router-dom";
-import { Button, Spinner, Badge, Form } from "react-bootstrap";
+import { Button, Spinner, Badge, Form, Toast, ToastContainer } from "react-bootstrap";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { io } from "socket.io-client";
 import { BsStar, BsStarFill } from "react-icons/bs";
@@ -27,6 +27,8 @@ function Orders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [feedbackDrafts, setFeedbackDrafts] = useState({});
+  const [receivingOrderId, setReceivingOrderId] = useState(null);
+  const [toastState, setToastState] = useState({ show: false, message: "" });
   const navigate = useNavigate();
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
@@ -395,16 +397,61 @@ function Orders() {
         setOrders(prevOrders => prevOrders.filter(order => order._id !== id));
       })
       .catch((error) => {
-        console.error("Error deleting order:", error);
-        setError(error.response?.data?.message || "Failed to delete order.");
-      });
+      console.error("Error deleting order:", error);
+      setError(error.response?.data?.message || "Failed to delete order.");
+    });
+  };
+
+  const showToastMessage = (message) => {
+    setToastState({ show: true, message });
+  };
+
+  const handleConfirmReceived = async (orderId) => {
+    const normalizedId = orderId ? String(orderId) : "";
+    if (!normalizedId) return;
+
+    const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+    if (!token) {
+      setError("Please log in to manage your orders.");
+      return;
+    }
+
+    setReceivingOrderId(normalizedId);
+    try {
+      const response = await axios.patch(
+        `${ORDER_SERVICE_URL}/api/orders/${normalizedId}/received`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const updatedOrder = response.data;
+      const updatedId = updatedOrder?._id || updatedOrder?.id || normalizedId;
+      setOrders((prev) =>
+        prev.map((item) => {
+          const itemId = item?._id || item?.id;
+          if (!itemId) return item;
+          return String(itemId) === String(updatedId) ? updatedOrder : item;
+        })
+      );
+      setError("");
+      showToastMessage("Đơn hàng đã hoàn tất");
+      fetchOrders({ silent: true });
+    } catch (err) {
+      console.error("Error confirming order receipt:", err);
+      const message =
+        err.response?.data?.message || "Không thể xác nhận đơn hàng. Vui lòng thử lại.";
+      setError(message);
+    } finally {
+      setReceivingOrderId(null);
+    }
   };
 
   const categorizeOrder = (status = "") => status.trim().toLowerCase();
 
   const isRateableStatus = (status = "") => {
     const normalized = categorizeOrder(status);
-    return normalized === "delivered" || normalized === "completed";
+    return normalized === "completed";
   };
 
   const startFeedbackForOrder = (order) => {
@@ -528,7 +575,10 @@ function Orders() {
     () =>
       orders.filter((order) => {
         const status = categorizeOrder(order.status);
-        return status && !["delivered", "completed", "canceled", "cancelled"].includes(status);
+        return (
+          status &&
+          !["completed", "canceled", "cancelled", "failed", "refunded"].includes(status)
+        );
       }),
     [orders]
   );
@@ -537,7 +587,7 @@ function Orders() {
     () =>
       orders.filter((order) => {
         const status = categorizeOrder(order.status);
-        return ["delivered", "completed", "canceled", "cancelled"].includes(status);
+        return ["completed", "canceled", "cancelled", "failed", "refunded"].includes(status);
       }),
     [orders]
   );
@@ -606,6 +656,10 @@ function Orders() {
         paymentLabel === "Paid" ? "success" : paymentLabel === "Failed" ? "danger" : "warning";
       const orderId = order._id || order.id;
       const orderKey = orderId ? String(orderId) : "";
+      const normalizedStatus = categorizeOrder(order.status);
+      const canCancelOrder = normalizedStatus === "pending";
+      const canConfirmReceipt = normalizedStatus === "delivering" && Boolean(orderKey);
+      const isReceiving = Boolean(orderKey && receivingOrderId === orderKey);
       const orderFeedback = order.orderFeedback || {};
       const driverFeedback = order.deliveryFeedback || {};
       const draft = orderKey ? feedbackDrafts[orderKey] : undefined;
@@ -694,15 +748,25 @@ function Orders() {
                 Giá món (chưa VAT) {formatCurrency(itemsNet)} • VAT {formatCurrency(vatAmount)} • Phí vận chuyển {formatCurrency(shippingFee)} • Phí dịch vụ {formatCurrency(serviceFee)}
               </div>
             </div>
-            <div className="d-flex gap-2">
+            <div className="d-flex gap-2 flex-wrap">
               <Link to={`/orders/details/${order._id}`}>
                 <Button variant="primary" size="sm">
                   Xem chi tiết đơn
                 </Button>
               </Link>
-              {categorizeOrder(order.status) !== "delivered" && (
+              {canCancelOrder && (
                 <Button variant="outline-danger" size="sm" onClick={() => handleDelete(order._id)}>
                   Hủy đơn
+                </Button>
+              )}
+              {canConfirmReceipt && (
+                <Button
+                  variant="success"
+                  size="sm"
+                  disabled={isReceiving}
+                  onClick={() => handleConfirmReceived(orderKey)}
+                >
+                  {isReceiving ? "Đang xác nhận..." : "Đã nhận hàng"}
                 </Button>
               )}
             </div>
@@ -920,6 +984,17 @@ function Orders() {
           : renderOrderList(historyOrders, "Chưa có đơn hàng hoàn thành. Đặt món để trải nghiệm ngay nhé!")}
       </div>
       </div>
+      <ToastContainer position="bottom-end" className="p-3">
+        <Toast
+          bg="success"
+          onClose={() => setToastState({ show: false, message: "" })}
+          show={toastState.show}
+          delay={3000}
+          autohide
+        >
+          <Toast.Body className="text-white">{toastState.message}</Toast.Body>
+        </Toast>
+      </ToastContainer>
     </CustomerLayout>
   );
 }

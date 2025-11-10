@@ -100,14 +100,14 @@ const DRIVER_STATUS_OPTIONS = createOptions(DRIVER_STATUS_ENTRIES);
 
 const ORDER_STATUS_ENTRIES = [
   ['all', 'Tất cả'],
-  ['Pending Confirmation', 'Chờ xác nhận'],
+  ['Pending', 'Chờ xử lý'],
   ['Confirmed', 'Đã xác nhận'],
   ['Preparing', 'Đang chuẩn bị'],
-  ['Awaiting Driver', 'Chờ tài xế'],
-  ['Out for Delivery', 'Đang giao'],
-  ['Delivered', 'Đã giao'],
+  ['Delivering', 'Đang giao'],
+  ['Completed', 'Hoàn tất'],
   ['Cancelled', 'Đã hủy'],
   ['Failed', 'Giao thất bại'],
+  ['Refunded', 'Đã hoàn tiền'],
 ];
 const ORDER_STATUS_OPTIONS = createOptions(ORDER_STATUS_ENTRIES);
 const ORDER_STATUS_LABELS = createLookup(ORDER_STATUS_ENTRIES);
@@ -261,7 +261,7 @@ const FALLBACK_ORDERS = [
     customerName: 'Nguyễn Văn A',
     restaurantName: 'Nhà Hàng Sài Gòn',
     driverName: 'Trần Hữu Phúc',
-    status: 'Pending Confirmation',
+    status: 'Pending',
     total: 185000,
     paymentMethod: 'COD',
     createdAt: '2024-03-12T10:30:00Z',
@@ -272,7 +272,7 @@ const FALLBACK_ORDERS = [
     customerName: 'Trần Thị B',
     restaurantName: 'Pizza Corner',
     driverName: 'Phạm Hải Yến',
-    status: 'Out for Delivery',
+    status: 'Delivering',
     total: 265000,
     paymentMethod: 'Online',
     createdAt: '2024-03-12T11:05:00Z',
@@ -283,7 +283,7 @@ const FALLBACK_ORDERS = [
     customerName: 'Phạm Quốc C',
     restaurantName: 'Bếp Nhà Mẹ',
     driverName: 'Ngô Phước Long',
-    status: 'Delivered',
+    status: 'Completed',
     total: 312000,
     paymentMethod: 'Online',
     createdAt: '2024-03-11T18:40:00Z',
@@ -670,10 +670,7 @@ const normalizeOrders = (raw = []) => {
 
       const rawCode = item.code || item.orderCode || item.reference || id;
       const status =
-        item.status ||
-        item.orderStatus ||
-        item.currentStatus ||
-        'Pending Confirmation';
+        item.status || item.orderStatus || item.currentStatus || 'Pending';
 
       const paymentMethod =
         item.paymentMethod ||
@@ -1268,11 +1265,11 @@ function SuperAdminDashboard() {
       (restaurant) => restaurant.approvalStatus === 'approved'
     ).length;
     const onlineDrivers = drivers.filter((driver) => driver.status === 'online').length;
-    const openOrders = ordersHydrated.filter(
-      (order) => !['Delivered', 'Cancelled', 'Failed'].includes(order.status)
-    ).length;
-    const deliveredOrders = ordersHydrated.filter((order) => order.status === 'Delivered');
-    const totalRevenue = deliveredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+    const closedStatuses = ['Completed', 'Delivered', 'Cancelled', 'Failed', 'Refunded'];
+    const completedStatuses = ['Completed', 'Delivered'];
+    const openOrders = ordersHydrated.filter((order) => !closedStatuses.includes(order.status)).length;
+    const completedOrders = ordersHydrated.filter((order) => completedStatuses.includes(order.status));
+    const totalRevenue = completedOrders.reduce((sum, order) => sum + (order.total || 0), 0);
     const cancellationRate =
       ordersHydrated.length === 0
         ? 0
@@ -1409,27 +1406,26 @@ function SuperAdminDashboard() {
       };
     }
 
-    const deliveredOrders = ordersHydrated.filter((order) => order.status === 'Delivered');
+    const completedStatuses = ['Completed', 'Delivered'];
+    const deliveringStatuses = ['Delivering', 'Awaiting Driver', 'Out for Delivery'];
+    const inProgressStatuses = ['Pending', 'Pending Confirmation', 'Confirmed', 'Preparing', ...deliveringStatuses];
+    const completedOrders = ordersHydrated.filter((order) => completedStatuses.includes(order.status));
     const cancelled = ordersHydrated.filter((order) => order.status === 'Cancelled').length;
     const failed = ordersHydrated.filter((order) => order.status === 'Failed').length;
-    const awaitingDriver = ordersHydrated.filter((order) => order.status === 'Awaiting Driver').length;
-    const inProgress = ordersHydrated.filter((order) =>
-      ['Pending Confirmation', 'Confirmed', 'Preparing', 'Awaiting Driver', 'Out for Delivery'].includes(
-        order.status
-      )
-    ).length;
-    const revenue = deliveredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
-    const avgTicket = deliveredOrders.length ? revenue / deliveredOrders.length : 0;
+    const delivering = ordersHydrated.filter((order) => deliveringStatuses.includes(order.status)).length;
+    const inProgress = ordersHydrated.filter((order) => inProgressStatuses.includes(order.status)).length;
+    const revenue = completedOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+    const avgTicket = completedOrders.length ? revenue / completedOrders.length : 0;
 
     return {
       total: ordersHydrated.length,
       inProgress,
-      delivered: deliveredOrders.length,
+      delivered: completedOrders.length,
       cancelled,
       failed,
       revenue,
       avgTicket,
-      awaitingDriver,
+      awaitingDriver: delivering,
     };
   }, [ordersHydrated]);
 
@@ -2632,13 +2628,7 @@ function SuperAdminDashboard() {
   };
 
   const renderOrders = () => {
-    const statusHighlights = [
-      'Pending Confirmation',
-      'Awaiting Driver',
-      'Out for Delivery',
-      'Delivered',
-      'Cancelled',
-    ]
+    const statusHighlights = ['Pending', 'Confirmed', 'Preparing', 'Delivering', 'Completed', 'Cancelled', 'Failed', 'Refunded']
       .map((status) => ({
         status,
         label: ORDER_STATUS_LABELS[status] || status,
@@ -2678,7 +2668,7 @@ function SuperAdminDashboard() {
             <small>{orderSummary.inProgress} đang xử lý</small>
           </div>
           <div className="sa-mini-card success">
-            <span>Đã giao</span>
+            <span>Hoàn tất</span>
             <strong>{orderSummary.delivered}</strong>
             <small>Doanh thu {formatCurrency(orderSummary.revenue || 0)}</small>
           </div>
@@ -2690,7 +2680,7 @@ function SuperAdminDashboard() {
             </small>
           </div>
           <div className="sa-mini-card accent">
-            <span>Chờ tài xế</span>
+            <span>Đang giao</span>
             <strong>{orderSummary.awaitingDriver}</strong>
             <small>
               Giá trị TB{' '}
