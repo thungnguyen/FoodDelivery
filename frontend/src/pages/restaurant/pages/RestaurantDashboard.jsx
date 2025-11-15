@@ -92,6 +92,7 @@ function RestaurantDashboard() {
     imageUrl: '',
     imageFile: null,
     imageMode: 'file',
+    availability: true,
   });
   const [editFoodItem, setEditFoodItem] = useState(null); // For editing food items
   const [editProfile, setEditProfile] = useState(false); // For editing profile
@@ -121,6 +122,7 @@ function RestaurantDashboard() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
   const ORDER_API_BASE = ORDER_SERVICE_URL;
+  const [foodAvailabilityUpdating, setFoodAvailabilityUpdating] = useState({});
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
   const restaurantRoomRef = useRef(null);
@@ -218,24 +220,31 @@ function RestaurantDashboard() {
     return editFoodImagePreview || resolveImageSrc(editFoodItem.image) || '';
   }, [editFoodImagePreview, editFoodItem, resolveImageSrc]);
 
-  const handleOpenEditFoodItem = useCallback((item) => {
-    setEditFoodItem({
-      ...item,
-      imageUrl: item.image || '',
-      imageFile: null,
-      imageMode: 'url',
-    });
-  }, [setEditFoodItem]);
+  const handleOpenEditFoodItem = useCallback(
+    (item) => {
+      setEditFoodItem({
+        ...item,
+        imageUrl: item.image || '',
+        imageFile: null,
+        imageMode: 'url',
+        availability: item.availability !== false,
+      });
+    },
+    [setEditFoodItem]
+  );
 
+  const normalizedFoodItems = Array.isArray(foodItems) ? foodItems : [];
   const filteredFoodItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
-      return foodItems;
+      return normalizedFoodItems;
     }
-    return foodItems.filter((item) =>
+    return normalizedFoodItems.filter((item) =>
       item.name?.toLowerCase().includes(query)
     );
-  }, [foodItems, searchQuery]);
+  }, [normalizedFoodItems, searchQuery]);
+  const safeFoodItems = Array.isArray(filteredFoodItems) ? filteredFoodItems : [];
+  const hasFoodItems = safeFoodItems.length > 0;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -293,7 +302,7 @@ function RestaurantDashboard() {
       }
       const data = await res.json();
       if (res.ok) {
-        setFoodItems(data);
+        setFoodItems(Array.isArray(data) ? data : []);
       } else {
         alert(data.message || 'Failed to fetch food items');
       }
@@ -972,6 +981,51 @@ function RestaurantDashboard() {
     }
   }, [activeTab, fetchOrders, fetchReviews]);
 
+  const handleFoodAvailabilityToggle = async (foodId, nextAvailability) => {
+    const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+    if (!token) {
+      handleUnauthorizedError();
+      return;
+    }
+    setFoodAvailabilityUpdating((prev) => ({ ...prev, [foodId]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/food-items/availability/${foodId}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ availability: nextAvailability }),
+      });
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
+      const data = await res.json();
+      if (res.ok) {
+        setFoodItems((prev) =>
+          prev.map((item) =>
+            item._id === foodId ? { ...item, availability: nextAvailability } : item
+          )
+        );
+        setEditFoodItem((prev) =>
+          prev && prev._id === foodId ? { ...prev, availability: nextAvailability } : prev
+        );
+        alert(data.message || 'Cập nhật trạng thái món thành công');
+      } else {
+        alert(data.message || 'Failed to update food availability');
+      }
+    } catch (err) {
+      alert('Error updating food availability');
+    } finally {
+      setFoodAvailabilityUpdating((prev) => {
+        const next = { ...prev };
+        delete next[foodId];
+        return next;
+      });
+    }
+  };
+
   const handleAddFoodItem = async () => {
     const trimmedName = newFoodItem.name?.trim();
     const trimmedDescription = newFoodItem.description?.trim();
@@ -999,6 +1053,7 @@ function RestaurantDashboard() {
       formData.append('description', trimmedDescription);
       formData.append('price', trimmedPrice);
       formData.append('category', trimmedCategory);
+      formData.append('availability', newFoodItem.availability !== false ? 'true' : 'false');
 
       if (wantsFile) {
         formData.append('image', newFoodItem.imageFile);
@@ -1027,6 +1082,7 @@ function RestaurantDashboard() {
           imageUrl: '',
           imageFile: null,
           imageMode: 'file',
+          availability: true,
         }); // Reset form
       } else {
         alert(data.message || 'Failed to add food item');
@@ -1333,8 +1389,12 @@ function RestaurantDashboard() {
     }
   };
   const toggleAvailability = async () => {
+    const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+    if (!token) {
+      handleUnauthorizedError();
+      return;
+    }
     try {
-      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
       const res = await fetch(`${API_BASE}/api/restaurants/availability`, {
         method: 'PUT',
         headers: {
@@ -1343,10 +1403,18 @@ function RestaurantDashboard() {
         },
         body: JSON.stringify({ availability: !availability }),
       });
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
       const data = await res.json();
       if (res.ok) {
-        setAvailability(!availability);
+        const nextAvailability = Boolean(data.availability);
+        setAvailability(nextAvailability);
+        setRestaurant((prev) => (prev ? { ...prev, availability: nextAvailability } : prev));
         alert(data.message);
+      } else {
+        alert(data.message || 'Error updating availability');
       }
     } catch (err) {
       alert('Error updating availability');
@@ -1706,7 +1774,7 @@ function RestaurantDashboard() {
                     onChange={(event) => setSearchQuery(event.target.value)}
                   />
                 </div>
-                {filteredFoodItems.length === 0 ? (
+                {!hasFoodItems ? (
                   <div className="empty-state">
                     <h3>Không tìm thấy món ăn</h3>
                     <p>Thử từ khóa khác hoặc thêm món mới ở khung bên cạnh.</p>
@@ -1721,12 +1789,14 @@ function RestaurantDashboard() {
                           <th>Mô tả</th>
                           <th>Giá</th>
                           <th>Phân loại</th>
+                          <th>Trạng thái</th>
                           <th></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredFoodItems.map((item) => {
+                        {safeFoodItems.map((item) => {
                           const imageSrc = resolveImageSrc(item.image);
+                          const isAvailable = item.availability !== false;
                           return (
                             <tr key={item._id}>
                               <td>
@@ -1742,6 +1812,21 @@ function RestaurantDashboard() {
                               <td className="food-description">{item.description || '—'}</td>
                               <td>{formatCurrency(item.price)}</td>
                               <td>{item.category || '—'}</td>
+                              <td className="food-status-cell">
+                                <div className="food-status-control">
+                                  <span className={`status-pill ${isAvailable ? 'open' : 'closed'}`}>
+                                    {isAvailable ? 'Đang mở bán' : 'Tạm ngưng'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className={`food-status-toggle ${isAvailable ? 'off' : 'on'}`}
+                                    onClick={() => handleFoodAvailabilityToggle(item._id, !isAvailable)}
+                                    disabled={!!foodAvailabilityUpdating[item._id]}
+                                  >
+                                    {isAvailable ? 'Tạm ngưng' : 'Mở bán'}
+                                  </button>
+                                </div>
+                              </td>
                               <td className="food-actions">
                                 <button
                                   type="button"
@@ -1962,6 +2047,22 @@ function RestaurantDashboard() {
                           }))
                         }
                       />
+                    </label>
+                    <label>
+                      <span className="field-label">Trạng thái món</span>
+                      <select
+                        className="text-input"
+                        value={newFoodItem.availability !== false ? 'true' : 'false'}
+                        onChange={(event) =>
+                          setNewFoodItem((prev) => ({
+                            ...prev,
+                            availability: event.target.value === 'true',
+                          }))
+                        }
+                      >
+                        <option value="true">Đang mở bán</option>
+                        <option value="false">Tạm ngưng</option>
+                      </select>
                     </label>
                   </div>
                   <div className="image-field">

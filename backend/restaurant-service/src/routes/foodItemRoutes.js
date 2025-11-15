@@ -6,9 +6,25 @@ import upload from '../middleware/uploadMiddleware.js';
 
 const router = express.Router();
 
+const parseBooleanValue = (raw) => {
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'open', 'available'].includes(normalized)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n', 'closed', 'unavailable'].includes(normalized)) {
+      return false;
+    }
+  }
+  return null;
+};
+
 // Create a new food item (Restaurant Admin only)
 router.post('/create', authMiddleware, upload.single('image'), async (req, res) => {
-  const { name, description, price, category, imageUrl } = req.body;
+  const { name, description, price, category, imageUrl, availability } = req.body;
 
   try {
     const restaurant = await Restaurant.findById(req.user.id);
@@ -31,6 +47,11 @@ router.post('/create', authMiddleware, upload.single('image'), async (req, res) 
       image: hasFile ? `/uploads/${req.file.filename}` : cleanedUrl,
       category,
     });
+
+    const parsedAvailability = parseBooleanValue(availability);
+    if (parsedAvailability !== null) {
+      newFoodItem.availability = parsedAvailability;
+    }
 
     await newFoodItem.save();
     res.status(201).json({ message: 'Food item created successfully', newFoodItem });
@@ -69,7 +90,15 @@ router.put('/:id', authMiddleware, upload.single('image'), async (req, res) => {
     if (description) foodItem.description = description;
     if (price) foodItem.price = price;
     if (category) foodItem.category = category;
-    if (typeof availability !== 'undefined') foodItem.availability = availability;
+    if (typeof availability !== 'undefined') {
+      const parsedAvailability = parseBooleanValue(availability);
+      if (parsedAvailability === null) {
+        return res
+          .status(400)
+          .json({ message: 'Invalid value for availability. Must be true or false.' });
+      }
+      foodItem.availability = parsedAvailability;
+    }
 
     const cleanedUrl = typeof imageUrl === 'string' ? imageUrl.trim() : '';
 
@@ -121,14 +150,22 @@ router.put('/availability/:id', authMiddleware, async (req, res) => {
       return res.status(403).json({ message: 'You are not authorized to modify this food item' });
     }
 
-    if (typeof availability !== 'boolean') {
-      return res.status(400).json({ message: 'Invalid value for availability. Must be true or false.' });
+    const parsedAvailability = parseBooleanValue(availability);
+    if (parsedAvailability === null) {
+      return res
+        .status(400)
+        .json({ message: 'Invalid value for availability. Must be true or false.' });
     }
 
-    foodItem.availability = availability;
+    foodItem.availability = parsedAvailability;
     await foodItem.save();
 
-    res.status(200).json({ message: `Food item is now ${availability ? 'Available' : 'Unavailable'}`, foodItem });
+    res
+      .status(200)
+      .json({
+        message: `Food item is now ${parsedAvailability ? 'Available' : 'Unavailable'}`,
+        foodItem,
+      });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server Error' });
@@ -152,7 +189,7 @@ router.get('/restaurant/:restaurantId', async (req, res) => {
     const { restaurantId } = req.params;
 
     // Find food items for the given restaurant ID
-    const foodItems = await FoodItem.find({ restaurant: restaurantId }).populate('restaurant', 'name location');
+    const foodItems = await FoodItem.find({ restaurant: restaurantId }).populate('restaurant', 'name location availability');
 
     if (!foodItems.length) {
       return res.status(404).json({ message: 'No food items found for this restaurant' });

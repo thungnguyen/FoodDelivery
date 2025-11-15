@@ -90,7 +90,7 @@ function CustomerHome() {
 
     const fetchRestaurants = async () => {
       try {
-        const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/all`);
+        const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/all?includeClosed=true`);
 
         const data = await res.json();
         if (res.ok) {
@@ -734,6 +734,9 @@ function CustomerHome() {
                 const lastUpdated = rest.updatedAt
                   ? new Date(rest.updatedAt).toLocaleDateString("vi-VN")
                   : "Mới cập nhật";
+                const isOpen = rest.availability !== false;
+                const statusColor = isOpen ? "#22c55e" : "#f97316";
+                const statusLabel = isOpen ? "Đang mở cửa" : "Tạm đóng";
                 return (
                   <div
                     key={rest._id}
@@ -781,6 +784,21 @@ function CustomerHome() {
                           Đề xuất hôm nay
                         </span>
                       )}
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: "14px",
+                          right: "14px",
+                          padding: "6px 12px",
+                          borderRadius: "999px",
+                          backgroundColor: statusColor,
+                          color: "#fff",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {statusLabel}
+                      </span>
                     </div>
                     <div
                       style={{
@@ -815,10 +833,13 @@ function CustomerHome() {
                           color: "#475569",
                         }}
                       >
-                        <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <FaClock size={12} color="#475569" />
-                          {lastUpdated}
-                        </span>
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <FaClock size={12} color="#475569" />
+                            {lastUpdated}
+                          </span>
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: statusColor, fontWeight: 600 }}>
+                            ● {statusLabel}
+                          </span>
                         <button
                           type="button"
                           onClick={(event) => {

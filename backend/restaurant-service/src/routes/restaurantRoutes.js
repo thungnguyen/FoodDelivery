@@ -558,23 +558,47 @@ router.put('/password', authMiddleware, async (req, res) => {
 });
 
 // Update availability
+const parseBooleanValue = (raw) => {
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (['true', '1', 'yes', 'open', 'available'].includes(normalized)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'closed', 'unavailable'].includes(normalized)) {
+      return false;
+    }
+  }
+  return null;
+};
+
 router.put('/availability', authMiddleware, async (req, res) => {
   const { availability } = req.body;
 
   try {
-    const restaurant = await Restaurant.findById(req.user.id);
+    const parsedAvailability = parseBooleanValue(availability);
+    if (parsedAvailability === null) {
+      return res.status(400).json({ message: 'Invalid value for availability. Must be true or false.' });
+    }
+
+    const restaurant = await Restaurant.findByIdAndUpdate(
+      req.user.id,
+      { $set: { availability: parsedAvailability } },
+      { new: true, runValidators: false, select: '-admin.password' }
+    );
+
     if (!restaurant) {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
 
-    if (typeof availability !== 'boolean') {
-      return res.status(400).json({ message: 'Invalid value for availability. Must be true or false.' });
-    }
-
-    restaurant.availability = availability;
-    await restaurant.save();
-
-    res.status(200).json({ message: `Restaurant is now ${availability ? 'Open' : 'Closed'}`, availability });
+    res
+      .status(200)
+      .json({
+        message: `Restaurant is now ${parsedAvailability ? 'Open' : 'Closed'}`,
+        availability: restaurant.availability,
+      });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server Error' });
@@ -584,7 +608,9 @@ router.put('/availability', authMiddleware, async (req, res) => {
 // Get all restaurants (Public - for customers to browse)
 router.get('/all', async (req, res) => {
   try {
-    const restaurants = await Restaurant.find({ availability: true }).select('-admin.password');
+    const includeClosed = req.query.includeClosed === 'true';
+    const filter = includeClosed ? {} : { availability: true };
+    const restaurants = await Restaurant.find(filter).select('-admin.password');
     res.status(200).json(restaurants);
   } catch (err) {
     console.error(err);
