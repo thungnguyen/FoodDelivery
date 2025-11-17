@@ -1,13 +1,31 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import '../styles/rdashboard.css';
 import { io } from 'socket.io-client';
-import { RESTAURANT_SERVICE_URL, ORDER_SERVICE_URL, REALTIME_SERVICE_URL } from '../../../utils/serviceUrls';
+import {
+  RESTAURANT_SERVICE_URL,
+  ORDER_SERVICE_URL,
+  REALTIME_SERVICE_URL,
+  PROMOTION_SERVICE_URL,
+  SETTLEMENT_SERVICE_URL,
+} from '../../../utils/serviceUrls';
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
 const FALLBACK_IMAGE =
   'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="%23eceff1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2399a1a7" font-family="Arial" font-size="14">No Image</text></svg>';
 
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+
+const DEFAULT_PROMOTION_FORM = {
+  code: '',
+  type: 'PERCENT',
+  value: 10,
+  minOrder: '',
+  maxDiscount: '',
+  usageLimit: '',
+  startDate: '',
+  endDate: '',
+  description: '',
+};
 
 const useFilePreview = (file) => {
   const [preview, setPreview] = useState('');
@@ -121,6 +139,15 @@ function RestaurantDashboard() {
   const [walletSnapshot, setWalletSnapshot] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
+  const [promotionList, setPromotionList] = useState([]);
+  const [promotionLoading, setPromotionLoading] = useState(false);
+  const [promotionError, setPromotionError] = useState('');
+  const [restaurantPromoForm, setRestaurantPromoForm] = useState(DEFAULT_PROMOTION_FORM);
+  const [promoSaving, setPromoSaving] = useState(false);
+  const [promoFeedback, setPromoFeedback] = useState('');
+  const [cashflowSnapshot, setCashflowSnapshot] = useState({ wallet: null, settlements: [] });
+  const [cashflowLoading, setCashflowLoading] = useState(false);
+  const [cashflowError, setCashflowError] = useState('');
   const ORDER_API_BASE = ORDER_SERVICE_URL;
   const [foodAvailabilityUpdating, setFoodAvailabilityUpdating] = useState({});
   const socketRef = useRef(null);
@@ -404,6 +431,150 @@ function RestaurantDashboard() {
     [ORDER_API_BASE, handleUnauthorizedError]
   );
 
+  const fetchRestaurantPromotions = useCallback(async () => {
+    const restaurantId = restaurantIdRef.current;
+    if (!restaurantId) {
+      return;
+    }
+    try {
+      setPromotionLoading(true);
+      setPromotionError('');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(
+        `${PROMOTION_SERVICE_URL}/api/promotions/restaurant/${encodeURIComponent(restaurantId)}`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }
+      );
+      const data = await res.json();
+      if (res.ok) {
+        setPromotionList(Array.isArray(data) ? data : []);
+      } else {
+        setPromotionError(data.message || 'Không thể tải khuyến mãi.');
+      }
+    } catch (error) {
+      console.error('Failed to fetch promotions:', error);
+      setPromotionError('Không thể tải khuyến mãi.');
+    } finally {
+      setPromotionLoading(false);
+    }
+  }, []);
+
+  const fetchCashflowSnapshot = useCallback(async () => {
+    const restaurantId = restaurantIdRef.current;
+    if (!restaurantId) {
+      return;
+    }
+    try {
+      setCashflowLoading(true);
+      setCashflowError('');
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(
+        `${SETTLEMENT_SERVICE_URL}/api/settlements/restaurant/${encodeURIComponent(restaurantId)}`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }
+      );
+      if (res.status === 401) {
+        handleUnauthorizedError();
+        return;
+      }
+      const data = await res.json();
+      if (res.ok) {
+        setCashflowSnapshot({
+          wallet: data.wallet || null,
+          settlements: Array.isArray(data.settlements) ? data.settlements : [],
+        });
+      } else {
+        setCashflowError(data.message || 'Không thể tải dòng tiền.');
+      }
+    } catch (error) {
+      console.error('Failed to fetch cashflow:', error);
+      setCashflowError('Không thể tải dòng tiền.');
+    } finally {
+      setCashflowLoading(false);
+    }
+  }, [handleUnauthorizedError]);
+
+  const handlePromoInputChange = (event) => {
+    const { name, value } = event.target;
+    setRestaurantPromoForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleCreateRestaurantPromotion = async (event) => {
+    event.preventDefault();
+    const restaurantId = restaurantIdRef.current;
+    if (!restaurantId) {
+      setPromoFeedback('Không xác định được nhà hàng. Vui lòng thử lại.');
+      return;
+    }
+
+    const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+    if (!token) {
+      handleUnauthorizedError();
+      return;
+    }
+
+    const trimmedCode = restaurantPromoForm.code.trim().toUpperCase();
+    if (!trimmedCode) {
+      setPromoFeedback('Vui lòng nhập mã khuyến mãi.');
+      return;
+    }
+
+    setPromoSaving(true);
+    setPromoFeedback('');
+    try {
+      const now = new Date();
+      const startDate = restaurantPromoForm.startDate
+        ? new Date(restaurantPromoForm.startDate).toISOString()
+        : now.toISOString();
+      const defaultEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const endDate = restaurantPromoForm.endDate
+        ? new Date(restaurantPromoForm.endDate).toISOString()
+        : defaultEnd.toISOString();
+
+      const payload = {
+        code: trimmedCode,
+        type: restaurantPromoForm.type === 'FIXED' ? 'FIXED' : 'PERCENT',
+        value: Number(restaurantPromoForm.value) || 0,
+        minOrder: Number(restaurantPromoForm.minOrder) || 0,
+        maxDiscount: restaurantPromoForm.maxDiscount
+          ? Number(restaurantPromoForm.maxDiscount)
+          : undefined,
+        usageLimit: restaurantPromoForm.usageLimit
+          ? Number(restaurantPromoForm.usageLimit)
+          : undefined,
+        restaurantId,
+        startDate,
+        endDate,
+        description: restaurantPromoForm.description,
+      };
+
+      const res = await fetch(`${PROMOTION_SERVICE_URL}/api/promotions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể tạo khuyến mãi mới.');
+      }
+      setPromoFeedback('Đã tạo mã khuyến mãi thành công.');
+      setRestaurantPromoForm(DEFAULT_PROMOTION_FORM);
+      fetchRestaurantPromotions();
+    } catch (error) {
+      setPromoFeedback(error.message || 'Không thể tạo khuyến mãi.');
+    } finally {
+      setPromoSaving(false);
+    }
+  };
+
   const fetchOrders = useCallback(
     async ({ silent = false } = {}) => {
       try {
@@ -502,6 +673,25 @@ function RestaurantDashboard() {
             next[index] = {
               ...next[index],
               status: payload?.status || 'Cancelled',
+            };
+            return next;
+          });
+          fetchOrders({ silent: true });
+          break;
+        }
+        case 'order.refunded': {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              status: payload?.status || 'Refunded',
+              paymentStatus: 'Refunded',
             };
             return next;
           });
@@ -981,6 +1171,15 @@ function RestaurantDashboard() {
     }
   }, [activeTab, fetchOrders, fetchReviews]);
 
+  useEffect(() => {
+    if (activeTab === 'promotions') {
+      fetchRestaurantPromotions();
+    }
+    if (activeTab === 'cashflow') {
+      fetchCashflowSnapshot();
+    }
+  }, [activeTab, fetchRestaurantPromotions, fetchCashflowSnapshot]);
+
   const handleFoodAvailabilityToggle = async (foodId, nextAvailability) => {
     const token = getAuthToken(AUTH_ROLES.RESTAURANT);
     if (!token) {
@@ -1450,6 +1649,8 @@ function RestaurantDashboard() {
         <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>Orders</button>
         <button className={activeTab === 'reviews' ? 'active' : ''} onClick={() => setActiveTab('reviews')}>Reviews</button>
         <button className={activeTab === 'finance' ? 'active' : ''} onClick={() => setActiveTab('finance')}>Finance</button>
+        <button className={activeTab === 'promotions' ? 'active' : ''} onClick={() => setActiveTab('promotions')}>Promotions</button>
+        <button className={activeTab === 'cashflow' ? 'active' : ''} onClick={() => setActiveTab('cashflow')}>Cashflow</button>
         <button className={activeTab === 'availability' ? 'active' : ''} onClick={() => setActiveTab('availability')}>Availability</button>
       </div>
 
@@ -2570,6 +2771,293 @@ function RestaurantDashboard() {
                     })}
                   </div>
                 )}
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'promotions' && (
+          <div className="finance-section">
+            <div className="finance-header">
+              <div>
+                <h2>Khuyến mãi của nhà hàng</h2>
+                <p>Tự tạo mã cho khách và theo dõi các chiến dịch đang hoạt động.</p>
+              </div>
+              <span className="finance-chip">{promotionList.length} mã khả dụng</span>
+            </div>
+            <div className="finance-overview" style={{ gap: '16px' }}>
+              <div className="finance-card stretch">
+                <h3>Tạo chương trình mới</h3>
+                <form className="promotion-form" onSubmit={handleCreateRestaurantPromotion}>
+                  <div className="promotion-grid">
+                    <label>
+                      Mã khuyến mãi
+                      <input
+                        className="text-input"
+                        type="text"
+                        name="code"
+                        value={restaurantPromoForm.code}
+                        onChange={handlePromoInputChange}
+                        placeholder="VD: TRIANKH"
+                      />
+                    </label>
+                    <label>
+                      Loại ưu đãi
+                      <select
+                        className="text-input"
+                        name="type"
+                        value={restaurantPromoForm.type}
+                        onChange={handlePromoInputChange}
+                      >
+                        <option value="PERCENT">Giảm theo %</option>
+                        <option value="FIXED">Giảm theo số tiền</option>
+                      </select>
+                    </label>
+                    <label>
+                      Giá trị
+                      <input
+                        className="text-input"
+                        type="number"
+                        name="value"
+                        min="0"
+                        value={restaurantPromoForm.value}
+                        onChange={handlePromoInputChange}
+                      />
+                    </label>
+                  </div>
+                  <div className="promotion-grid">
+                    <label>
+                      Đơn tối thiểu
+                      <input
+                        className="text-input"
+                        type="number"
+                        name="minOrder"
+                        min="0"
+                        value={restaurantPromoForm.minOrder}
+                        onChange={handlePromoInputChange}
+                      />
+                    </label>
+                    <label>
+                      Giảm tối đa
+                      <input
+                        className="text-input"
+                        type="number"
+                        name="maxDiscount"
+                        min="0"
+                        value={restaurantPromoForm.maxDiscount}
+                        onChange={handlePromoInputChange}
+                        placeholder="Tùy chọn"
+                      />
+                    </label>
+                    <label>
+                      Lượt dùng
+                      <input
+                        className="text-input"
+                        type="number"
+                        name="usageLimit"
+                        min="1"
+                        value={restaurantPromoForm.usageLimit}
+                        onChange={handlePromoInputChange}
+                        placeholder="Không giới hạn nếu để trống"
+                      />
+                    </label>
+                  </div>
+                  <div className="promotion-grid">
+                    <label>
+                      Bắt đầu
+                      <input
+                        className="text-input"
+                        type="date"
+                        name="startDate"
+                        value={restaurantPromoForm.startDate}
+                        onChange={handlePromoInputChange}
+                      />
+                    </label>
+                    <label>
+                      Kết thúc
+                      <input
+                        className="text-input"
+                        type="date"
+                        name="endDate"
+                        value={restaurantPromoForm.endDate}
+                        onChange={handlePromoInputChange}
+                      />
+                    </label>
+                    <label>
+                      Mô tả
+                      <input
+                        className="text-input"
+                        type="text"
+                        name="description"
+                        value={restaurantPromoForm.description}
+                        onChange={handlePromoInputChange}
+                        placeholder="Thông điệp gửi tới khách"
+                      />
+                    </label>
+                  </div>
+                  <div className="form-actions" style={{ marginTop: '12px' }}>
+                    <button type="submit" className="form-primary" disabled={promoSaving}>
+                      {promoSaving ? 'Đang lưu...' : 'Tạo mã'}
+                    </button>
+                    {promoFeedback && (
+                      <span className="status-label" style={{ marginLeft: '12px' }}>
+                        {promoFeedback}
+                      </span>
+                    )}
+                  </div>
+                </form>
+              </div>
+            </div>
+            {promotionLoading ? (
+              <p>Đang tải danh sách mã khuyến mãi...</p>
+            ) : promotionError ? (
+              <p className="error-text">{promotionError}</p>
+            ) : (
+              <div className="finance-table-wrapper">
+                {promotionList.length === 0 ? (
+                  <div className="finance-empty">
+                    <h3>Chưa có mã khuyến mãi</h3>
+                    <p>Tạo mã mới ngay tại biểu mẫu bên trên để thu hút khách hàng.</p>
+                  </div>
+                ) : (
+                  <table className="finance-table">
+                    <thead>
+                      <tr>
+                        <th>Mã</th>
+                        <th>Loại</th>
+                        <th>Giá trị</th>
+                        <th>Đơn tối thiểu</th>
+                        <th>Lượt dùng</th>
+                        <th>Hiệu lực</th>
+                        <th>Trạng thái</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {promotionList.map((promo) => (
+                        <tr key={promo.id || promo._id || promo.code}>
+                          <td>{promo.code}</td>
+                          <td>{promo.type === 'PERCENT' ? 'Giảm %' : 'Giảm tiền'}</td>
+                          <td>
+                            {promo.type === 'PERCENT'
+                              ? `${promo.value}%`
+                              : formatCurrency(promo.value || 0)}
+                          </td>
+                          <td>{promo.minOrder ? formatCurrency(promo.minOrder) : 'Không'}</td>
+                          <td>
+                            {promo.usedCount || 0}/{promo.usageLimit || '∞'}
+                          </td>
+                          <td>
+                            <div className="sa-stack">
+                              <span>
+                                {promo.startDate
+                                  ? new Date(promo.startDate).toLocaleDateString('vi-VN')
+                                  : '—'}
+                              </span>
+                              <span className="sa-meta">
+                                {promo.endDate
+                                  ? new Date(promo.endDate).toLocaleDateString('vi-VN')
+                                  : '—'}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`sa-status badge ${promo.status?.toLowerCase() || ''}`}>
+                              {promo.status || 'Chưa xác định'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'cashflow' && (
+          <div className="finance-section">
+            <div className="finance-header">
+              <h2>Dòng tiền & lịch sử thanh toán</h2>
+            </div>
+            {cashflowLoading ? (
+              <p>Đang tải dữ liệu đối soát...</p>
+            ) : cashflowError ? (
+              <p className="error-text">{cashflowError}</p>
+            ) : (
+              <>
+                <div className="finance-overview">
+                  <div className="finance-card primary">
+                    <h3>Số tiền chờ chuyển</h3>
+                    <p>{formatCurrency(cashflowSnapshot.wallet?.pendingAmount || 0)}</p>
+                    <span>Tự động đối soát theo chu kỳ</span>
+                  </div>
+                  <div className="finance-card accent">
+                    <h3>Tổng đã thanh toán</h3>
+                    <p>{formatCurrency(cashflowSnapshot.wallet?.totalPaid || 0)}</p>
+                    <span>Đã hoàn tất qua các kỳ trước</span>
+                  </div>
+                  <div className="finance-card neutral">
+                    <h3>Lần cập nhật gần nhất</h3>
+                    <p>
+                      {cashflowSnapshot.wallet?.updatedAt
+                        ? new Date(cashflowSnapshot.wallet.updatedAt).toLocaleString('vi-VN')
+                        : '—'}
+                    </p>
+                    <span>Tự động đồng bộ khi đơn hoàn tất</span>
+                  </div>
+                </div>
+                <div className="finance-table-wrapper" style={{ marginTop: '20px' }}>
+                  <h3>Lịch sử đối soát</h3>
+                  {cashflowSnapshot.settlements.length === 0 ? (
+                    <div className="finance-empty">
+                      <h4>Chưa có kỳ đối soát</h4>
+                      <p>Đơn hoàn tất sẽ được gom và tạo lịch thanh toán tự động.</p>
+                    </div>
+                  ) : (
+                    <table className="finance-table">
+                      <thead>
+                        <tr>
+                          <th>Kỳ</th>
+                          <th>Doanh số</th>
+                          <th>Phí nền tảng</th>
+                          <th>Chuyển cho nhà hàng</th>
+                          <th>Trạng thái</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cashflowSnapshot.settlements.map((settlement) => (
+                          <tr key={settlement._id}>
+                            <td>
+                              <div className="sa-stack">
+                                <strong>
+                                  {new Date(settlement.periodStart).toLocaleDateString('vi-VN')}
+                                </strong>
+                                <span className="sa-meta">
+                                  đến {new Date(settlement.periodEnd).toLocaleDateString('vi-VN')}
+                                </span>
+                              </div>
+                            </td>
+                            <td>{formatCurrency(settlement.grossSales)}</td>
+                            <td>{formatCurrency(settlement.fees)}</td>
+                            <td>{formatCurrency(settlement.netTransfer)}</td>
+                            <td>
+                              <span
+                                className={`sa-status badge ${settlement.status?.toLowerCase() || ''}`}
+                              >
+                                {settlement.status === 'paid'
+                                  ? 'Đã thanh toán'
+                                  : settlement.status === 'ready'
+                                  ? 'Sẵn sàng'
+                                  : 'Đang xử lý'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </>
             )}
           </div>

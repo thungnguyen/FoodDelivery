@@ -109,13 +109,21 @@ const CheckoutFormInner = () => {
       const derivedShipping = parsed.shippingFee ?? computeShippingFee(cartItems);
       const derivedTotal = parsed.totalPrice ?? derivedItemsTotal + derivedShipping;
 
+      const storedDiscount = roundCurrency(
+        parsed.promotionDiscount || parsed?.promotionDetails?.discountAmount || 0
+      );
+      const payable = roundCurrency(Math.max(0, derivedTotal - storedDiscount));
+
       setOrderData({
         ...parsed,
         cartItems,
         items: cartItems,
         itemsTotal: roundCurrency(derivedItemsTotal),
         shippingFee: roundCurrency(derivedShipping),
-        totalPrice: roundCurrency(derivedTotal),
+        totalPrice: payable,
+        promotionCode: parsed.promotionCode || parsed?.promotionDetails?.code || "",
+        promotionDiscount: storedDiscount,
+        promotionDetails: parsed.promotionDetails || null,
       });
     } catch (err) {
       console.error("Failed to parse pending order from storage", err);
@@ -127,7 +135,7 @@ const CheckoutFormInner = () => {
 
   const totals = useMemo(() => {
     if (!orderData) {
-      return { items: 0, shipping: 0, grand: 0 };
+      return { items: 0, shipping: 0, discount: 0, grand: 0 };
     }
     const sourceItems = Array.isArray(orderData.cartItems) && orderData.cartItems.length
       ? orderData.cartItems
@@ -139,10 +147,12 @@ const CheckoutFormInner = () => {
         sourceItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
     );
     const shipping = roundCurrency(orderData.shippingFee ?? computeShippingFee(sourceItems));
+    const discount = roundCurrency(orderData.promotionDiscount || 0);
     return {
       items,
       shipping,
-      grand: roundCurrency(items + shipping),
+      discount,
+      grand: roundCurrency(Math.max(0, items + shipping - discount)),
     };
   }, [orderData]);
 
@@ -324,6 +334,9 @@ const CheckoutFormInner = () => {
       if (paymentRecordId) {
         orderPayload.paymentId = paymentRecordId;
       }
+      if (orderData.promotionCode) {
+        orderPayload.promotionCode = orderData.promotionCode;
+      }
 
       await axios.post(`${ORDER_SERVICE_URL}/api/orders`, orderPayload, {
         headers: { Authorization: `Bearer ${token}` },
@@ -403,6 +416,12 @@ const CheckoutFormInner = () => {
             <span>Phí giao hàng</span>
             <strong>{formatCurrency(totals.shipping)}</strong>
           </div>
+          {totals.discount > 0 && (
+            <div className="order-total-row discount">
+              <span>Giảm giá (mã {orderData.promotionCode})</span>
+              <strong>-{formatCurrency(totals.discount)}</strong>
+            </div>
+          )}
           <div className="order-total-row grand">
             <span>Tổng thanh toán</span>
             <strong>{formatCurrency(totals.grand)}</strong>

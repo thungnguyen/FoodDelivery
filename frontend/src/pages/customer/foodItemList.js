@@ -13,9 +13,15 @@ import { CartContext } from "../contexts/CartContext";
 import {
   RESTAURANT_SERVICE_URL,
   ORDER_SERVICE_URL,
+  PROMOTION_SERVICE_URL,
 } from "../../utils/serviceUrls";
 import CustomerLayout from "../../components/customer/CustomerLayout";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
+import {
+  getSavedPromotions,
+  savePromotion,
+  subscribePromotionChanges,
+} from "../../utils/promotionStorage";
 
 const FALLBACK_RESTAURANT_IMAGE =
   "https://placehold.co/800x450?text=Restaurant+Image";
@@ -52,6 +58,16 @@ const formatCurrency = (value) => {
   }
 };
 
+const describePromotionValue = (promo) => {
+  if (!promo) return "";
+  const type = (promo.type || "").toUpperCase();
+  if (type === "PERCENT") {
+    return `${promo.value || 0}%`;
+  }
+  const amount = Number(promo.value || promo.discountAmount || promo.maxDiscount || 0);
+  return formatCurrency(amount);
+};
+
 function FoodItemList() {
   const { restaurantId } = useParams();
   const navigate = useNavigate();
@@ -67,6 +83,13 @@ function FoodItemList() {
   const [ratingError, setRatingError] = useState("");
   const [error, setError] = useState("");
   const [favorites, setFavorites] = useState({});
+  const [restaurantPromotions, setRestaurantPromotions] = useState([]);
+  const [promotionLoading, setPromotionLoading] = useState(false);
+  const [promotionError, setPromotionError] = useState("");
+  const [savedPromotionCodes, setSavedPromotionCodes] = useState(() => {
+    return new Set(getSavedPromotions().map((promo) => promo.code));
+  });
+  const [promoFeedback, setPromoFeedback] = useState("");
   const availableFoodsCount = useMemo(
     () => foods.filter((item) => item.availability !== false).length,
     [foods]
@@ -148,9 +171,42 @@ function FoodItemList() {
     fetchRestaurantFoods();
     fetchRestaurantDetails();
     fetchRestaurantRating();
+    const unsubscribe = subscribePromotionChanges((list) => {
+      setSavedPromotionCodes(new Set(list.map((promo) => promo.code)));
+    });
 
     return () => {
       isMounted = false;
+      unsubscribe();
+    };
+  }, [restaurantId]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchPromotions = async () => {
+      setPromotionLoading(true);
+      setPromotionError("");
+      try {
+        const res = await axios.get(
+          `${PROMOTION_SERVICE_URL}/api/promotions/restaurant/${restaurantId}`
+        );
+        if (!active) return;
+        const list = Array.isArray(res.data) ? res.data : [];
+        setRestaurantPromotions(list);
+      } catch (err) {
+        console.error(err);
+        if (active) {
+          setPromotionError("Không thể tải khuyến mãi cho nhà hàng.");
+        }
+      } finally {
+        if (active) {
+          setPromotionLoading(false);
+        }
+      }
+    };
+    fetchPromotions();
+    return () => {
+      active = false;
     };
   }, [restaurantId]);
 
@@ -159,6 +215,19 @@ function FoodItemList() {
       ...prev,
       [foodId]: !prev[foodId],
     }));
+  };
+
+  const handleSavePromotion = (promotion) => {
+    if (!promotion) return;
+    const payload = {
+      ...promotion,
+      restaurantId,
+      restaurantName,
+    };
+    const list = savePromotion(payload, { restaurantId, restaurantName });
+    setSavedPromotionCodes(new Set(list.map((item) => item.code)));
+    setPromoFeedback(`Đã lưu mã ${promotion.code}`);
+    setTimeout(() => setPromoFeedback(""), 2500);
   };
 
   const handleAddToCart = (food) => {
@@ -483,6 +552,131 @@ function FoodItemList() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section
+          style={{
+            background: "#fff7ed",
+            borderRadius: "24px",
+            padding: "28px",
+            boxShadow: "0 35px 60px rgba(124,45,18,0.15)",
+            border: "1px solid rgba(249,115,22,0.1)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              marginBottom: "18px",
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, color: "#78350f" }}>Ưu đãi riêng của nhà hàng</h3>
+              <p style={{ margin: "4px 0 0", color: "#b45309", fontSize: "14px" }}>
+                Thu thập mã và áp dụng ở bước đặt đơn. Ưu đãi do nhà hàng cung cấp.
+              </p>
+            </div>
+            {promoFeedback && (
+              <span
+                style={{
+                  backgroundColor: "#fef3c7",
+                  color: "#b45309",
+                  padding: "6px 16px",
+                  borderRadius: "999px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                }}
+              >
+                {promoFeedback}
+              </span>
+            )}
+          </div>
+          {promotionLoading ? (
+            <p>Đang tải chương trình khuyến mãi...</p>
+          ) : promotionError ? (
+            <p className="error-text">{promotionError}</p>
+          ) : restaurantPromotions.length === 0 ? (
+            <div style={{ color: "#b45309" }}>
+              Nhà hàng chưa có chương trình nào. Ghé lại sau để săn ưu đãi nhé!
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "20px",
+              }}
+            >
+              {restaurantPromotions.map((promo) => {
+                const alreadySaved = savedPromotionCodes.has(promo.code);
+                return (
+                  <div
+                    key={promo.id || promo.code}
+                    style={{
+                      backgroundColor: "#fff",
+                      borderRadius: "20px",
+                      padding: "18px",
+                      border: "1px dashed rgba(249,115,22,0.4)",
+                      boxShadow: "0 15px 35px rgba(249,115,22,0.2)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                      <strong style={{ fontSize: "18px", color: "#9a3412" }}>{promo.code}</strong>
+                      <span
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: "999px",
+                          backgroundColor: "#fee2e2",
+                          color: "#b91c1c",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {promo.status || "ACTIVE"}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, color: "#7c2d12" }}>
+                      Giảm {describePromotionValue(promo)}
+                    </p>
+                    {promo.minOrder ? (
+                      <p style={{ margin: "4px 0 0", color: "#b45309", fontSize: "13px" }}>
+                        Đơn tối thiểu {formatCurrency(promo.minOrder)}
+                      </p>
+                    ) : null}
+                    <p style={{ margin: "6px 0 12px", color: "#a16207", fontSize: "12px" }}>
+                      HSD:{" "}
+                      {promo.endDate
+                        ? new Date(promo.endDate).toLocaleDateString("vi-VN")
+                        : "Chưa cập nhật"}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleSavePromotion(promo)}
+                      disabled={alreadySaved}
+                      style={{
+                        width: "100%",
+                        padding: "10px 0",
+                        borderRadius: "12px",
+                        border: "none",
+                        backgroundColor: alreadySaved ? "#d1fae5" : "#f97316",
+                        color: alreadySaved ? "#047857" : "#fff",
+                        fontWeight: 600,
+                        cursor: alreadySaved ? "default" : "pointer",
+                        boxShadow: alreadySaved
+                          ? "none"
+                          : "0 12px 24px rgba(249,115,22,0.5)",
+                      }}
+                    >
+                      {alreadySaved ? "Đã lưu" : "Lưu mã"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {!restaurantOpen && (

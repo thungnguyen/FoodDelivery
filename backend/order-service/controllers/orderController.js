@@ -3,9 +3,10 @@ import emitEvent from "../utils/eventBus.js";
 import { publish as publishRabbitEvent } from "../src/rabbitmq.js";
 import buildOrderRooms from "../utils/realtimeRooms.js";
 import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
+import { applyPromotionToOrder } from "../services/orderPromotionService.js";
 import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
 
-const PAYMENT_STATUSES = ["Pending", "Paid", "Failed"];
+const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
 
 const CANONICAL_STATUSES = [
     "Pending",
@@ -86,7 +87,11 @@ const toOrderResponse = (orderDoc) => {
     }
     plain.itemsTotal = Math.round(resolvedItemsTotal * 100) / 100;
     plain.shippingFee = Math.round(resolvedShipping * 100) / 100;
-    plain.totalPrice = Math.round((plain.itemsTotal + plain.shippingFee) * 100) / 100;
+    const resolvedDiscount =
+        typeof plain.discountTotal === "number" && plain.discountTotal > 0 ? plain.discountTotal : 0;
+    plain.discountTotal = Math.round(resolvedDiscount * 100) / 100;
+    const grand = plain.itemsTotal + plain.shippingFee - plain.discountTotal;
+    plain.totalPrice = Math.round(Math.max(0, grand) * 100) / 100;
     return plain;
 };
 
@@ -118,7 +123,91 @@ const recalculateOrderTotals = (orderDoc) => {
     );
     orderDoc.itemsTotal = Math.round(itemsTotal * 100) / 100;
     orderDoc.shippingFee = parseAmount(orderDoc.shippingFee, 0);
-    orderDoc.totalPrice = Math.round((orderDoc.itemsTotal + orderDoc.shippingFee) * 100) / 100;
+    const discount =
+        typeof orderDoc.discountTotal === "number" && orderDoc.discountTotal > 0
+            ? orderDoc.discountTotal
+            : 0;
+    orderDoc.discountTotal = Math.round(Math.min(discount, orderDoc.itemsTotal + orderDoc.shippingFee) * 100) / 100;
+    const grand = orderDoc.itemsTotal + orderDoc.shippingFee - orderDoc.discountTotal;
+    orderDoc.totalPrice = Math.round(Math.max(0, grand) * 100) / 100;
+};
+
+const isOrderRefundEligible = (orderDoc) => {
+    if (!orderDoc) return false;
+    const paymentMethod = (orderDoc.paymentMethod || "").toLowerCase();
+    if (paymentMethod !== "card") {
+        return false;
+    }
+    if (orderDoc.paymentStatus !== "Paid") {
+        return false;
+    }
+    const amount = Number(orderDoc.totalPrice || 0);
+    return Number.isFinite(amount) && amount > 0;
+};
+
+const buildCancellationEventPayload = ({ order, cancelledBy, role, reason }) => {
+    const refundEligible = isOrderRefundEligible(order);
+    const orderId =
+        (typeof order?._id?.toString === "function" && order._id.toString()) ||
+        order?.id ||
+        order?.orderId;
+
+    const realtimePayload = {
+        orderId,
+        status: order?.status || "Cancelled",
+        cancelledBy,
+        role,
+        refundEligible
+    };
+
+    const rabbitPayload = {
+        orderId,
+        customerId: order?.customerId || null,
+        customerEmail: order?.customerEmail || null,
+        customerPhone: order?.customerPhone || null,
+        restaurantId: order?.restaurantId || null,
+        restaurantName: order?.restaurantName || "",
+        totalPrice: order?.totalPrice ?? null,
+        itemsTotal: order?.itemsTotal ?? null,
+        shippingFee: order?.shippingFee ?? null,
+        paymentMethod: order?.paymentMethod || null,
+        paymentStatus: order?.paymentStatus || null,
+        paymentIntentId: order?.paymentIntentId || null,
+        paymentId: order?.paymentId || null,
+        promotion: order?.promotion || null,
+        refundEligible,
+        cancelledBy,
+        role,
+        reason: reason || "order_cancelled"
+    };
+
+    return {
+        refundEligible,
+        realtimePayload,
+        rabbitPayload
+    };
+};
+
+const emitCancellationNotifications = async ({ order, cancelledBy, role, reason }) => {
+    const { refundEligible, realtimePayload, rabbitPayload } = buildCancellationEventPayload({
+        order,
+        cancelledBy,
+        role,
+        reason
+    });
+
+    await publishRabbitEvent("order.cancelled.internal", rabbitPayload);
+    await emitEvent({
+        event: "order.cancelled",
+        payload: realtimePayload,
+        rooms: buildOrderRooms({
+            orderId: order._id,
+            customerId: order.customerId,
+            restaurantId: order.restaurantId
+        })
+    });
+
+    return refundEligible;
 };
 
 const buildOrderCompletedPayload = (orderDoc) => {
@@ -131,7 +220,18 @@ const buildOrderCompletedPayload = (orderDoc) => {
         orderId,
         userId: orderDoc.customerId,
         restaurantId: orderDoc.restaurantId,
-        total: orderDoc.totalPrice
+        total: orderDoc.totalPrice,
+        itemsTotal: orderDoc.itemsTotal,
+        shippingFee: orderDoc.shippingFee,
+        promotionDiscount: orderDoc.discountTotal,
+        promotion: orderDoc.promotion
+            ? {
+                  code: orderDoc.promotion.code,
+                  promotionId: orderDoc.promotion.promotionId,
+                  discountAmount: orderDoc.promotion.discountAmount
+              }
+            : null,
+        financialSummary: orderDoc.financialSummary || null
     };
 };
 
@@ -155,10 +255,13 @@ export const createOrder = async (req, res) => {
             shippingFee,
             paymentIntentId,
             paymentId,
-            perRestaurantShipping
+            perRestaurantShipping,
+            promotionCode
         } = req.body;
 
         const normalizedCartItems = Array.isArray(cartItems) && cartItems.length ? cartItems : null;
+        const normalizedPromotionCode =
+            typeof promotionCode === "string" ? promotionCode.trim().toUpperCase() : "";
         if (normalizedCartItems) {
             const shouldDeduplicate = Boolean(paymentIntentId || paymentId);
             const createdOrders = await createOrdersFromCart({
@@ -175,7 +278,8 @@ export const createOrder = async (req, res) => {
                 perRestaurantShipping,
                 paymentIntentId,
                 paymentId,
-                skipDeduplication: !shouldDeduplicate
+                skipDeduplication: !shouldDeduplicate,
+                promotionCode: normalizedPromotionCode
             });
             const response = createdOrders.map(toOrderResponse);
             return res.status(201).json(response);
@@ -234,6 +338,14 @@ export const createOrder = async (req, res) => {
         });
 
         recalculateOrderTotals(order);
+        if (normalizedPromotionCode) {
+            await applyPromotionToOrder({
+                orderDoc: order,
+                promotionCode: normalizedPromotionCode,
+                customerId
+            });
+            recalculateOrderTotals(order);
+        }
         await order.save();
         const orderEventPayload = {
             orderId: order._id.toString(),
@@ -246,6 +358,7 @@ export const createOrder = async (req, res) => {
             items: normalizedItems,
             itemsTotal: order.itemsTotal,
             shippingFee: order.shippingFee,
+            discountTotal: order.discountTotal,
             totalPrice: order.totalPrice,
             paymentMethod: normalizedPaymentMethod,
             paymentStatus: normalizedPaymentStatus,
@@ -253,6 +366,7 @@ export const createOrder = async (req, res) => {
             deliveryAddress,
             paymentIntentId,
             paymentId,
+            promotion: order.promotion || null,
             createdAt: order.createdAt,
             updatedAt: order.updatedAt
         };
@@ -274,7 +388,10 @@ export const createOrder = async (req, res) => {
         const response = toOrderResponse(order);
         res.status(201).json(response);
     } catch (error) {
-        console.error("Error creating order:", error);  // Log error for debugging
+        if (error?.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error("Error creating order:", error); // Log error for debugging
         res.status(500).json({ error: "Server Error" });
     }
 };
@@ -418,6 +535,7 @@ export const updateOrderStatus = async (req, res) => {
     let orderResponse = null;
     let eventPayload = null;
     let completionPayload = null;
+    let cancellationNotice = null;
 
     try {
         await session.withTransaction(async () => {
@@ -481,6 +599,21 @@ export const updateOrderStatus = async (req, res) => {
                 };
             }
 
+            if (order.status === "Cancelled" && previousStatus !== "Cancelled") {
+                cancellationNotice = {
+                    order: order.toObject({ depopulate: true }),
+                    cancelledBy: req.user?.id,
+                    role,
+                    reason:
+                        req.body?.reason ||
+                        (role === "restaurant"
+                            ? "restaurant_cancelled"
+                            : role === "admin"
+                            ? "admin_cancelled"
+                            : "order_cancelled")
+                };
+            }
+
             await order.save({ session });
 
             if (order.status === "Completed" && previousStatus !== "Completed") {
@@ -520,6 +653,15 @@ export const updateOrderStatus = async (req, res) => {
 
     if (eventPayload) {
         emitEvent(eventPayload);
+    }
+
+    if (cancellationNotice) {
+        await emitCancellationNotifications({
+            order: cancellationNotice.order,
+            cancelledBy: cancellationNotice.cancelledBy,
+            role: cancellationNotice.role,
+            reason: cancellationNotice.reason
+        });
     }
 
     if (completionPayload) {
@@ -910,22 +1052,20 @@ export const cancelOrder = async (req, res) => {
         order.status = "Cancelled";
         await order.save();
 
-        emitEvent({
-            event: "order.cancelled",
-            payload: {
-                orderId: order._id,
-                status: order.status,
-                cancelledBy: req.user?.id,
-                role
-            },
-            rooms: buildOrderRooms({
-                orderId: order._id,
-                customerId: order.customerId,
-                restaurantId: order.restaurantId
-            })
+        const refundEligible = await emitCancellationNotifications({
+            order,
+            cancelledBy: req.user?.id,
+            role,
+            reason: req.body?.reason || (role === "customer" ? "customer_cancelled" : "merchant_cancelled")
         });
 
-        res.status(200).json({ message: "Order cancelled", order: toOrderResponse(order) });
+        res.status(200).json({
+            message: refundEligible
+                ? "Order cancelled. Refund will be processed shortly."
+                : "Order cancelled",
+            order: toOrderResponse(order),
+            refundEligible
+        });
     } catch (error) {
         console.error("Error cancelling order:", error);
         res.status(500).json({ error: "Server Error" });

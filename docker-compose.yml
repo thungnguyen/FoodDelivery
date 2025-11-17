@@ -68,6 +68,7 @@ services:
       REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
       SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
       RABBITMQ_URL: amqp://rabbitmq:5672
+      PROMOTION_SERVICE_URL: ${PROMOTION_INTERNAL_URL:-http://promotion-service:5006}
     ports:
       - "${ORDER_PORT:-5005}:${ORDER_PORT:-5005}"
     depends_on:
@@ -119,6 +120,43 @@ services:
       RABBITMQ_URL: amqp://rabbitmq:5672
     ports:
       - "${PAY_PORT:-5004}:${PAY_PORT:-5004}"
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  promotion-service:
+    build:
+      context: ./backend/promotion-service
+    container_name: promotion-service
+    env_file:
+      - .env
+    environment:
+      PORT: ${PROMOTION_PORT:-5006}
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    ports:
+      - "${PROMOTION_PORT:-5006}:${PROMOTION_PORT:-5006}"
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  settlement-service:
+    build:
+      context: ./backend/settlement-service
+    container_name: settlement-service
+    env_file:
+      - .env
+    environment:
+      PORT: ${SETTLEMENT_PORT:-5007}
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      SETTLEMENT_PERIOD: ${SETTLEMENT_PERIOD:-day}
+    ports:
+      - "${SETTLEMENT_PORT:-5007}:${SETTLEMENT_PORT:-5007}"
     depends_on:
       - rabbitmq
     restart: unless-stopped
