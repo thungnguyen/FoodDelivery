@@ -176,7 +176,7 @@ body {
   }
   
   /* Food Items Section Buttons */
-  .food-item-card .actions button {
+.food-item-card .actions button {
     padding: 10px 15px; /* Uniform padding for both buttons */
     border: none;
     border-radius: 8px;
@@ -193,11 +193,49 @@ body {
     color: white;
     padding: 10px 20px; /* Ensure consistent padding */
   }
-  
+
   .food-item-card .edit-btn:hover {
     background-color: #2980b9;
     transform: scale(1.05);
   }
+
+.food-status-cell {
+  min-width: 170px;
+}
+
+.food-status-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.food-status-toggle {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.food-status-toggle.on {
+  background-color: #22c55e;
+}
+
+.food-status-toggle.off {
+  background-color: #f97316;
+}
+
+.food-status-toggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.food-status-toggle:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
   
   .food-item-card .cancel-btn {
     background-color: #e74c3c; /* Red for Cancel */

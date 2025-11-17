@@ -93,7 +93,7 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
 
         const isSucceeded = event.type === "payment_intent.succeeded";
         if (isSucceeded) {
-            if (payment.status !== "Paid") {
+            if (payment.status !== "Paid" && payment.status !== "Refunded") {
                 payment.status = "Paid";
                 await payment.save();
                 console.log(`✅ Payment for Order ${payment.orderId} updated to Paid.`);
@@ -139,11 +139,15 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
                     }
                 }
             } else {
-                console.log(`Payment for Order ${payment.orderId} already updated to Paid.`);
+                console.log(`Payment for Order ${payment.orderId} already updated to ${payment.status}.`);
             }
 
             await publishStripeSuccessEvent({ payment, paymentIntentId });
-        } else if (event.type === "payment_intent.payment_failed" && payment.status !== "Failed") {
+        } else if (
+            event.type === "payment_intent.payment_failed" &&
+            payment.status !== "Failed" &&
+            payment.status !== "Refunded"
+        ) {
             payment.status = "Failed";
             await payment.save();
             console.log(`❌ Payment for Order ${payment.orderId} updated to Failed.`);

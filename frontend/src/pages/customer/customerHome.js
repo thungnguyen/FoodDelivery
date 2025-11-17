@@ -18,12 +18,18 @@ import {
   FaGift,
 } from "react-icons/fa";
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from "../../utils/authTokens";
+import {
+  getSavedPromotions,
+  removeSavedPromotion,
+  subscribePromotionChanges,
+} from "../../utils/promotionStorage";
 
 function CustomerHome() {
   const [restaurants, setRestaurants] = useState([]);
   const [customer, setCustomer] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState('');
+  const [savedPromotions, setSavedPromotions] = useState([]);
   const navigate = useNavigate();
   const { cartItems } = useContext(CartContext);
 
@@ -79,6 +85,15 @@ function CustomerHome() {
     r.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const savedPromoList = useMemo(() => {
+    if (!Array.isArray(savedPromotions)) return [];
+    return [...savedPromotions].sort((a, b) => {
+      const aTime = new Date(a.savedAt || 0).getTime();
+      const bTime = new Date(b.savedAt || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [savedPromotions]);
+
   const handleLogout = useCallback(() => {
     clearAuthToken(AUTH_ROLES.CUSTOMER);
     localStorage.removeItem("pendingOrder");
@@ -90,7 +105,7 @@ function CustomerHome() {
 
     const fetchRestaurants = async () => {
       try {
-        const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/all`);
+        const res = await fetch(`${RESTAURANT_SERVICE_URL}/api/restaurants/all?includeClosed=true`);
 
         const data = await res.json();
         if (res.ok) {
@@ -135,8 +150,23 @@ function CustomerHome() {
     fetchData();
   }, [navigate, handleLogout]);
 
+  useEffect(() => {
+    setSavedPromotions(getSavedPromotions());
+    const unsubscribe = subscribePromotionChanges((list) => {
+      setSavedPromotions(Array.isArray(list) ? list : getSavedPromotions());
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const handleCardClick = (restaurantId) => {
     navigate(`/customer/restaurant/${restaurantId}/foods`);
+  };
+
+  const handleRemoveSavedPromotion = (code) => {
+    const updated = removeSavedPromotion(code);
+    setSavedPromotions(updated);
   };
 
   const customerDisplayName = useMemo(() => {
@@ -734,6 +764,9 @@ function CustomerHome() {
                 const lastUpdated = rest.updatedAt
                   ? new Date(rest.updatedAt).toLocaleDateString("vi-VN")
                   : "Mới cập nhật";
+                const isOpen = rest.availability !== false;
+                const statusColor = isOpen ? "#22c55e" : "#f97316";
+                const statusLabel = isOpen ? "Đang mở cửa" : "Tạm đóng";
                 return (
                   <div
                     key={rest._id}
@@ -781,6 +814,21 @@ function CustomerHome() {
                           Đề xuất hôm nay
                         </span>
                       )}
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: "14px",
+                          right: "14px",
+                          padding: "6px 12px",
+                          borderRadius: "999px",
+                          backgroundColor: statusColor,
+                          color: "#fff",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {statusLabel}
+                      </span>
                     </div>
                     <div
                       style={{
@@ -815,10 +863,13 @@ function CustomerHome() {
                           color: "#475569",
                         }}
                       >
-                        <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <FaClock size={12} color="#475569" />
-                          {lastUpdated}
-                        </span>
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <FaClock size={12} color="#475569" />
+                            {lastUpdated}
+                          </span>
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: statusColor, fontWeight: 600 }}>
+                            ● {statusLabel}
+                          </span>
                         <button
                           type="button"
                           onClick={(event) => {

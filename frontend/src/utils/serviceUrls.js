@@ -36,6 +36,16 @@ export const PAYMENT_SERVICE_URL = fallback(
   "http://localhost:5004"
 );
 
+export const PROMOTION_SERVICE_URL = fallback(
+  process.env.REACT_APP_PROMOTION_URL,
+  "http://localhost:5006"
+);
+
+export const SETTLEMENT_SERVICE_URL = fallback(
+  process.env.REACT_APP_SETTLEMENT_URL,
+  "http://localhost:5007"
+);
+
 export const DELIVERY_SERVICE_URL = fallback(
   process.env.REACT_APP_DELIVERY_URL,
   "http://localhost:5003"

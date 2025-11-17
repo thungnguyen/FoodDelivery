@@ -18,9 +18,20 @@ const orderSchema = new mongoose.Schema(
         ],
         itemsTotal: { type: Number, default: 0 },
         shippingFee: { type: Number, default: 0 },
+        discountTotal: { type: Number, default: 0 },
         totalPrice: { type: Number, required: true },
+        promotion: {
+            code: { type: String },
+            promotionId: { type: String },
+            type: { type: String, enum: ["PERCENT", "FIXED"] },
+            value: { type: Number },
+            discountAmount: { type: Number, default: 0 },
+            restaurantId: { type: String },
+            status: { type: String },
+            appliedAt: { type: Date }
+        },
         paymentMethod: { type: String, enum: ["card", "cash"], default: "cash" },
-        paymentStatus: { type: String, enum: ["Pending", "Paid", "Failed"], default: "Pending" },
+        paymentStatus: { type: String, enum: ["Pending", "Paid", "Failed", "Refunded"], default: "Pending" },
         paymentIntentId: { type: String },
         paymentId: { type: String },
         status: {
@@ -87,7 +98,10 @@ const orderSchema = new mongoose.Schema(
                 enum: ["payable_to_restaurant", "collect_from_restaurant", "even"]
             },
             restaurantWalletBalance: { type: Number, default: 0 },
-            processedAt: { type: Date }
+            processedAt: { type: Date },
+            refundAmount: { type: Number, default: 0 },
+            refundTransactionId: { type: String },
+            refundStatus: { type: String }
         }
     },
     { timestamps: true }

@@ -94,8 +94,8 @@ function Home() {
                 viewport={{ once: true }}
                 transition={{ duration: 0.4, delay: 0.3 }}
               >
-                <div className="role-card-icon">🚗</div>
-                <h3>Delivery Driver</h3>
+                <div className="role-card-icon">🛸+</div>
+                <h3>Drone Manage</h3>
                 <p>Join our team and earn money delivering</p>
                 <div className="role-card-arrow">→</div>
               </motion.div>

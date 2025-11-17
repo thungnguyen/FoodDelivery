@@ -29,6 +29,9 @@ const handlePaymentEvent = async (payload, routingKey) => {
     const nextPaymentMethod = normalizePaymentMethod(payload?.paymentMethod || order.paymentMethod);
     order.paymentMethod = nextPaymentMethod;
 
+    let realtimeEvent = null;
+    let realtimePayload = null;
+
     if (routingKey === "payment.success") {
         if (order.paymentStatus !== "Paid") {
             order.paymentStatus = "Paid";
@@ -43,9 +46,42 @@ const handlePaymentEvent = async (payload, routingKey) => {
             ...(order.financialSummary || {}),
             fundSource: "cod"
         };
+    } else if (routingKey === "payment.refunded") {
+        order.paymentStatus = "Refunded";
+        if (order.status === "Cancelled") {
+            order.status = "Refunded";
+        }
+        const refundAmount = Number(payload?.refundAmount ?? order.totalPrice ?? 0);
+        order.financialSummary = {
+            ...(order.financialSummary || {}),
+            fundSource: "online",
+            refundAmount: refundAmount > 0 ? refundAmount : order.financialSummary?.refundAmount || 0,
+            refundTransactionId: payload?.refundId || payload?.transactionId || null,
+            refundStatus: payload?.refundStatus || "succeeded"
+        };
+        realtimeEvent = "order.refunded";
+        realtimePayload = {
+            orderId: order._id,
+            status: order.status,
+            refundAmount: refundAmount > 0 ? refundAmount : order.totalPrice,
+            currency: payload?.currency || "VND",
+            reason: payload?.reason || "order_cancelled"
+        };
     }
 
     await order.save();
+
+    if (realtimeEvent) {
+        await emitEvent({
+            event: realtimeEvent,
+            payload: realtimePayload,
+            rooms: buildOrderRooms({
+                orderId: order._id,
+                customerId: order.customerId,
+                restaurantId: order.restaurantId
+            })
+        });
+    }
 };
 
 const handleDeliveryCompleted = async (payload) => {
@@ -128,7 +164,7 @@ const handleDeliveryCompleted = async (payload) => {
 };
 
 export const startOrderEventConsumers = async () => {
-    await consume(PAYMENT_QUEUE, ["payment.success", "payment.cod.pending"], handlePaymentEvent);
+    await consume(PAYMENT_QUEUE, ["payment.success", "payment.cod.pending", "payment.refunded"], handlePaymentEvent);
     await consume(DELIVERY_QUEUE, "delivery.completed", handleDeliveryCompleted);
     await consume(STRIPE_QUEUE, STRIPE_SUCCESS_ROUTING, handleStripePaymentSuccess);
 };

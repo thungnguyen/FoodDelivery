@@ -2,6 +2,7 @@ import Order from "../../models/orderModel.js";
 import emitEvent from "../../utils/eventBus.js";
 import buildOrderRooms from "../../utils/realtimeRooms.js";
 import { publish as publishRabbitEvent } from "../rabbitmq.js";
+import { applyPromotionToOrder } from "../../services/orderPromotionService.js";
 
 const DEFAULT_STATUS = "Pending";
 const DEFAULT_PAYMENT_METHOD = "cash";
@@ -148,6 +149,7 @@ const createOrderEventPayload = (orderDoc) => {
         items: plain.items,
         itemsTotal: plain.itemsTotal,
         shippingFee: plain.shippingFee,
+        discountTotal: plain.discountTotal,
         totalPrice: plain.totalPrice,
         paymentMethod: plain.paymentMethod,
         paymentStatus: plain.paymentStatus,
@@ -155,6 +157,7 @@ const createOrderEventPayload = (orderDoc) => {
         deliveryAddress: plain.deliveryAddress,
         paymentIntentId: plain.paymentIntentId,
         paymentId: plain.paymentId,
+        promotion: plain.promotion || null,
         createdAt: plain.createdAt,
         updatedAt: plain.updatedAt
     };
@@ -170,6 +173,15 @@ export const createOrdersFromCart = async (payload = {}) => {
     if (!groupedItems.length) {
         throw new Error("No valid cart items found for order creation.");
     }
+
+    if (payload.promotionCode && groupedItems.length > 1) {
+        const promoError = new Error("Mã khuyến mãi chỉ áp dụng khi đặt một nhà hàng mỗi lần.");
+        promoError.statusCode = 400;
+        throw promoError;
+    }
+
+    const normalizedPromotionCode =
+        typeof payload.promotionCode === "string" ? payload.promotionCode.trim().toUpperCase() : "";
 
     const customerId = payload.userId || payload.customerId || payload.customer?.id;
     if (!customerId) {
@@ -239,6 +251,14 @@ export const createOrdersFromCart = async (payload = {}) => {
                         fundSource
                     }
                 });
+
+                if (normalizedPromotionCode) {
+                    await applyPromotionToOrder({
+                        orderDoc: order,
+                        promotionCode: normalizedPromotionCode,
+                        customerId
+                    });
+                }
 
                 await order.save({ session });
                 orders.push(order);

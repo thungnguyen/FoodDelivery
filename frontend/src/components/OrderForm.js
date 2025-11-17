@@ -1,13 +1,22 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useMemo } from "react";
 import axios from "axios";
-import { ORDER_SERVICE_URL, AUTH_SERVICE_URL } from "../utils/serviceUrls";
+import { ORDER_SERVICE_URL, AUTH_SERVICE_URL, PROMOTION_SERVICE_URL } from "../utils/serviceUrls";
 import { useNavigate } from "react-router-dom";
 import { Button, Form, Spinner } from "react-bootstrap";
 import { BsArrowLeftCircle } from "react-icons/bs";
 import { CartContext } from "../pages/contexts/CartContext";
 import { getAuthToken, AUTH_ROLES } from "../utils/authTokens";
 import { computeShippingFee, roundCurrency } from "../utils/pricing";
+import { getSavedPromotions, subscribePromotionChanges } from "../utils/promotionStorage";
 import CustomerLayout from "./customer/CustomerLayout";
+
+const formatCurrency = (value = 0) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "0 VND";
+  }
+  return `${numeric.toLocaleString("vi-VN")} VND`;
+};
 
 function OrderForm({ addOrder }) {
   const { cartItems, clearCart } = useContext(CartContext);
@@ -17,6 +26,9 @@ function OrderForm({ addOrder }) {
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [promotionState, setPromotionState] = useState({ loading: false, applied: null, error: "" });
+  const [savedPromotions, setSavedPromotions] = useState(() => getSavedPromotions());
   const token = getAuthToken(AUTH_ROLES.CUSTOMER);
 
   // Fetch customer profile on mount
@@ -51,6 +63,57 @@ function OrderForm({ addOrder }) {
     }
   }, [cartItems, navigate]);
 
+  useEffect(() => {
+    setSavedPromotions(getSavedPromotions());
+    const unsubscribe = subscribePromotionChanges((list) => {
+      setSavedPromotions(Array.isArray(list) ? list : getSavedPromotions());
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const cartRestaurants = useMemo(() => {
+    const map = new Map();
+    cartItems.forEach((item) => {
+      const raw = item.restaurantId || item.restaurant || item.restaurant?._id;
+      const id =
+        (typeof raw === "object" ? raw._id || raw.id || raw.toString?.() : raw) || null;
+      if (!id) {
+        return;
+      }
+      if (!map.has(id)) {
+        map.set(id, {
+          restaurantId: id,
+          restaurantName: item.restaurantName || item.restaurant?.name || "",
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [cartItems]);
+
+  const singleRestaurant = cartRestaurants.length <= 1;
+  const primaryRestaurant = cartRestaurants[0] || { restaurantId: null, restaurantName: "" };
+  const primaryRestaurantId = singleRestaurant ? primaryRestaurant.restaurantId : null;
+  const primaryRestaurantName = singleRestaurant ? primaryRestaurant.restaurantName : "";
+
+  const describePromotionValue = (promotion) => {
+    if (!promotion) {
+      return "";
+    }
+    const type = (promotion.type || "").toUpperCase();
+    if (type === "PERCENT") {
+      const percentValue = roundCurrency(promotion.value || 0);
+      return `${percentValue}%`;
+    }
+    const fixedValue =
+      promotion.value ??
+      promotion.maxDiscount ??
+      promotion.discountAmount ??
+      0;
+    return formatCurrency(fixedValue);
+  };
+
   // Calculate total price with quantities
   const itemsTotal = cartItems.reduce(
     (total, item) => total + (item.price || 0) * (item.quantity || 1),
@@ -58,7 +121,66 @@ function OrderForm({ addOrder }) {
   );
   const roundedItemsTotal = roundCurrency(itemsTotal);
   const shippingFee = roundCurrency(computeShippingFee(cartItems));
+  const appliedPromotion = promotionState.applied;
+  const discountAmount = appliedPromotion?.discountAmount
+    ? roundCurrency(appliedPromotion.discountAmount)
+    : 0;
   const grandTotal = roundCurrency(roundedItemsTotal + shippingFee);
+  const finalTotal = roundCurrency(Math.max(0, grandTotal - discountAmount));
+  const eligibleSavedPromotions = useMemo(() => {
+    if (!singleRestaurant) {
+      return [];
+    }
+    const list = Array.isArray(savedPromotions) ? savedPromotions : [];
+    if (!list.length) {
+      return [];
+    }
+    const targetId = primaryRestaurantId
+      ? primaryRestaurantId.toString?.() || primaryRestaurantId
+      : null;
+    const now = Date.now();
+    return list
+      .filter((promo) => {
+        if (!promo?.code) {
+          return false;
+        }
+        if (promo.restaurantId) {
+          const promoRestaurantId =
+            typeof promo.restaurantId === "object"
+              ? promo.restaurantId._id ||
+                promo.restaurantId.id ||
+                promo.restaurantId.toString?.()
+              : promo.restaurantId;
+          if (!targetId || !promoRestaurantId) {
+            return false;
+          }
+          if (promoRestaurantId.toString() !== targetId.toString()) {
+            return false;
+          }
+        }
+        const minOrder = Number(promo.minOrder);
+        if (Number.isFinite(minOrder) && minOrder > 0 && grandTotal < minOrder) {
+          return false;
+        }
+        const status = (promo.status || "").toUpperCase();
+        if (status && ["INACTIVE", "EXPIRED"].includes(status)) {
+          return false;
+        }
+        if (promo.endDate) {
+          const end = new Date(promo.endDate);
+          if (!Number.isNaN(end.getTime()) && end.getTime() < now) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a.savedAt || 0).getTime();
+        const bTime = new Date(b.savedAt || 0).getTime();
+        return bTime - aTime;
+      });
+  }, [savedPromotions, singleRestaurant, primaryRestaurantId, grandTotal]);
+  const hasEligibleSavedPromotions = eligibleSavedPromotions.length > 0;
 
   const validateDeliveryAddress = (value) => {
     if (!value.trim()) {
@@ -68,6 +190,65 @@ function OrderForm({ addOrder }) {
       return "Address must be at least 10 characters long.";
     }
     return "";
+  };
+
+  const handleApplyPromotion = async (codeOverride) => {
+    const candidateCode = codeOverride ?? promoCode;
+    const nextCode = ((candidateCode || "")).trim();
+    if (!nextCode) {
+      setPromotionState((prev) => ({ ...prev, error: "Vui lòng nhập mã khuyến mãi." }));
+      return;
+    }
+    if (!singleRestaurant) {
+      setPromotionState({
+        loading: false,
+        applied: null,
+        error: "Mã khuyến mãi chỉ áp dụng khi đơn thuộc một nhà hàng.",
+      });
+      return;
+    }
+    setPromotionState((prev) => ({ ...prev, loading: true, error: "" }));
+    try {
+      const { data } = await axios.post(`${PROMOTION_SERVICE_URL}/api/promotions/validate`, {
+        code: nextCode,
+        restaurantId: primaryRestaurantId,
+        orderTotal: grandTotal,
+      });
+      const computedDiscount = roundCurrency(Number(data?.discountAmount || 0));
+      if (!computedDiscount) {
+        setPromotionState({
+          loading: false,
+          applied: null,
+          error: "Mã khuyến mãi không tạo ra ưu đãi cho đơn này.",
+        });
+        return;
+      }
+      setPromotionState({
+        loading: false,
+        applied: { ...data, discountAmount: computedDiscount },
+        error: "",
+      });
+      setPromoCode(data?.code || nextCode);
+    } catch (error) {
+      setPromotionState({
+        loading: false,
+        applied: null,
+        error: error.response?.data?.message || "Không thể áp dụng mã khuyến mãi.",
+      });
+    }
+  };
+
+  const handleRemovePromotion = () => {
+    setPromotionState({ loading: false, applied: null, error: "" });
+    setPromoCode("");
+  };
+
+  const handleUseSavedPromotion = (promotion) => {
+    if (!promotion?.code) {
+      return;
+    }
+    setPromoCode(promotion.code);
+    handleApplyPromotion(promotion.code);
   };
 
   const handleSubmit = async (e) => {
@@ -97,11 +278,6 @@ function OrderForm({ addOrder }) {
       return;
     }
 
-    const uniqueRestaurants = Array.from(new Set(normalizedItems.map(item => item.restaurantId))).filter(Boolean);
-    const singleRestaurant = uniqueRestaurants.length === 1;
-    const primaryRestaurantId = singleRestaurant ? normalizedItems[0].restaurantId : null;
-    const primaryRestaurantName = singleRestaurant ? normalizedItems[0].restaurantName : "";
-
     // Save order data to localStorage for checkout page
     const orderData = {
       customerId: customerInfo.id,
@@ -114,8 +290,11 @@ function OrderForm({ addOrder }) {
       cartItems: normalizedItems,
       itemsTotal: roundedItemsTotal,
       shippingFee,
-      totalPrice: grandTotal,
+      totalPrice: finalTotal,
       deliveryAddress: deliveryAddress,
+      promotionCode: appliedPromotion?.code || "",
+      promotionDiscount: discountAmount,
+      promotionDetails: appliedPromotion,
     };
 
     localStorage.setItem("pendingOrder", JSON.stringify(orderData));
@@ -251,6 +430,20 @@ function OrderForm({ addOrder }) {
               <span>Shipping:</span>
               <span>{shippingFee} VND</span>
             </div>
+            {discountAmount > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "16px",
+                  color: "#16a34a",
+                  fontWeight: 600,
+                }}
+              >
+                <span>Discount:</span>
+                <span>-{discountAmount} VND</span>
+              </div>
+            )}
             <div
               style={{
                 display: "flex",
@@ -260,9 +453,151 @@ function OrderForm({ addOrder }) {
               }}
             >
               <span>Total:</span>
-              <span>{grandTotal} VND</span>
+              <span>{finalTotal} VND</span>
             </div>
           </div>
+        </div>
+
+        {/* Promotion */}
+        <div style={{ marginBottom: "25px", padding: "15px", backgroundColor: "#eef2ff", borderRadius: "6px" }}>
+          <h5 style={{ marginBottom: "10px", color: "#4338ca" }}>🎁 Promotion Code</h5>
+          {!singleRestaurant && (
+            <p style={{ color: "#b45309", fontSize: "14px", marginBottom: "8px" }}>
+              Hiện chỉ hỗ trợ áp dụng mã khi đơn thuộc một nhà hàng. Vui lòng tách đơn nếu cần.
+            </p>
+          )}
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <input
+              type="text"
+              className="text-input"
+              placeholder="Nhập mã khuyến mãi"
+              value={promoCode}
+              onChange={(event) => {
+                setPromoCode(event.target.value);
+                setPromotionState((prev) => ({ ...prev, error: "" }));
+              }}
+              style={{ flex: 1 }}
+              disabled={promotionState.loading}
+            />
+            {appliedPromotion ? (
+              <button
+                type="button"
+                onClick={handleRemovePromotion}
+                className="form-secondary"
+                style={{ whiteSpace: "nowrap" }}
+              >
+                Bỏ mã
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleApplyPromotion}
+                className="form-primary"
+                disabled={promotionState.loading || !promoCode.trim()}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                {promotionState.loading ? "Đang kiểm tra..." : "Áp dụng"}
+              </button>
+            )}
+          </div>
+          {promotionState.error && (
+            <p style={{ color: "#dc2626", marginTop: "8px" }}>{promotionState.error}</p>
+          )}
+          {hasEligibleSavedPromotions && (
+            <div
+              style={{
+                marginTop: "12px",
+                padding: "12px",
+                backgroundColor: "#f0fdf4",
+                borderRadius: "10px",
+                border: "1px solid #bbf7d0",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "10px",
+                }}
+              >
+                <span style={{ fontWeight: 600, color: "#166534" }}>
+                  Hoặc chọn mã đã lưu cho {primaryRestaurantName || "đơn này"}
+                </span>
+                <span style={{ fontSize: "13px", color: "#15803d" }}>
+                  {eligibleSavedPromotions.length} mã khả dụng
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                {eligibleSavedPromotions.map((promotion) => {
+                  const isActive = appliedPromotion?.code === promotion.code;
+                  return (
+                    <button
+                      key={`${promotion.code}-${promotion.restaurantId || "any"}`}
+                      type="button"
+                      onClick={() => handleUseSavedPromotion(promotion)}
+                      disabled={promotionState.loading}
+                      style={{
+                        flex: "1 1 220px",
+                        minWidth: "200px",
+                        border: isActive ? "2px solid #16a34a" : "1px solid #e2e8f0",
+                        backgroundColor: isActive ? "#dcfce7" : "#fff",
+                        borderRadius: "12px",
+                        padding: "12px",
+                        textAlign: "left",
+                        boxShadow: "0 10px 18px rgba(15,23,42,0.08)",
+                        cursor: promotionState.loading ? "not-allowed" : "pointer",
+                        opacity: promotionState.loading ? 0.7 : 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: "#0f172a", fontSize: "15px" }}>
+                          {promotion.code}
+                        </span>
+                        <span style={{ fontSize: "12px", color: isActive ? "#15803d" : "#475569" }}>
+                          {isActive ? "Đang áp dụng" : "Áp dụng"}
+                        </span>
+                      </div>
+                      <div style={{ color: "#475569", fontSize: "14px" }}>
+                        Giảm {describePromotionValue(promotion)}
+                      </div>
+                      {Number(promotion.minOrder) > 0 ? (
+                        <div style={{ color: "#52606d", fontSize: "12px", marginTop: "4px" }}>
+                          Đơn tối thiểu {formatCurrency(Number(promotion.minOrder))}
+                        </div>
+                      ) : null}
+                      {promotion.restaurantName ? (
+                        <div style={{ color: "#94a3b8", fontSize: "12px", marginTop: "4px" }}>
+                          {promotion.restaurantName}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+            {appliedPromotion && (
+              <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#ecfccb", borderRadius: "6px" }}>
+                <div>
+                  <strong>{appliedPromotion.code}</strong>{" "}
+                  <span style={{ color: "#166534" }}>• Giảm {describePromotionValue(appliedPromotion)}</span>
+                </div>
+                {appliedPromotion.maxDiscount && appliedPromotion.type === "PERCENT" && (
+                  <small style={{ display: "block", color: "#4d7c0f" }}>
+                    Tối đa {formatCurrency(appliedPromotion.maxDiscount)}
+                  </small>
+                )}
+                <div>Tiết kiệm: {formatCurrency(discountAmount)}</div>
+              </div>
+            )}
         </div>
 
         <Form onSubmit={handleSubmit}>

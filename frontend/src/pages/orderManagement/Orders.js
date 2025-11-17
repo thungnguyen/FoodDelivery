@@ -197,6 +197,39 @@ function Orders() {
             return next;
           });
           fetchOrders({ silent: true });
+          if (payload?.refundEligible) {
+            showToastMessage("Đơn đã hủy và hệ thống đang hoàn lại tiền cho bạn.");
+          } else {
+            showToastMessage("Đơn hàng đã được hủy.");
+          }
+          break;
+        }
+        case "order.refunded": {
+          const orderId = payload?.orderId;
+          if (!orderId) return;
+          setOrders((prev) => {
+            const index = prev.findIndex((order) => (order._id || order.id) === orderId);
+            if (index === -1) {
+              return prev;
+            }
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              status: payload?.status || "Refunded",
+              paymentStatus: "Refunded",
+              financialSummary: {
+                ...(next[index].financialSummary || {}),
+                refundAmount: payload?.refundAmount ?? next[index].financialSummary?.refundAmount,
+              },
+            };
+            return next;
+          });
+          const refundAmount = Number(payload?.refundAmount);
+          if (Number.isFinite(refundAmount) && refundAmount > 0) {
+            showToastMessage(`Đơn đã hoàn lại ${formatCurrency(refundAmount)} về phương thức thanh toán.`);
+          } else {
+            showToastMessage("Đơn đã được hoàn tiền về phương thức thanh toán.");
+          }
           break;
         }
         case "order.feedback.updated": {
@@ -389,17 +422,38 @@ function Orders() {
       return;
     }
 
-    axios.delete(`${ORDER_SERVICE_URL}/api/orders/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(() => {
+    axios
+      .delete(`${ORDER_SERVICE_URL}/api/orders/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((response) => {
         setError("");
-        setOrders(prevOrders => prevOrders.filter(order => order._id !== id));
+        const updatedOrder = response.data?.order;
+        const refundEligible = Boolean(response.data?.refundEligible);
+        setOrders((prevOrders) => {
+          if (!updatedOrder) {
+            return prevOrders.filter((order) => order._id !== id);
+          }
+          const exists = prevOrders.some(
+            (order) => (order._id || order.id) === (updatedOrder._id || updatedOrder.id)
+          );
+          if (!exists) {
+            return [updatedOrder, ...prevOrders];
+          }
+          return prevOrders.map((order) =>
+            (order._id || order.id) === (updatedOrder._id || updatedOrder.id) ? updatedOrder : order
+          );
+        });
+        if (refundEligible) {
+          showToastMessage("Đã hủy đơn và hệ thống sẽ hoàn lại tiền trong giây lát.");
+        } else {
+          showToastMessage("Đơn hàng đã được hủy.");
+        }
       })
       .catch((error) => {
-      console.error("Error deleting order:", error);
-      setError(error.response?.data?.message || "Failed to delete order.");
-    });
+        console.error("Error deleting order:", error);
+        setError(error.response?.data?.message || "Failed to delete order.");
+      });
   };
 
   const showToastMessage = (message) => {
@@ -653,7 +707,13 @@ function Orders() {
       const statusLabel = order.status || "Pending";
       const paymentLabel = order.paymentStatus || "Pending";
       const badgeVariant =
-        paymentLabel === "Paid" ? "success" : paymentLabel === "Failed" ? "danger" : "warning";
+        paymentLabel === "Paid"
+          ? "success"
+          : paymentLabel === "Refunded"
+          ? "info"
+          : paymentLabel === "Failed"
+          ? "danger"
+          : "warning";
       const orderId = order._id || order.id;
       const orderKey = orderId ? String(orderId) : "";
       const normalizedStatus = categorizeOrder(order.status);
@@ -706,6 +766,11 @@ function Orders() {
       const serviceFee = roundCurrency(
         Number.isFinite(Number(summary.driverServiceFee)) ? Number(summary.driverServiceFee) : 0
       );
+      const refundAmountRaw = Number(summary.refundAmount);
+      const hasRefund = paymentLabel === "Refunded" || (Number.isFinite(refundAmountRaw) && refundAmountRaw > 0);
+      const refundDisplay = hasRefund
+        ? (Number.isFinite(refundAmountRaw) && refundAmountRaw > 0 ? refundAmountRaw : grandTotal)
+        : 0;
 
       return (
         <div key={order._id} className="bg-white rounded-3 shadow-sm p-4 mb-4 border border-light">
@@ -747,6 +812,11 @@ function Orders() {
               <div className="text-muted small">
                 Giá món (chưa VAT) {formatCurrency(itemsNet)} • VAT {formatCurrency(vatAmount)} • Phí vận chuyển {formatCurrency(shippingFee)} • Phí dịch vụ {formatCurrency(serviceFee)}
               </div>
+              {hasRefund && (
+                <div className="text-info small fw-semibold mt-1">
+                  Đã hoàn {formatCurrency(refundDisplay)} về phương thức thanh toán ban đầu.
+                </div>
+              )}
             </div>
             <div className="d-flex gap-2 flex-wrap">
               <Link to={`/orders/details/${order._id}`}>

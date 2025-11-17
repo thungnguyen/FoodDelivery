@@ -4,6 +4,8 @@ import '../styles/dashboard.css';
 import {
   RESTAURANT_SERVICE_URL,
   SUPER_ADMIN_API_URL,
+  PROMOTION_SERVICE_URL,
+  SETTLEMENT_SERVICE_URL,
 } from '../../../utils/serviceUrls';
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
@@ -813,6 +815,14 @@ function SuperAdminDashboard() {
     description: '',
   });
   const [promotionMessage, setPromotionMessage] = useState('');
+  const [promotionList, setPromotionList] = useState([]);
+  const [promotionLoading, setPromotionLoading] = useState(false);
+  const [promotionError, setPromotionError] = useState('');
+  const [settlements, setSettlements] = useState([]);
+  const [wallets, setWallets] = useState([]);
+  const [cashflowLoading, setCashflowLoading] = useState(false);
+  const [cashflowError, setCashflowError] = useState('');
+  const [payingSettlementId, setPayingSettlementId] = useState(null);
 
   const lastRefreshLabel = useMemo(() => formatDateTime(lastRefreshedAt), [lastRefreshedAt]);
 
@@ -839,6 +849,60 @@ function SuperAdminDashboard() {
     },
     [token]
   );
+
+  const fetchPromotionList = useCallback(async () => {
+    try {
+      setPromotionLoading(true);
+      setPromotionError('');
+      const res = await fetch(`${PROMOTION_SERVICE_URL}/api/promotions`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể tải khuyến mãi');
+      }
+      setPromotionList(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setPromotionError(error.message);
+    } finally {
+      setPromotionLoading(false);
+    }
+  }, [token]);
+
+  const fetchCashflowOverview = useCallback(async () => {
+    try {
+      setCashflowLoading(true);
+      setCashflowError('');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const [settlementRes, walletRes] = await Promise.all([
+        fetch(`${SETTLEMENT_SERVICE_URL}/api/settlements`, { headers }),
+        fetch(`${SETTLEMENT_SERVICE_URL}/api/settlements/wallets`, { headers }),
+      ]);
+      const settlementData = await settlementRes.json().catch(() => []);
+      if (!settlementRes.ok) {
+        throw new Error(settlementData.message || 'Không thể tải đối soát');
+      }
+      const walletData = await walletRes.json().catch(() => []);
+      if (!walletRes.ok) {
+        throw new Error(walletData.message || 'Không thể tải ví nhà hàng');
+      }
+      setSettlements(Array.isArray(settlementData) ? settlementData : []);
+      setWallets(Array.isArray(walletData) ? walletData : []);
+    } catch (error) {
+      setCashflowError(error.message);
+    } finally {
+      setCashflowLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (activeTab === 'promotions') {
+      fetchPromotionList();
+    }
+    if (activeTab === 'finance') {
+      fetchCashflowOverview();
+    }
+  }, [activeTab, fetchPromotionList, fetchCashflowOverview]);
 
   const handleRealtimeEvent = useCallback(
     (message) => {
@@ -870,7 +934,8 @@ function SuperAdminDashboard() {
           break;
         }
         case 'order.created':
-        case 'order.cancelled': {
+        case 'order.cancelled':
+        case 'order.refunded': {
           setOrdersRefreshTick((tick) => tick + 1);
           break;
         }
@@ -1891,9 +1956,76 @@ function SuperAdminDashboard() {
     setPromotionForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handlePromotionSubmit = (event) => {
+  const handlePromotionSubmit = async (event) => {
     event.preventDefault();
-    setPromotionMessage('Đã lưu chiến dịch khuyến mãi (demo).');
+    try {
+      setPromotionMessage('');
+      const startDate = new Date().toISOString();
+      const endDate = promotionForm.expiresAt
+        ? new Date(promotionForm.expiresAt).toISOString()
+        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const payload = {
+        code: promotionForm.code.trim(),
+        type: promotionForm.discountType === 'amount' ? 'FIXED' : 'PERCENT',
+        value: Number(promotionForm.value) || 0,
+        usageLimit: Number(promotionForm.usageLimit) || undefined,
+        minOrder: Number(promotionForm.minOrderValue) || 0,
+        startDate,
+        endDate,
+        description: promotionForm.description,
+      };
+      const res = await fetch(`${PROMOTION_SERVICE_URL}/api/promotions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể tạo khuyến mãi');
+      }
+      setPromotionMessage('Đã tạo khuyến mãi mới.');
+      setPromotionForm((prev) => ({
+        ...prev,
+        code: '',
+        value: 10,
+        usageLimit: 100,
+        description: '',
+      }));
+      fetchPromotionList();
+    } catch (error) {
+      setPromotionMessage(error.message);
+    }
+  };
+
+  const handlePaySettlement = async (settlementId) => {
+    if (!settlementId) {
+      return;
+    }
+    try {
+      setPayingSettlementId(settlementId);
+      const res = await fetch(
+        `${SETTLEMENT_SERVICE_URL}/api/settlements/${settlementId}/pay`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể thanh toán nhà hàng');
+      }
+      fetchCashflowOverview();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setPayingSettlementId(null);
+    }
   };
 
   const financialSummary = useMemo(() => {
@@ -2863,6 +2995,90 @@ function SuperAdminDashboard() {
           dùng các số dư này để lập lịch payout.
         </p>
       </div>
+      <div className="sa-card stretch">
+        <h3>Ví nhà hàng có công nợ</h3>
+        {cashflowLoading ? (
+          <p>Đang tải dữ liệu ví...</p>
+        ) : cashflowError ? (
+          <p className="sa-error">{cashflowError}</p>
+        ) : wallets.length === 0 ? (
+          <p>Chưa ghi nhận ví nhà hàng nào.</p>
+        ) : (
+          <ul className="sa-list compact">
+            {wallets.slice(0, 5).map((wallet) => (
+              <li key={wallet._id}>
+                <div className="sa-stack">
+                  <strong>{wallet.restaurantId}</strong>
+                  <span className="sa-meta">
+                    Tổng đã trả: {formatCurrency(wallet.totalPaid || 0)}
+                  </span>
+                </div>
+                <strong>{formatCurrency(wallet.pendingAmount || 0)}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="sa-table-wrapper">
+        <h3>Kỳ đối soát cần thanh toán</h3>
+        {cashflowLoading ? (
+          <p>Đang tải đối soát...</p>
+        ) : settlements.length === 0 ? (
+          <p className="sa-placeholder">Chưa có đợt đối soát nào từ Settlement Service.</p>
+        ) : (
+          <table className="sa-table">
+            <thead>
+              <tr>
+                <th>Nhà hàng</th>
+                <th>Kỳ</th>
+                <th>Doanh số</th>
+                <th>Phí</th>
+                <th>Cần chuyển</th>
+                <th>Trạng thái</th>
+                <th>Hành động</th>
+              </tr>
+            </thead>
+            <tbody>
+              {settlements.slice(0, 10).map((settlement) => (
+                <tr key={settlement._id}>
+                  <td>{settlement.restaurantId}</td>
+                  <td>
+                    {new Date(settlement.periodStart).toLocaleDateString('vi-VN')} -{' '}
+                    {new Date(settlement.periodEnd).toLocaleDateString('vi-VN')}
+                  </td>
+                  <td>{formatCurrency(settlement.grossSales)}</td>
+                  <td>{formatCurrency(settlement.fees)}</td>
+                  <td>{formatCurrency(settlement.netTransfer)}</td>
+                  <td>
+                    <span className={`sa-status badge ${settlement.status}`}>
+                      {settlement.status}
+                    </span>
+                  </td>
+                  <td>
+                    {settlement.status === 'paid' ? (
+                      <span className="sa-meta">
+                        Đã thanh toán{' '}
+                        {settlement.paidAt
+                          ? new Date(settlement.paidAt).toLocaleDateString('vi-VN')
+                          : ''}
+                      </span>
+                    ) : (
+                      <button
+                        className="sa-button primary"
+                        type="button"
+                        onClick={() => handlePaySettlement(settlement._id)}
+                        disabled={payingSettlementId === settlement._id}
+                      >
+                        {payingSettlementId === settlement._id ? 'Đang thanh toán...' : 'Thanh toán'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </section>
   );
 
@@ -2876,6 +3092,62 @@ function SuperAdminDashboard() {
           <p>Tạo mã giảm giá, đặt điều kiện áp dụng và giới hạn sử dụng.</p>
         </div>
       </header>
+      <div className="sa-table-wrapper">
+        {promotionLoading ? (
+          <p className="sa-placeholder">Đang tải danh sách khuyến mãi...</p>
+        ) : promotionError ? (
+          <p className="sa-error">{promotionError}</p>
+        ) : promotionList.length === 0 ? (
+          <p className="sa-placeholder">Chưa có mã khuyến mãi nào.</p>
+        ) : (
+          <table className="sa-table">
+            <thead>
+              <tr>
+                <th>Mã</th>
+                <th>Phạm vi</th>
+                <th>Loại</th>
+                <th>Giá trị</th>
+                <th>Đơn tối thiểu</th>
+                <th>Lượt dùng</th>
+                <th>Hiệu lực</th>
+                <th>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {promotionList.map((promo) => (
+                <tr key={promo.id || promo._id || promo.code}>
+                  <td>{promo.code}</td>
+                  <td>{promo.restaurantId || 'Toàn hệ thống'}</td>
+                  <td>{promo.type === 'PERCENT' ? 'Giảm %' : 'Giảm tiền'}</td>
+                  <td>
+                    {promo.type === 'PERCENT'
+                      ? `${promo.value}%`
+                      : formatCurrency(promo.value || 0)}
+                  </td>
+                  <td>{promo.minOrder ? formatCurrency(promo.minOrder) : 'Không'}</td>
+                  <td>
+                    {promo.usedCount || 0}/{promo.usageLimit || '∞'}
+                  </td>
+                  <td>
+                    {promo.startDate
+                      ? new Date(promo.startDate).toLocaleDateString('vi-VN')
+                      : '—'}{' '}
+                    →{' '}
+                    {promo.endDate
+                      ? new Date(promo.endDate).toLocaleDateString('vi-VN')
+                      : '—'}
+                  </td>
+                  <td>
+                    <span className={`sa-status badge ${promo.status?.toLowerCase() || ''}`}>
+                      {promo.status || 'Chưa xác định'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
       <form className="sa-form" onSubmit={handlePromotionSubmit}>
         <div className="sa-form-row">
           <label>

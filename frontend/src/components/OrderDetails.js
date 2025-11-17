@@ -423,7 +423,17 @@ function OrderDetails() {
               <div>
                 <span className="text-muted text-uppercase small">Trạng thái thanh toán</span>
                 <div className="mt-1">
-                  <Badge bg={order.paymentStatus === "Paid" ? "success" : order.paymentStatus === "Failed" ? "danger" : "warning"}>
+                  <Badge
+                    bg={
+                      order.paymentStatus === "Paid"
+                        ? "success"
+                        : order.paymentStatus === "Refunded"
+                        ? "info"
+                        : order.paymentStatus === "Failed"
+                        ? "danger"
+                        : "warning"
+                    }
+                  >
                     {order.paymentStatus || "Pending"}
                   </Badge>
                 </div>

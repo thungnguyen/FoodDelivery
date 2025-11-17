@@ -61,6 +61,10 @@ const FoodDetailPage = () => {
     : null;
   const locationRestaurantName =
     location.state?.restaurantName || location.state?.food?.restaurant?.name || "";
+  const locationRestaurantAvailability =
+    typeof location.state?.restaurantAvailability === "boolean"
+      ? location.state.restaurantAvailability
+      : null;
   const { addToCart } = useContext(CartContext);
 
   const [food, setFood] = useState(locationFood);
@@ -75,6 +79,9 @@ const FoodDetailPage = () => {
   const [averageRating, setAverageRating] = useState(null);
   const [reviewsLoading, setReviewsLoading] = useState(true);
   const [reviewsError, setReviewsError] = useState("");
+  const [restaurantAvailability, setRestaurantAvailability] = useState(
+    locationRestaurantAvailability
+  );
 
   useEffect(() => {
     if (locationFood) {
@@ -87,7 +94,10 @@ const FoodDetailPage = () => {
     if (locationRestaurantName) {
       setRestaurantName(locationRestaurantName);
     }
-  }, [locationFood, locationFoods, locationRestaurantName]);
+    if (typeof locationRestaurantAvailability === "boolean") {
+      setRestaurantAvailability(locationRestaurantAvailability);
+    }
+  }, [locationFood, locationFoods, locationRestaurantName, locationRestaurantAvailability]);
 
   useEffect(() => {
     let canceled = false;
@@ -105,6 +115,10 @@ const FoodDetailPage = () => {
         }
         const items = Array.isArray(response.data) ? response.data : [];
         setAllFoods(items);
+        const firstRestaurant = items[0]?.restaurant;
+        if (firstRestaurant && typeof firstRestaurant.availability !== "undefined") {
+          setRestaurantAvailability(firstRestaurant.availability !== false);
+        }
 
         const selected = items.find((item) => item._id === foodId) || null;
         if (!selected) {
@@ -113,6 +127,9 @@ const FoodDetailPage = () => {
         } else {
           setFood(selected);
           setRestaurantName((prev) => prev || selected?.restaurant?.name || "");
+          if (typeof selected?.restaurant?.availability !== "undefined") {
+            setRestaurantAvailability(selected.restaurant.availability !== false);
+          }
         }
       } catch (error) {
         if (!canceled) {
@@ -132,6 +149,30 @@ const FoodDetailPage = () => {
       canceled = true;
     };
   }, [restaurantId, foodId]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const fetchRestaurantInfo = async () => {
+      try {
+        const response = await axios.get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`);
+        if (canceled) {
+          return;
+        }
+        setRestaurantAvailability(response.data?.availability !== false);
+      } catch (error) {
+        if (!canceled) {
+          console.error("Failed to fetch restaurant metadata:", error);
+        }
+      }
+    };
+
+    fetchRestaurantInfo();
+
+    return () => {
+      canceled = true;
+    };
+  }, [restaurantId]);
 
   useEffect(() => {
     if (!food) {
@@ -234,12 +275,26 @@ const FoodDetailPage = () => {
     return Number(averageRating).toFixed(1);
   }, [averageRating]);
 
+  const isFoodAvailable = food?.availability !== false;
+  const restaurantOpen = restaurantAvailability !== false;
+  const canOrderCurrentFood = Boolean(food) && isFoodAvailable && restaurantOpen;
+  const detailStatusLabel = !restaurantOpen
+    ? "Nhà hàng tạm đóng"
+    : isFoodAvailable
+    ? "Đang mở bán"
+    : "Tạm ngưng bán";
+  const detailStatusColor = !restaurantOpen
+    ? "#ea580c"
+    : isFoodAvailable
+    ? "#22c55e"
+    : "#94a3b8";
+
   const handleBack = () => {
     navigate(-1);
   };
 
   const handleAddToCartFromDetail = () => {
-    if (!food) {
+    if (!food || !canOrderCurrentFood) {
       return;
     }
     addToCart({
@@ -256,6 +311,7 @@ const FoodDetailPage = () => {
         food: item,
         restaurantName: restaurantName || item?.restaurant?.name,
         foods: allFoods,
+        restaurantAvailability,
       },
     });
   };

@@ -91,10 +91,13 @@ router.post("/process", async (req, res) => {
     let payment = await Payment.findOne({ orderId });
     if (payment && payment.stripeClientSecret) {
       console.log("Existing Payment Found:", payment);
-      if (payment.status === "Paid") {
+      if (payment.status === "Paid" || payment.status === "Refunded") {
         return res.status(200).json({
-          message: "✅ This order has already been paid successfully.",
-          paymentStatus: "Paid",
+          message:
+            payment.status === "Refunded"
+              ? "⚠️ This order has already been refunded."
+              : "✅ This order has already been paid successfully.",
+          paymentStatus: payment.status,
           disablePayment: true,
         });
       }
@@ -169,10 +172,13 @@ router.post("/process", async (req, res) => {
       let existingPayment = await Payment.findOne({ orderId: req.body.orderId });
       if (existingPayment) {
         console.log("⚠️ Duplicate detected; returning existing payment:", existingPayment);
-        if (existingPayment.status === "Paid") {
+        if (existingPayment.status === "Paid" || existingPayment.status === "Refunded") {
           return res.status(200).json({
-            message: "✅ This order has already been paid successfully.",
-            paymentStatus: "Paid",
+            message:
+              existingPayment.status === "Refunded"
+                ? "⚠️ This order has already been refunded."
+                : "✅ This order has already been paid successfully.",
+            paymentStatus: existingPayment.status,
             disablePayment: true,
           });
         }

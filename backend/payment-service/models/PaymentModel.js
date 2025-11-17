@@ -19,7 +19,7 @@ const PaymentSchema = new mongoose.Schema({
   currency: { type: String, default: "usd" },
   status: {
     type: String,
-    enum: ["Pending", "Paid", "Failed"],
+    enum: ["Pending", "Paid", "Failed", "Refunded"],
     default: "Pending",
   },
   paymentMethod: {
@@ -43,6 +43,14 @@ const PaymentSchema = new mongoose.Schema({
   stripePaymentIntentId: { type: String, unique: true, sparse: true },
   // Also save the client secret (e.g. "pi_3R9OXlD3879aJGnP0xfO1oMm_secret_...")
   stripeClientSecret: { type: String },
+  refund: {
+    refundId: { type: String },
+    amount: { type: Number },
+    currency: { type: String },
+    status: { type: String },
+    processedAt: { type: Date },
+    reason: { type: String },
+  },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
