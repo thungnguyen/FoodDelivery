@@ -8,7 +8,7 @@ import adminDriverRoutes from './routes/adminDriverRoutes.js';
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000')
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://192.168.1.4:3000')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);

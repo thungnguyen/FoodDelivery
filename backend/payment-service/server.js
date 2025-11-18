@@ -16,7 +16,12 @@ connectDB();
 const app = express();
 
 // Enable CORS for your frontend
-app.use(cors({ origin: "http://localhost:3000" }));
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://192.168.1.4:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({ origin: allowedOrigins }));
 
 // IMPORTANT: Mount the webhook route with raw body parsing BEFORE JSON parser middleware.
 app.use("/api/payment/webhook", express.raw({ type: "application/json" }), webhookRoutes);
