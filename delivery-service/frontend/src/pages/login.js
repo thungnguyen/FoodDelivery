@@ -54,7 +54,7 @@ export default function Login() {
             <FiTruck />
           </span>
           <div>
-            <h2>Tài xế giao hàng</h2>
+            <h2>Drone giao hàng</h2>
             <p>Đăng nhập để nhận đơn, cập nhật trạng thái giao và theo dõi thu nhập theo thời gian thực.</p>
           </div>
         </div>
