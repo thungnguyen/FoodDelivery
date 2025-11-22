@@ -125,6 +125,10 @@ export default function DriverDashboard() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("active");
   const [profile, setProfile] = useState(getStoredDriverProfile());
+  const socketLabel = useMemo(
+    () => SOCKET_URL.replace(/^https?:\/\//, "").replace(/\/$/, ""),
+    []
+  );
 
   const token = getDriverToken();
   const driverId = getDriverId();
@@ -359,27 +363,52 @@ export default function DriverDashboard() {
   return (
     <div className="driver-dashboard">
       <header className="driver-dashboard__header">
-        <div>
-          <h1>Xin chào, {profile?.name || "Tài xế"}</h1>
+        <div className="driver-hero">
+          <p className="driver-overline">Drone Operations Center</p>
+          <h1>Xin chào, {profile?.name || "Phi công"}</h1>
           <p>
-            Quản lý toàn bộ đơn giao hàng, theo dõi thu nhập và hiệu suất làm
-            việc của bạn theo thời gian thực.
+            Điều phối đội drone giao nhận, theo dõi nhiệm vụ và telemetries theo
+            thời gian thực từ bảng điều khiển thống nhất.
           </p>
+          <div className="driver-chip-row">
+            <span className="driver-chip driver-chip--success">
+              Đường truyền realtime sẵn sàng
+            </span>
+            <span className="driver-chip">Socket: {socketLabel}</span>
+            <span className="driver-chip driver-chip--outline">
+              {availableJobs.length} nhiệm vụ chờ phân bổ
+            </span>
+          </div>
         </div>
-        <div className="driver-dashboard__header-actions">
-          <button
-            className="driver-button driver-button--ghost"
-            onClick={syncDashboard}
-            disabled={syncing}
-          >
-            {syncing ? "Đang đồng bộ..." : "Đồng bộ"}
-          </button>
-          <button
-            className="driver-button driver-button--danger"
-            onClick={handleLogout}
-          >
-            Đăng xuất
-          </button>
+
+        <div className="driver-console">
+          <div className="driver-console__panel">
+            <span>Đội bay đang hoạt động</span>
+            <strong>{groupedDeliveries.active.length} drone</strong>
+            <small>
+              {groupedDeliveries.history.length} nhiệm vụ hoàn thành gần đây
+            </small>
+          </div>
+          <div className="driver-console__panel driver-console__panel--muted">
+            <span>Nhiệm vụ cần điều phối</span>
+            <strong>{availableJobs.length}</strong>
+            <small>Kiểm tra hàng đợi trước khi khởi bay</small>
+          </div>
+          <div className="driver-console__actions">
+            <button
+              className="driver-button driver-button--ghost"
+              onClick={syncDashboard}
+              disabled={syncing}
+            >
+              {syncing ? "Đồng bộ luồng dữ liệu..." : "Đồng bộ ngay"}
+            </button>
+            <button
+              className="driver-button driver-button--danger"
+              onClick={handleLogout}
+            >
+              Thoát trạm
+            </button>
+          </div>
         </div>
       </header>
 
@@ -387,25 +416,25 @@ export default function DriverDashboard() {
 
       <section className="driver-metrics">
         <div className="driver-metric-card">
-          <span className="driver-metric-card__label">Thu nhập hôm nay</span>
+          <span className="driver-metric-card__label">Ngân sách bay hôm nay</span>
           <strong>{formatCurrency(stats?.earningsToday || 0)}</strong>
-          <small>= 90% phí ship + tiền tip thực nhận</small>
+          <small>Nguồn: 90% phí ship + tip khi hoàn thành</small>
         </div>
         <div className="driver-metric-card">
-          <span className="driver-metric-card__label">Tổng thu nhập</span>
+          <span className="driver-metric-card__label">Tổng ngân sách đội bay</span>
           <strong>{formatCurrency(stats?.totalEarnings || 0)}</strong>
         </div>
         <div className="driver-metric-card">
-          <span className="driver-metric-card__label">Đơn hoàn thành</span>
+          <span className="driver-metric-card__label">Nhiệm vụ hoàn thành</span>
           <strong>{stats?.delivered || 0}</strong>
         </div>
         <div className="driver-metric-card">
-          <span className="driver-metric-card__label">Đơn đang xử lý</span>
+          <span className="driver-metric-card__label">Drone đang bay</span>
           <strong>{stats?.activeDeliveries || 0}</strong>
         </div>
         {typeof stats?.totalShippingFee === "number" && (
           <div className="driver-metric-card driver-metric-card--split">
-            <span className="driver-metric-card__label">Phí giao hàng đã thu</span>
+            <span className="driver-metric-card__label">Dòng tiền giao hàng</span>
             <strong>{formatCurrency(stats.totalShippingFee || 0)}</strong>
             <small>Phần của bạn (90%): {formatCurrency((stats.totalShippingFee || 0) * 0.9)}</small>
             <small>Nhà hàng (10%): {formatCurrency((stats.totalShippingFee || 0) * 0.1)}</small>
@@ -414,23 +443,26 @@ export default function DriverDashboard() {
       </section>
 
       <div className="driver-share-banner">
-        <strong>Dòng tiền:</strong> 80% giá trị món chuyển cho nhà hàng, nền tảng giữ 20% cùng phí duy trì.
-        Phí giao hàng phân bổ 90% cho tài xế, 10% thưởng nhà hàng theo quy trình đối soát.
+        <strong>Lưu ý vận hành drone:</strong> kiểm tra điện áp pin, liên lạc GPS
+        và tình trạng gió trước khi cất cánh. Dòng tiền: 80% giá trị món chuyển
+        cho nhà hàng, phí ship phân bổ 90% cho phi công, 10% cho đối tác.
       </div>
 
       <section className="driver-available-jobs">
         <div className="driver-section-header">
-          <h2>Đơn chờ tài xế ({availableJobs.length})</h2>
+          <h2>Nhiệm vụ chờ điều phối ({availableJobs.length})</h2>
           <button
             className="driver-button driver-button--ghost"
             onClick={fetchAvailableJobs}
             disabled={syncing}
           >
-            Làm mới
+            Làm mới hàng đợi
           </button>
         </div>
         {availableJobs.length === 0 ? (
-          <div className="driver-empty">Hiện chưa có đơn nào cần nhận.</div>
+          <div className="driver-empty">
+            Chưa có nhiệm vụ mới. Hệ thống sẽ nhả job khi đơn hàng cần drone.
+          </div>
         ) : (
           <div className="driver-job-grid">
             {availableJobs.map((job) => (
@@ -438,12 +470,12 @@ export default function DriverDashboard() {
                 <div className="driver-job-card__header">
                   <h3>Đơn #{formatOrderCode(job.orderId)}</h3>
                   <span className="driver-tag driver-tag--pending">
-                    {getStatusLabel(job.status) || "Chờ tài xế"}
+                    {getStatusLabel(job.status) || "Chờ phi công"}
                   </span>
                 </div>
                 <div className="driver-job-card__body">
                   <p>
-                    <strong>Khách:</strong> {job.customerName || "Ẩn danh"}
+                    <strong>Người nhận:</strong> {job.customerName || "Ẩn danh"}
                     {formatPhoneNumber(job.customerPhone)
                       ? ` • ${formatPhoneNumber(job.customerPhone)}`
                       : ""}
@@ -452,14 +484,14 @@ export default function DriverDashboard() {
                     <strong>Nhà hàng:</strong> {job.restaurantName || "—"}
                   </p>
                   <p>
-                    <strong>Lấy hàng:</strong>{" "}
+                    <strong>Điểm lấy:</strong>{" "}
                     {job.restaurantLocation || "Chưa cập nhật"}
                   </p>
                   <p>
-                    <strong>Giao tới:</strong> {job.deliveryAddress}
+                    <strong>Điểm thả:</strong> {job.deliveryAddress}
                   </p>
                   <p>
-                    <strong>Tổng đơn:</strong>{" "}
+                    <strong>Giá trị đơn:</strong>{" "}
                     {formatCurrency(job.totalPrice || 0)}
                   </p>
                   <p>
@@ -479,7 +511,7 @@ export default function DriverDashboard() {
                     onClick={() => handleAcceptJob(job)}
                     disabled={syncing}
                   >
-                    Nhận đơn
+                    Nhận nhiệm vụ
                   </button>
                 </div>
               </article>
@@ -496,7 +528,7 @@ export default function DriverDashboard() {
             }`}
             onClick={() => setActiveTab("active")}
           >
-            Đơn đang giao ({groupedDeliveries.active.length})
+            Nhiệm vụ đang bay ({groupedDeliveries.active.length})
           </button>
           <button
             className={`driver-tabs__button ${
@@ -504,7 +536,7 @@ export default function DriverDashboard() {
             }`}
             onClick={() => setActiveTab("history")}
           >
-            Lịch sử ({groupedDeliveries.history.length})
+            Lịch sử nhiệm vụ ({groupedDeliveries.history.length})
           </button>
         </div>
 
@@ -592,7 +624,7 @@ function DeliveryCard({
     <article className="driver-delivery-card">
       <div className="driver-delivery-card__header">
         <div>
-          <h3>Đơn #{formatOrderCode(delivery.orderId)}</h3>
+          <h3>Nhiệm vụ #{formatOrderCode(delivery.orderId)}</h3>
           <p className="driver-delivery-card__subtitle">
             {delivery.customerName || "Khách lẻ"}
             {customerPhone ? ` • ${customerPhone}` : ""}
@@ -607,16 +639,16 @@ function DeliveryCard({
 
       <div className="driver-delivery-card__grid">
         <div>
-          <h4>Khách hàng</h4>
+          <h4>Người nhận</h4>
           <p>{delivery.customerName || "Không rõ"}</p>
           {customerPhone ? <p>{customerPhone}</p> : null}
         </div>
         <div>
-          <h4>Điểm lấy</h4>
+          <h4>Bãi cất cánh</h4>
           <p>{delivery.pickupAddressString || delivery.restaurantName}</p>
         </div>
         <div>
-          <h4>Điểm giao</h4>
+          <h4>Bãi hạ cánh</h4>
           <p>{delivery.deliveryAddressString || delivery.deliveryAddress}</p>
         </div>
         <div>
