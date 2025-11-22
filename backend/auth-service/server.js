@@ -6,15 +6,30 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 
 const app = express();
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://192.168.1.4:3000')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.4:3000')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
 
-app.use(cors({
-  origin: allowedOrigins,
+const allowAllOrigins = process.env.CORS_ALLOW_ALL === 'true';
+
+const corsOptions = {
+  origin: allowAllOrigins
+    ? true
+    : (origin, callback) => {
+        if (!origin) {
+          return callback(null, true);
+        }
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        console.warn(`[auth-service] Blocked CORS origin: ${origin}`);
+        return callback(new Error('Not allowed by CORS'));
+      },
   credentials: true,
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Connect DB then start

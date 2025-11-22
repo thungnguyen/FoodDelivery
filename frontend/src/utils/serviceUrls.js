@@ -10,48 +10,70 @@ const fallback = (...values) => {
   return typeof last === 'string' ? last : '';
 };
 
+const runtimeHostBase = (() => {
+  if (typeof window === 'undefined' || !window.location) {
+    return '';
+  }
+  const { protocol, hostname } = window.location;
+  if (!protocol || !hostname) {
+    return '';
+  }
+  return `${protocol}//${hostname}`;
+})();
+
+const buildDynamicUrl = (port) => (runtimeHostBase ? `${runtimeHostBase}:${port}` : '');
+
 export const AUTH_SERVICE_URL = fallback(
   process.env.REACT_APP_AUTH_URL || process.env.REACT_APP_BACKEND_URL,
-  "http://localhost:4000"
+  buildDynamicUrl(process.env.REACT_APP_AUTH_PORT || 5000),
+  'http://localhost:5000'
 );
 
 export const RESTAURANT_SERVICE_URL = fallback(
   process.env.REACT_APP_RESTAURANT_URL,
-  "http://localhost:5002"
+  buildDynamicUrl(process.env.REACT_APP_RESTAURANT_PORT || 5002),
+  'http://localhost:5002'
 );
 
 export const SUPER_ADMIN_API_URL = fallback(
   process.env.REACT_APP_SUPER_ADMIN_URL,
   process.env.REACT_APP_RESTAURANT_URL,
-  "http://localhost:5002"
+  buildDynamicUrl(process.env.REACT_APP_RESTAURANT_PORT || 5002),
+  'http://localhost:5002'
 );
 
 export const ORDER_SERVICE_URL = fallback(
   process.env.REACT_APP_ORDER_URL,
-  "http://localhost:5005"
+  buildDynamicUrl(process.env.REACT_APP_ORDER_PORT || 5005),
+  'http://localhost:5005'
 );
 
 export const PAYMENT_SERVICE_URL = fallback(
   process.env.REACT_APP_PAYMENT_URL,
-  "http://localhost:5004"
+  buildDynamicUrl(process.env.REACT_APP_PAYMENT_PORT || 5004),
+  'http://localhost:5004'
 );
 
 export const PROMOTION_SERVICE_URL = fallback(
   process.env.REACT_APP_PROMOTION_URL,
-  "http://localhost:5006"
+  buildDynamicUrl(process.env.REACT_APP_PROMOTION_PORT || 5006),
+  'http://localhost:5006'
 );
 
 export const SETTLEMENT_SERVICE_URL = fallback(
   process.env.REACT_APP_SETTLEMENT_URL,
-  "http://localhost:5007"
+  buildDynamicUrl(process.env.REACT_APP_SETTLEMENT_PORT || 5007),
+  'http://localhost:5007'
 );
 
 export const DELIVERY_SERVICE_URL = fallback(
   process.env.REACT_APP_DELIVERY_URL,
-  "http://localhost:5003"
+  buildDynamicUrl(process.env.REACT_APP_DELIVERY_PORT || 5003),
+  'http://localhost:5003'
 );
 
 export const REALTIME_SERVICE_URL = fallback(
   process.env.REACT_APP_REALTIME_URL,
-  "http://localhost:5050"
+  buildDynamicUrl(process.env.REACT_APP_REALTIME_PORT || 5050),
+  'http://localhost:5050'
 );
