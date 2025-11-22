@@ -19,7 +19,9 @@ import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import { computeShippingFee, roundCurrency } from "../../utils/pricing";
 import CustomerLayout from "../../components/customer/CustomerLayout";
 
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
+const publishableKey = process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY;
+const hasStripeKey = Boolean(publishableKey);
+const stripePromise = hasStripeKey ? loadStripe(publishableKey) : null;
 
 const PAYMENT_METHODS = [
   { key: "card", label: "Thẻ quốc tế (Visa/Mastercard)", icon: <BsCreditCard size={18} /> },
@@ -103,16 +105,16 @@ const CheckoutFormInner = () => {
         : Array.isArray(parsed.items)
           ? parsed.items
           : [];
-      const derivedItemsTotal =
+      const derivedItemsTotal = roundCurrency(
         parsed.itemsTotal ??
-        cartItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
-      const derivedShipping = parsed.shippingFee ?? computeShippingFee(cartItems);
-      const derivedTotal = parsed.totalPrice ?? derivedItemsTotal + derivedShipping;
-
+          cartItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
+      );
+      const derivedShipping = roundCurrency(parsed.shippingFee ?? computeShippingFee(cartItems));
       const storedDiscount = roundCurrency(
         parsed.promotionDiscount || parsed?.promotionDetails?.discountAmount || 0
       );
-      const payable = roundCurrency(Math.max(0, derivedTotal - storedDiscount));
+      const baseTotal = roundCurrency(derivedItemsTotal + derivedShipping);
+      const payable = roundCurrency(Math.max(0, baseTotal - storedDiscount));
 
       setOrderData({
         ...parsed,
@@ -255,6 +257,10 @@ const CheckoutFormInner = () => {
   };
 
   const handleSelectPaymentMethod = (methodKey) => {
+    if (methodKey === "card" && !hasStripeKey) {
+      setError("Thanh toán thẻ cần cấu hình REACT_APP_STRIPE_PUBLISHABLE_KEY (pk_test...) trong frontend/.env.");
+      return;
+    }
     setPaymentMethod(methodKey);
     setError(null);
     if (methodKey !== "card") {
@@ -287,6 +293,11 @@ const CheckoutFormInner = () => {
     try {
       let paymentIntentId = null;
       if (paymentMethod === "card") {
+        if (!hasStripeKey) {
+          setError("Thanh toán thẻ bị tắt vì thiếu REACT_APP_STRIPE_PUBLISHABLE_KEY.");
+          setLoading(false);
+          return;
+        }
         const paymentResult = await handleCardPayment();
         if (!paymentResult.success) {
           setLoading(false);
@@ -359,7 +370,7 @@ const CheckoutFormInner = () => {
   };
 
   useEffect(() => {
-    if (paymentMethod === "card" && orderData && !clientSecret) {
+    if (paymentMethod === "card" && orderData && !clientSecret && hasStripeKey) {
       createPaymentIntent();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -434,6 +445,7 @@ const CheckoutFormInner = () => {
               key={method.key}
               type="button"
               className={`payment-method-btn ${paymentMethod === method.key ? "active" : ""}`}
+              disabled={!hasStripeKey && method.key === "card"}
               onClick={() => handleSelectPaymentMethod(method.key)}
             >
               {method.icon}
@@ -443,25 +455,32 @@ const CheckoutFormInner = () => {
         </div>
 
         {paymentMethod === "card" && (
-          <form onSubmit={handleSubmit} className="checkout-form">
-            <div className="input-group">
-              <label>Số thẻ</label>
-              <CardNumberElement className="stripe-input" />
-            </div>
-            <div className="input-row">
+          hasStripeKey ? (
+            <form onSubmit={handleSubmit} className="checkout-form">
               <div className="input-group">
-                <label>Expiry</label>
-                <CardExpiryElement className="stripe-input" />
+                <label>Số thẻ</label>
+                <CardNumberElement className="stripe-input" />
               </div>
-              <div className="input-group">
-                <label>CVC</label>
-                <CardCvcElement className="stripe-input" />
+              <div className="input-row">
+                <div className="input-group">
+                  <label>Expiry</label>
+                  <CardExpiryElement className="stripe-input" />
+                </div>
+                <div className="input-group">
+                  <label>CVC</label>
+                  <CardCvcElement className="stripe-input" />
+                </div>
               </div>
+              <button type="submit" disabled={!stripe || loading} className="checkout-btn">
+                {loading ? "Đang xử lý..." : "Thanh toán & đặt hàng"}
+              </button>
+            </form>
+          ) : (
+            <div className="checkout-error">
+              Thanh toán thẻ đang bị tắt vì thiếu khóa publishable Stripe. Thêm
+              `REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_test_xxx` vào `frontend/.env` rồi chạy lại frontend.
             </div>
-            <button type="submit" disabled={!stripe || loading} className="checkout-btn">
-              {loading ? "Đang xử lý..." : "Thanh toán & đặt hàng"}
-            </button>
-          </form>
+          )
         )}
 
         {paymentMethod === "vietqr" && (

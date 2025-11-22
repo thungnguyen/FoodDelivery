@@ -7,6 +7,33 @@ const stripe = stripeSecretKey ? require("stripe")(stripeSecretKey) : null;
 require("dotenv").config();
 const { sendSmsNotification } = require("../utils/twilioService"); // Import Twilio service
 
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  "bif",
+  "clp",
+  "djf",
+  "gnf",
+  "jpy",
+  "kmf",
+  "krw",
+  "mga",
+  "pyg",
+  "rwf",
+  "ugx",
+  "vnd",
+  "vuv",
+  "xaf",
+  "xof",
+  "xpf",
+]);
+
+const MIN_PAYMENT_MINOR_UNITS = {
+  usd: 50, // $0.50
+  eur: 50, // €0.50
+  gbp: 30, // £0.30
+  sgd: 50, // $0.50 SGD
+  vnd: 10000, // 10,000₫
+};
+
 const normalizeCartItems = (cartItems = []) => {
   return cartItems
     .map((item) => {
@@ -41,6 +68,27 @@ const normalizeCartItems = (cartItems = []) => {
 const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundAmount = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return 0;
+  }
+  return Math.round(num * 100) / 100;
+};
+
+const normalizeCurrency = (value) => {
+  if (typeof value === "string" && value.trim().length) {
+    return value.trim().toLowerCase();
+  }
+  return "usd";
+};
+
+const toMinorUnits = (amount, currency) => {
+  const normalizedCurrency = normalizeCurrency(currency);
+  const multiplier = ZERO_DECIMAL_CURRENCIES.has(normalizedCurrency) ? 1 : 100;
+  return Math.round(amount * multiplier);
 };
 
 const normalizeShippingMap = (value) => {
@@ -85,6 +133,34 @@ router.post("/process", async (req, res) => {
       console.warn("[payment-service] Payment processed without delivery address");
     }
 
+    const subtotalFromCart = normalizedCartItems.reduce(
+      (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1),
+      0
+    );
+    const normalizedItemsTotal = roundAmount(toNumber(itemsTotal, subtotalFromCart));
+    const normalizedShipping = roundAmount(Math.max(0, toNumber(shippingFee, 0)));
+    const computedTotal = roundAmount(toNumber(totalPrice, normalizedItemsTotal + normalizedShipping));
+    const clientAmount = roundAmount(toNumber(amount, computedTotal));
+    const baselineAmount = computedTotal > 0 ? computedTotal : normalizedItemsTotal + normalizedShipping;
+    const normalizedAmount = clientAmount > 0 ? Math.max(clientAmount, baselineAmount) : baselineAmount;
+
+    if (!normalizedAmount || normalizedAmount <= 0) {
+      return res.status(400).json({
+        error: "Số tiền thanh toán không hợp lệ. Vui lòng kiểm tra lại giỏ hàng hoặc thử lại.",
+      });
+    }
+
+    const normalizedCurrency = normalizeCurrency(currency || process.env.DEFAULT_PAYMENT_CURRENCY);
+    const amountInMinorUnits = toMinorUnits(normalizedAmount, normalizedCurrency);
+    const minimumMinor = MIN_PAYMENT_MINOR_UNITS[normalizedCurrency];
+    if (minimumMinor && amountInMinorUnits < minimumMinor) {
+      const divisor = ZERO_DECIMAL_CURRENCIES.has(normalizedCurrency) ? 1 : 100;
+      const minimumDisplay = minimumMinor / divisor;
+      return res.status(400).json({
+        error: `Số tiền thanh toán thấp hơn mức tối thiểu (${minimumDisplay} ${normalizedCurrency.toUpperCase()}). Vui lòng thêm món hoặc chọn phương thức khác.`,
+      });
+    }
+
     console.log(`Processing payment request for order ${orderId}`);
 
     // Check if a payment record already exists for this order.
@@ -112,10 +188,9 @@ router.post("/process", async (req, res) => {
     let paymentIntentId = null;
     let clientSecret = null;
     if (stripe) {
-      const amountInCents = Math.round(parseFloat(amount) * 100);
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: amountInCents,
-        currency: currency || "usd",
+        amount: amountInMinorUnits,
+        currency: normalizedCurrency,
         metadata: { orderId, userId },
         receipt_email: normalizedEmail,
       });
@@ -132,8 +207,8 @@ router.post("/process", async (req, res) => {
     payment = new Payment({
       orderId,
       userId,
-      amount,
-      currency: currency || "usd",
+      amount: normalizedAmount,
+      currency: normalizedCurrency,
       status: "Pending",
       paymentMethod: "card",
       customerName,
@@ -144,9 +219,9 @@ router.post("/process", async (req, res) => {
       email: normalizedEmail,
       orderSnapshot: {
         cartItems: normalizedCartItems,
-        itemsTotal: toNumber(itemsTotal, amount),
-        shippingFee: toNumber(shippingFee, 0),
-        totalPrice: toNumber(totalPrice, amount),
+        itemsTotal: normalizedItemsTotal,
+        shippingFee: normalizedShipping,
+        totalPrice: normalizedAmount,
         deliveryAddress,
         customerName,
         perRestaurantShipping: normalizeShippingMap(perRestaurantShipping),
