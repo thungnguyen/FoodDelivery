@@ -38,6 +38,7 @@ import FoodDetailPage from "./pages/customer/FoodDetailPage";
 import SuperAdminRegister from './pages/restaurant/components/SuperAdminRegister';
 import SuperAdminLogin from './pages/restaurant/components/SuperAdminLogin';
 import SuperAdminDashboard from './pages/restaurant/pages/SuperAdminDashboard';
+import SuperAdminDroneOrders from './pages/restaurant/pages/SuperAdminDroneOrders';
 import RestaurantRegister from './pages/restaurant/components/RestaurantRegister';
 import RestaurantLogin from './pages/restaurant/components/RestaurantLogin';
 import RestaurantOnboardingVerify from './pages/restaurant/components/RestaurantOnboardingVerify';
@@ -52,6 +53,12 @@ import AdminLanding from './pages/landing/AdminLanding';
 import DriverLanding from './pages/landing/DriverLanding';
 
 // delivery management
+import DroneCenterLayout from './pages/drone-center/DroneCenterLayout';
+import Dashboard from './pages/drone-center/Dashboard';
+import DronesPage from './pages/drone-center/DronesPage';
+import HubsPage from './pages/drone-center/HubsPage';
+import MapPage from './pages/drone-center/MapPage';
+import SimulatorPage from './pages/drone-center/SimulatorPage';
 
 function App() {
   const [orders, setOrders] = useState([]);
@@ -104,6 +111,7 @@ function App() {
           <Route path="/superadmin/login" element={<SuperAdminLogin />} />
           <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
           <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+          <Route path="/super-admin/drone-orders" element={<SuperAdminDroneOrders />} />
           <Route path="/restaurant/register" element={<RestaurantRegister />} />
           <Route path="/restaurant/login" element={<RestaurantLogin />} />
           <Route path="/restaurant/activate" element={<RestaurantOnboardingVerify />} />
@@ -115,6 +123,14 @@ function App() {
           <Route path="/restaurant/home" element={<IndexPage />} />
 
           {/* delivery management */}
+          <Route path="/drone-center/*" element={<DroneCenterLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="drones" element={<DronesPage />} />
+            <Route path="hubs" element={<HubsPage />} />
+            <Route path="map" element={<MapPage />} />
+            <Route path="simulator" element={<SimulatorPage />} />
+          </Route>
 
         </Routes>
       </Router>

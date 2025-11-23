@@ -55,7 +55,7 @@ const generateOtpCode = () => {
 
 // Register a new restaurant (awaiting admin approval)
 router.post('/register', upload.single('profilePicture'), async (req, res) => {
-  const { name, taxCode, ownerName, location, contactNumber, email } = req.body;
+  const { name, taxCode, ownerName, location, contactNumber, email, locationLat, locationLng } = req.body;
   const profilePicture = req.file ? `/uploads/${req.file.filename}` : '';
 
   const trimmed = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -98,6 +98,10 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       taxCode: requiredFields.taxCode,
       ownerName: requiredFields.ownerName,
       location: requiredFields.location,
+      locationCoords:
+        Number.isFinite(Number(locationLat)) && Number.isFinite(Number(locationLng))
+          ? { lat: Number(locationLat), lng: Number(locationLng) }
+          : undefined,
       contactNumber: requiredFields.contactNumber,
       profilePicture,
       admin: { email: requiredFields.email },
