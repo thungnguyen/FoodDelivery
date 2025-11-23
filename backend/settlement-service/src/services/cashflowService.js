@@ -4,7 +4,7 @@ import { clampPositive, roundCurrency, toNumber } from "../utils/money.js";
 import { resolvePeriodRange } from "../utils/dates.js";
 
 const COMMISSION_RATE = Number(process.env.SETTLEMENT_COMMISSION_RATE || 0.2);
-const RESTAURANT_SHIPPING_RATE = Number(process.env.RESTAURANT_SHIPPING_RATE || 0.1);
+const HOLD_DAYS = Number(process.env.PAYOUT_HOLD_DAYS || 7);
 
 const safeCommission = (value) => {
   const numeric = Number(value);
@@ -37,11 +37,8 @@ export const handleOrderCompletedEvent = async (payload = {}) => {
 
   const commission = clampPositive(baseGross * safeCommission(process.env.SETTLEMENT_COMMISSION_RATE));
   const restaurantItemShare = clampPositive(baseGross - commission);
-  const restaurantShippingShare = clampPositive(shippingFee * RESTAURANT_SHIPPING_RATE);
-  const netAmount = clampPositive(
-    payload.financialSummary?.netRestaurant ?? restaurantItemShare + restaurantShippingShare
-  );
-  const fees = clampPositive(grossSales - netAmount);
+  const netAmount = clampPositive(payload.financialSummary?.netRestaurant ?? restaurantItemShare);
+  const fees = clampPositive(grossSales - netAmount); // gồm phí drone và hoa hồng
 
   const wallet = await ensureWallet(restaurantId);
   wallet.transactions.push({
@@ -64,6 +61,7 @@ export const createSettlementFromTransactions = async ({ wallet, transactions, p
   }
   const reference = transactions[0]?.createdAt || new Date();
   const { periodStart, periodEnd } = resolvePeriodRange(reference, periodMode);
+  const payoutDueAt = new Date(Date.now() + HOLD_DAYS * 24 * 60 * 60 * 1000);
   const txIds = transactions.map((tx) => tx._id?.toString());
 
   let settlement = await Settlement.findOne({ restaurantId: wallet.restaurantId, periodStart });
@@ -91,6 +89,8 @@ export const createSettlementFromTransactions = async ({ wallet, transactions, p
       restaurantId: wallet.restaurantId,
       periodStart,
       periodEnd,
+      payoutDueAt,
+      holdDays: HOLD_DAYS,
       grossSales: gross,
       fees,
       netTransfer: net,
@@ -98,6 +98,12 @@ export const createSettlementFromTransactions = async ({ wallet, transactions, p
       transactions: txSummaries
     });
   } else {
+    if (!settlement.payoutDueAt) {
+      settlement.payoutDueAt = payoutDueAt;
+    }
+    if (!settlement.holdDays) {
+      settlement.holdDays = HOLD_DAYS;
+    }
     settlement.grossSales = roundCurrency((settlement.grossSales || 0) + gross);
     settlement.fees = roundCurrency((settlement.fees || 0) + fees);
     settlement.netTransfer = roundCurrency((settlement.netTransfer || 0) + net);

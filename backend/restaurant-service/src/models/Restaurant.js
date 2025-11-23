@@ -81,6 +81,21 @@ const restaurantSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    bankAccountNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    bankAccountName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    bankName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
   },
   { timestamps: true }
 );

@@ -2,6 +2,8 @@ import Settlement from "../models/Settlement.js";
 import RestaurantWallet from "../models/RestaurantWallet.js";
 import { clampPositive, roundCurrency } from "../utils/money.js";
 
+const HOLD_DAYS = Number(process.env.PAYOUT_HOLD_DAYS || 7);
+
 export const getAllSettlements = async (req, res) => {
   try {
     const query = {};
@@ -69,11 +71,13 @@ export const payRestaurant = async (req, res) => {
       fees: 0,
       netAmount: settlement.netTransfer,
       description: `Thanh toán đối soát ${settlement._id}`,
+      settlementId: settlement._id,
       settled: true,
       settledAt: new Date()
     });
 
     settlement.status = "paid";
+    settlement.payoutInitiatedAt = new Date();
     settlement.paidAt = new Date();
 
     await wallet.save();
@@ -83,5 +87,25 @@ export const payRestaurant = async (req, res) => {
   } catch (error) {
     console.error("[settlement-service] payRestaurant", error.message);
     res.status(500).json({ message: "Không thể xử lý thanh toán" });
+  }
+};
+
+export const confirmRestaurantReceipt = async (req, res) => {
+  try {
+    const { settlementId } = req.params;
+    const settlement = await Settlement.findById(settlementId);
+    if (!settlement) {
+      return res.status(404).json({ message: "Không tìm thấy đối soát" });
+    }
+    if (settlement.status !== "paid") {
+      return res.status(400).json({ message: "Chỉ xác nhận khi đã chuyển tiền" });
+    }
+    settlement.restaurantConfirmation = "confirmed";
+    settlement.restaurantConfirmedAt = new Date();
+    await settlement.save();
+    res.json({ settlement });
+  } catch (error) {
+    console.error("[settlement-service] confirmRestaurantReceipt", error.message);
+    res.status(500).json({ message: "Không thể xác nhận đã nhận tiền" });
   }
 };

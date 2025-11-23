@@ -496,6 +496,28 @@ function RestaurantDashboard() {
     }
   }, [handleUnauthorizedError]);
 
+  const handleConfirmPayoutReceived = async (settlementId) => {
+    if (!settlementId) return;
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(`${SETTLEMENT_SERVICE_URL}/api/settlements/${settlementId}/confirm`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể xác nhận đã nhận tiền');
+      }
+      fetchCashflowSnapshot();
+      alert('Đã xác nhận nhận tiền từ Admin.');
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
   const handlePromoInputChange = (event) => {
     const { name, value } = event.target;
     setRestaurantPromoForm((prev) => ({
@@ -881,6 +903,39 @@ function RestaurantDashboard() {
       return value;
     }
     return number.toLocaleString('vi-VN');
+  };
+
+  const payoutInfo = useMemo(() => {
+    const pending = (cashflowSnapshot.settlements || []).filter((s) =>
+      ['pending', 'ready', 'processing'].includes((s.status || '').toLowerCase())
+    );
+    if (!pending.length) {
+      return { nextDue: null, daysLeft: null };
+    }
+    const sorted = [...pending].sort((a, b) => {
+      const aDue = new Date(a.payoutDueAt || a.periodEnd || a.periodStart || 0).getTime();
+      const bDue = new Date(b.payoutDueAt || b.periodEnd || b.periodStart || 0).getTime();
+      return aDue - bDue;
+    });
+    const next = sorted[0];
+    const nextDue = next?.payoutDueAt || next?.periodEnd || null;
+    return { nextDue, daysLeft: daysUntil(nextDue) };
+  }, [cashflowSnapshot.settlements]);
+
+  const formatDateShort = (value) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('vi-VN');
+  };
+
+  const daysUntil = (future, from = Date.now()) => {
+    const target = future instanceof Date ? future.getTime() : new Date(future).getTime();
+    const base = from instanceof Date ? from.getTime() : new Date(from).getTime();
+    if (Number.isNaN(target) || Number.isNaN(base)) {
+      return null;
+    }
+    return Math.max(0, Math.ceil((target - base) / (24 * 60 * 60 * 1000)));
   };
 
   const financialMetrics = useMemo(() => {
@@ -1402,6 +1457,9 @@ function RestaurantDashboard() {
     const trimmedOwner = updatedProfile.ownerName?.trim();
     const trimmedLocation = updatedProfile.location?.trim();
     const trimmedContact = updatedProfile.contactNumber?.trim();
+    const trimmedBankNumber = updatedProfile.bankAccountNumber?.trim() || '';
+    const trimmedBankName = updatedProfile.bankName?.trim() || '';
+    const trimmedBankHolder = updatedProfile.bankAccountName?.trim() || '';
     const trimmedUrl = updatedProfile.profilePictureUrl?.trim() || '';
 
     if (!trimmedName || !trimmedOwner || !trimmedLocation || !trimmedContact) {
@@ -1434,6 +1492,9 @@ function RestaurantDashboard() {
       formData.append('ownerName', trimmedOwner);
       formData.append('location', trimmedLocation);
       formData.append('contactNumber', trimmedContact);
+      formData.append('bankAccountNumber', trimmedBankNumber);
+      formData.append('bankName', trimmedBankName);
+      formData.append('bankAccountName', trimmedBankHolder);
 
       if (updatedProfile.profileImageMode === 'file' && updatedProfile.profilePictureFile) {
         formData.append('profilePicture', updatedProfile.profilePictureFile);
@@ -1829,6 +1890,48 @@ function RestaurantDashboard() {
                         }
                       />
                     </label>
+                    <label>
+                      <span className="field-label">Số tài khoản</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.bankAccountNumber || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            bankAccountNumber: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Ngân hàng</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.bankName || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            bankName: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Chủ tài khoản</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.bankAccountName || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            bankAccountName: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
                   </div>
                 </div>
                 <div className="form-actions">
@@ -1871,6 +1974,18 @@ function RestaurantDashboard() {
                     <li>
                       <span>Liên hệ</span>
                       <strong>{restaurant.contactNumber || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Số tài khoản</span>
+                      <strong>{restaurant.bankAccountNumber || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Ngân hàng</span>
+                      <strong>{restaurant.bankName || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Chủ tài khoản</span>
+                      <strong>{restaurant.bankAccountName || 'Chưa cập nhật'}</strong>
                     </li>
                   </ul>
                 </div>
@@ -2988,14 +3103,23 @@ function RestaurantDashboard() {
               <>
                 <div className="finance-overview">
                   <div className="finance-card primary">
-                    <h3>Số tiền chờ chuyển</h3>
+                    <h3>Đang được Admin giữ</h3>
                     <p>{formatCurrency(cashflowSnapshot.wallet?.pendingAmount || 0)}</p>
-                    <span>Tự động đối soát theo chu kỳ</span>
+                    <span>Tiền món sau hoa hồng · chờ đủ kỳ 7 ngày</span>
                   </div>
                   <div className="finance-card accent">
                     <h3>Tổng đã thanh toán</h3>
                     <p>{formatCurrency(cashflowSnapshot.wallet?.totalPaid || 0)}</p>
                     <span>Đã hoàn tất qua các kỳ trước</span>
+                  </div>
+                  <div className="finance-card success">
+                    <h3>Kỳ payout gần nhất</h3>
+                    <p>{payoutInfo.nextDue ? formatDateShort(payoutInfo.nextDue) : '—'}</p>
+                    <span>
+                      {payoutInfo.daysLeft !== null
+                        ? `Còn ${payoutInfo.daysLeft} ngày tới hạn chuyển`
+                        : 'Chờ đơn hoàn tất để lên lịch'}
+                    </span>
                   </div>
                   <div className="finance-card neutral">
                     <h3>Lần cập nhật gần nhất</h3>
@@ -3019,10 +3143,12 @@ function RestaurantDashboard() {
                       <thead>
                         <tr>
                           <th>Kỳ</th>
+                          <th>Đáo hạn payout</th>
                           <th>Doanh số</th>
                           <th>Phí nền tảng</th>
                           <th>Chuyển cho nhà hàng</th>
                           <th>Trạng thái</th>
+                          <th>Thao tác</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3038,6 +3164,18 @@ function RestaurantDashboard() {
                                 </span>
                               </div>
                             </td>
+                            <td>
+                              <div className="sa-stack">
+                                <strong>{formatDateShort(settlement.payoutDueAt)}</strong>
+                                <span className="sa-meta">
+                                  {settlement.payoutDueAt
+                                    ? `Còn ${
+                                        daysUntil(settlement.payoutDueAt) ?? '—'
+                                      } ngày`
+                                    : 'Sẽ tự đặt sau khi tính toán'}
+                                </span>
+                              </div>
+                            </td>
                             <td>{formatCurrency(settlement.grossSales)}</td>
                             <td>{formatCurrency(settlement.fees)}</td>
                             <td>{formatCurrency(settlement.netTransfer)}</td>
@@ -3046,11 +3184,38 @@ function RestaurantDashboard() {
                                 className={`sa-status badge ${settlement.status?.toLowerCase() || ''}`}
                               >
                                 {settlement.status === 'paid'
-                                  ? 'Đã thanh toán'
+                                  ? 'Admin đã chuyển'
+                                  : settlement.status === 'processing'
+                                  ? 'Admin đang chuyển'
                                   : settlement.status === 'ready'
-                                  ? 'Sẵn sàng'
-                                  : 'Đang xử lý'}
+                                  ? 'Chờ đến ngày chuyển'
+                                  : 'Chờ lịch'}
                               </span>
+                              <span
+                                className={`sa-status badge ${
+                                  settlement.restaurantConfirmation === 'confirmed'
+                                    ? 'success'
+                                    : 'warning'
+                                }`}
+                              >
+                                {settlement.restaurantConfirmation === 'confirmed'
+                                  ? 'Đã xác nhận nhận tiền'
+                                  : 'Chờ xác nhận'}
+                              </span>
+                            </td>
+                            <td>
+                              {settlement.status === 'paid' &&
+                              settlement.restaurantConfirmation !== 'confirmed' ? (
+                                <button
+                                  className="sa-button primary"
+                                  type="button"
+                                  onClick={() => handleConfirmPayoutReceived(settlement._id)}
+                                >
+                                  Tôi đã nhận tiền
+                                </button>
+                              ) : (
+                                <span className="sa-meta">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}

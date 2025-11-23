@@ -118,7 +118,16 @@ export const updateRestaurant = async (req, res) => {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
 
-    const allowedFields = ['name', 'ownerName', 'location', 'contactNumber', 'approvalNotes'];
+    const allowedFields = [
+      'name',
+      'ownerName',
+      'location',
+      'contactNumber',
+      'approvalNotes',
+      'bankAccountNumber',
+      'bankAccountName',
+      'bankName',
+    ];
     allowedFields.forEach((field) => {
       if (typeof updates[field] !== 'undefined') {
         restaurant[field] = updates[field];

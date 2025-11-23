@@ -470,7 +470,16 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
 // Update restaurant details
 router.put('/update', authMiddleware, upload.single('profilePicture'), async (req, res) => {
-  const { name, ownerName, location, contactNumber, profilePictureUrl } = req.body || {};
+  const {
+    name,
+    ownerName,
+    location,
+    contactNumber,
+    profilePictureUrl,
+    bankAccountNumber,
+    bankAccountName,
+    bankName,
+  } = req.body || {};
 
   const updates = {};
   const trimmedName = typeof name === 'string' ? name.trim() : '';
@@ -478,11 +487,17 @@ router.put('/update', authMiddleware, upload.single('profilePicture'), async (re
   const trimmedLocation = typeof location === 'string' ? location.trim() : '';
   const trimmedContact = typeof contactNumber === 'string' ? contactNumber.trim() : '';
   const trimmedImageUrl = typeof profilePictureUrl === 'string' ? profilePictureUrl.trim() : '';
+  const trimmedBankNumber = typeof bankAccountNumber === 'string' ? bankAccountNumber.trim() : '';
+  const trimmedBankName = typeof bankName === 'string' ? bankName.trim() : '';
+  const trimmedBankHolder = typeof bankAccountName === 'string' ? bankAccountName.trim() : '';
 
   if (trimmedName) updates.name = trimmedName;
   if (trimmedOwner) updates.ownerName = trimmedOwner;
   if (trimmedLocation) updates.location = trimmedLocation;
   if (trimmedContact) updates.contactNumber = trimmedContact;
+  if (trimmedBankNumber) updates.bankAccountNumber = trimmedBankNumber;
+  if (trimmedBankName) updates.bankName = trimmedBankName;
+  if (trimmedBankHolder) updates.bankAccountName = trimmedBankHolder;
 
   if (req.file) {
     updates.profilePicture = `/uploads/${req.file.filename}`;
