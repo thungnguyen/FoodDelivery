@@ -190,6 +190,7 @@ export const updateDroneLocation = async (req, res) => {
     emitDroneLocation(payload);
     emitEvent({ event: 'drone-location-update', payload, broadcast: true });
     emitEvent({ event: 'drone-status-update', payload, broadcast: true });
+    emitEvent({ event: 'drone_waypoint_update', payload, broadcast: true });
     if (typeof drone.battery === 'number' && drone.battery < 20) {
       emitEvent({ event: 'drone.low_battery', payload: { droneId: drone.droneId, battery: drone.battery }, broadcast: true });
     }

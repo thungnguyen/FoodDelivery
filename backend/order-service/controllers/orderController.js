@@ -5,6 +5,7 @@ import buildOrderRooms from "../utils/realtimeRooms.js";
 import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
 import { applyPromotionToOrder } from "../services/orderPromotionService.js";
 import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
+import { geocode } from "../utils/geocode.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
 
@@ -344,6 +345,16 @@ export const createOrder = async (req, res) => {
 
         const normalizedPaymentMethod = (paymentMethod || "cash").toLowerCase() === "card" ? "card" : "cash";
 
+        let resolvedLat = Number.isFinite(Number(deliveryLat)) ? Number(deliveryLat) : undefined;
+        let resolvedLng = Number.isFinite(Number(deliveryLng)) ? Number(deliveryLng) : undefined;
+        if (!resolvedLat || !resolvedLng) {
+            const geo = await geocode(deliveryAddress);
+            if (geo) {
+                resolvedLat = geo.lat;
+                resolvedLng = geo.lng;
+            }
+        }
+
         const order = new Order({
             customerId,  // Manually inputted customerId
             customerName,
@@ -356,8 +367,8 @@ export const createOrder = async (req, res) => {
             shippingFee: normalizedShippingFee,
             totalPrice,
             deliveryAddress,
-            deliveryLat: Number.isFinite(Number(deliveryLat)) ? Number(deliveryLat) : undefined,
-            deliveryLng: Number.isFinite(Number(deliveryLng)) ? Number(deliveryLng) : undefined,
+            deliveryLat: resolvedLat,
+            deliveryLng: resolvedLng,
             paymentMethod: normalizedPaymentMethod,
             paymentStatus: normalizedPaymentStatus,
             status: normalizedStatus,

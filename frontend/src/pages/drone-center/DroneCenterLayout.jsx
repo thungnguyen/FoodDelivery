@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, Link } from 'react-router-dom';
 import { DroneCenterProvider, useDroneCenter } from './DroneCenterContext';
 import './droneCenter.css';
 
@@ -36,6 +36,9 @@ const Header = () => {
         <div className="legend-item">
           <strong>{stats?.totals?.total ?? 0}</strong> total drones
         </div>
+        <Link to="/super-admin/drone-orders" className="btn primary" style={{ textDecoration: 'none' }}>
+          Open Drone Orders
+        </Link>
       </div>
     </div>
   );
@@ -69,4 +72,3 @@ const DroneCenterLayout = () => (
 );
 
 export default DroneCenterLayout;
-

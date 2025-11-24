@@ -31,7 +31,7 @@ const haversineKm = (a, b) => {
   return R * c;
 };
 
-const accumulateDistance = (waypoints) => {
+const accumulateDistanceKm = (waypoints) => {
   let dist = 0;
   for (let i = 0; i < waypoints.length - 1; i += 1) {
     dist += haversineKm(waypoints[i], waypoints[i + 1]);
@@ -46,17 +46,28 @@ export const generateAutoRoute = async (req, res) => {
       return res.status(400).json({ message: 'orderId is required' });
     }
 
-    const orderResp = await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}`);
-    const order = orderResp.data;
+    let orderResp = await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}`);
+    let order = orderResp.data;
     if (!orderResp.ok || !order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
     const restaurantId = order.restaurantId;
-    const restaurantResp = restaurantId
+    let restaurantResp = restaurantId
       ? await fetchJson(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`)
       : { ok: false };
-    const restaurant = restaurantResp.data;
+    let restaurant = restaurantResp.data;
+
+    if ((!order?.deliveryLat || !order?.deliveryLng) && orderId) {
+      await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}/geocode`);
+      orderResp = await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}`);
+      order = orderResp.data;
+    }
+    if (restaurantId && (!restaurant?.locationCoords?.lat || !restaurant?.locationCoords?.lng)) {
+      await fetchJson(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}/geocode`);
+      restaurantResp = await fetchJson(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`);
+      restaurant = restaurantResp.data;
+    }
 
     const hub = hubId ? await Hub.findById(hubId) : await Hub.findOne();
 
@@ -76,23 +87,36 @@ export const generateAutoRoute = async (req, res) => {
     if (!hubPoint || !restaurantPoint || !customerPoint) {
       return res
         .status(400)
-        .json({ message: 'Missing hub/restaurant/customer coordinates for auto-route', data: { hub: hubPoint, restaurant: restaurantPoint, customer: customerPoint } });
+        .json({
+          message: 'Missing hub/restaurant/customer coordinates for auto-route',
+          data: { hub: hubPoint, restaurant: restaurantPoint, customer: customerPoint },
+        });
+    }
+
+    const MAX_DRONE_RADIUS_M = 4000;
+    const distHubCustomer = haversineKm(hubPoint, customerPoint) * 1000;
+    const distHubRestaurant = haversineKm(hubPoint, restaurantPoint) * 1000;
+    if (distHubCustomer > MAX_DRONE_RADIUS_M) {
+      return res.status(400).json({ message: 'Customer location is outside drone delivery radius' });
+    }
+    if (distHubRestaurant > MAX_DRONE_RADIUS_M) {
+      return res.status(400).json({ message: 'Restaurant location is outside drone delivery radius' });
     }
 
     const waypoints = [hubPoint, restaurantPoint, customerPoint, hubPoint];
-    const distanceKm = accumulateDistance(waypoints);
-    const etaMinutes = Math.round((distanceKm / 30) * 60); // assume 30km/h
+    const distanceKm = accumulateDistanceKm(waypoints);
+    const distanceMeters = Math.round(distanceKm * 1000);
+    const etaSeconds = Math.round((distanceKm / 30) * 3600); // assume 30km/h
 
     emitEvent({
       event: 'order_auto_route_loaded',
-      payload: { orderId, droneId, waypoints, distanceKm, etaMinutes },
+      payload: { orderId, droneId, waypoints, distanceMeters, etaSeconds },
       broadcast: true,
     });
 
-    return res.json({ data: { waypoints, distanceKm, etaMinutes, hubId: hubPoint.id } });
+    return res.json({ data: { waypoints, distanceMeters, etaSeconds, hubId: hubPoint.id } });
   } catch (error) {
     console.error('[auto-route] failed', error);
     return res.status(500).json({ message: 'Failed to build auto-route' });
   }
 };
-

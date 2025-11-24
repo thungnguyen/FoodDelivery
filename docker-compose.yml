@@ -79,7 +79,7 @@ services:
 
   delivery-service:
     build:
-      context: ./delivery-service/backend
+      context: ./backend/delivery-service
     container_name: delivery-service
     env_file:
       - .env

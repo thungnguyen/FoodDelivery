@@ -249,6 +249,11 @@ export const droneArrivedRestaurant = async (req, res) => {
                 droneId,
                 session
             });
+            await emitEvent({
+                event: "restaurant_wait_pickup",
+                payload: { orderId, droneId },
+                rooms: buildOrderRooms({ orderId: order._id, customerId: order.customerId, restaurantId: order.restaurantId })
+            });
         });
     } catch (error) {
         await session.endSession();
@@ -282,6 +287,11 @@ export const dronePickupOrder = async (req, res) => {
                 droneId,
                 session
             });
+            await emitEvent({
+                event: "drone_waypoint_update",
+                payload: { orderId, droneId, waypoint: "restaurant_pickup" },
+                broadcast: true
+            });
         });
     } catch (error) {
         await session.endSession();
@@ -314,6 +324,11 @@ export const droneArrivedCustomer = async (req, res) => {
                 status: "drone_arrived_customer",
                 droneId,
                 session
+            });
+            await emitEvent({
+                event: "customer_wait_confirm",
+                payload: { orderId, droneId },
+                rooms: buildOrderRooms({ orderId: order._id, customerId: order.customerId, restaurantId: order.restaurantId })
             });
         });
     } catch (error) {
@@ -355,6 +370,11 @@ export const droneReturnToHub = async (req, res) => {
     }
 
     await updateRemoteDrone(droneId, { status: "idle", currentOrderId: null });
+    await emitEvent({
+        event: "drone_route_complete",
+        payload: { orderId, droneId },
+        broadcast: true
+    });
     return res.json({ message: "Drone returned to hub" });
 };
 

@@ -336,11 +336,31 @@ export const DroneCenterProvider = ({ children }) => {
           recordEvent({ type: 'drone-status-update', timestamp: new Date().toISOString(), ...payload });
         }
       });
-      socket.on('order-status-update', (payload) => {
-        if (payload) {
-          recordEvent({ type: 'order-status-update', timestamp: new Date().toISOString(), ...payload });
-        }
-      });
+    socket.on('order-status-update', (payload) => {
+      if (payload) {
+        recordEvent({ type: 'order-status-update', timestamp: new Date().toISOString(), ...payload });
+      }
+    });
+    socket.on('restaurant_wait_pickup', (payload) => {
+      if (payload) {
+        recordEvent({ type: 'restaurant_wait_pickup', timestamp: new Date().toISOString(), ...payload });
+      }
+    });
+    socket.on('customer_wait_confirm', (payload) => {
+      if (payload) {
+        recordEvent({ type: 'customer_wait_confirm', timestamp: new Date().toISOString(), ...payload });
+      }
+    });
+    socket.on('drone_waypoint_update', (payload) => {
+      if (payload) {
+        recordEvent({ type: 'drone_waypoint_update', timestamp: new Date().toISOString(), ...payload });
+      }
+    });
+    socket.on('drone_route_complete', (payload) => {
+      if (payload) {
+        recordEvent({ type: 'drone_route_complete', timestamp: new Date().toISOString(), ...payload });
+      }
+    });
     };
 
     tryConnect();
@@ -351,6 +371,10 @@ export const DroneCenterProvider = ({ children }) => {
         activeSocket.off('drone-location-update');
         activeSocket.off('drone-status-update');
         activeSocket.off('order-status-update');
+        activeSocket.off('restaurant_wait_pickup');
+        activeSocket.off('customer_wait_confirm');
+        activeSocket.off('drone_waypoint_update');
+        activeSocket.off('drone_route_complete');
         activeSocket.disconnect();
       }
     };
