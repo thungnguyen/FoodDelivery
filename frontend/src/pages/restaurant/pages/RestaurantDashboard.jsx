@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import axios from 'axios';
 import '../styles/rdashboard.css';
 import { io } from 'socket.io-client';
 import {
@@ -62,6 +63,13 @@ const ORDER_STATUS_LABELS = {
   Pending: 'Chờ xác nhận',
   Canceled: 'Đã hủy',
   'Ready for Delivery': 'Chờ tài xế',
+  waiting_for_drone: 'Chờ drone',
+  drone_assigned: 'Drone đã gán',
+  drone_enroute_to_restaurant: 'Drone tới nhà hàng',
+  drone_arrived_restaurant: 'Drone đợi lấy hàng',
+  drone_picked_food: 'Drone đã lấy hàng',
+  drone_delivering: 'Drone đang giao',
+  drone_arrived_customer: 'Drone chờ khách',
 };
 
 const ORDER_STATUS_ACTIONS = {
@@ -79,6 +87,28 @@ const ORDER_CANCELABLE_STATUSES = new Set([
   'Pending', // backward compatibility
 ]);
 
+const DRONE_STAGE_LABELS = {
+  waiting_for_drone: 'Chờ gán drone',
+  drone_assigned: 'Drone đang rời hub',
+  drone_enroute_to_restaurant: 'Drone tới nhà hàng',
+  drone_arrived_restaurant: 'Drone chờ nhà hàng',
+  drone_picked_food: 'Drone đã lấy hàng',
+  drone_delivering: 'Đang giao cho khách',
+  drone_arrived_customer: 'Chờ khách xác nhận',
+};
+
+const mapDroneStage = (status = '') => {
+  const normalized = status.toLowerCase();
+  if (normalized === 'waiting_for_drone') return DRONE_STAGE_LABELS.waiting_for_drone;
+  if (normalized === 'drone_assigned') return DRONE_STAGE_LABELS.drone_assigned;
+  if (normalized === 'drone_enroute_to_restaurant') return DRONE_STAGE_LABELS.drone_enroute_to_restaurant;
+  if (normalized === 'drone_arrived_restaurant') return DRONE_STAGE_LABELS.drone_arrived_restaurant;
+  if (normalized === 'drone_picked_food') return DRONE_STAGE_LABELS.drone_picked_food;
+  if (normalized === 'drone_delivering') return DRONE_STAGE_LABELS.drone_delivering;
+  if (normalized === 'drone_arrived_customer') return DRONE_STAGE_LABELS.drone_arrived_customer;
+  return '';
+};
+
 const ORDER_STATUS_CLASSES = {
   'Pending Confirmation': 'status-pending',
   Confirmed: 'status-confirmed',
@@ -94,6 +124,13 @@ const ORDER_STATUS_CLASSES = {
   Pending: 'status-pending',
   'Ready for Delivery': 'status-ready',
   Canceled: 'status-canceled',
+  waiting_for_drone: 'status-ready',
+  drone_assigned: 'status-out',
+  drone_enroute_to_restaurant: 'status-out',
+  drone_arrived_restaurant: 'status-ready',
+  drone_picked_food: 'status-out',
+  drone_delivering: 'status-out',
+  drone_arrived_customer: 'status-delivered',
 };
 
 function RestaurantDashboard() {
@@ -136,6 +173,7 @@ function RestaurantDashboard() {
     totalReviews: 0,
     totalOrders: 0,
   });
+  const [droneTracking, setDroneTracking] = useState({});
   const [walletSnapshot, setWalletSnapshot] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
@@ -150,6 +188,8 @@ function RestaurantDashboard() {
   const [cashflowError, setCashflowError] = useState('');
   const ORDER_API_BASE = ORDER_SERVICE_URL;
   const [foodAvailabilityUpdating, setFoodAvailabilityUpdating] = useState({});
+  const [pickupLoadingId, setPickupLoadingId] = useState('');
+  const [arrivedLoadingId, setArrivedLoadingId] = useState('');
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
   const restaurantRoomRef = useRef(null);
@@ -496,6 +536,28 @@ function RestaurantDashboard() {
     }
   }, [handleUnauthorizedError]);
 
+  const handleConfirmPayoutReceived = async (settlementId) => {
+    if (!settlementId) return;
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      const res = await fetch(`${SETTLEMENT_SERVICE_URL}/api/settlements/${settlementId}/confirm`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể xác nhận đã nhận tiền');
+      }
+      fetchCashflowSnapshot();
+      alert('Đã xác nhận nhận tiền từ Admin.');
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
   const handlePromoInputChange = (event) => {
     const { name, value } = event.target;
     setRestaurantPromoForm((prev) => ({
@@ -616,6 +678,19 @@ function RestaurantDashboard() {
     [ORDER_API_BASE, handleUnauthorizedError, fetchWalletSummary]
   );
 
+  const upsertDroneTracking = useCallback((orderId, payload = {}) => {
+    if (!orderId) return;
+    setDroneTracking((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] || {}),
+        ...payload,
+        orderId,
+        updatedAt: payload.updatedAt || new Date().toISOString(),
+      },
+    }));
+  }, []);
+
   const handleRealtimeEvent = useCallback(
     (message) => {
       if (!message || typeof message !== 'object') return;
@@ -718,11 +793,72 @@ function RestaurantDashboard() {
           fetchReviews({ silent: true });
           break;
         }
+        case 'drone-location-update':
+        case 'drone-status-update': {
+          const orderId = payload?.orderId || payload?.currentOrderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: payload?.status,
+            lat: payload?.lat,
+            lng: payload?.lng,
+            battery: payload?.battery,
+          });
+          if (payload?.status) {
+            setOrders((prev) =>
+              prev.map((order) => {
+                const oid = order?._id || order?.id;
+                if (!oid || String(oid) !== normalizedId) return order;
+                return {
+                  ...order,
+                  droneId: order.droneId || payload.droneId,
+                  droneStatus: payload.status,
+                };
+              })
+            );
+          }
+          break;
+        }
+        case 'restaurant_wait_pickup': {
+          const orderId = payload?.orderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: 'drone_arrived_restaurant',
+          });
+          setOrders((prev) =>
+            prev.map((order) => {
+              const oid = order?._id || order?.id;
+              if (!oid || String(oid) !== normalizedId) return order;
+              return { ...order, droneStatus: 'drone_arrived_restaurant', droneId: order.droneId || payload?.droneId };
+            })
+          );
+          break;
+        }
+        case 'customer_wait_confirm': {
+          const orderId = payload?.orderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: 'drone_arrived_customer',
+          });
+          setOrders((prev) =>
+            prev.map((order) => {
+              const oid = order?._id || order?.id;
+              if (!oid || String(oid) !== normalizedId) return order;
+              return { ...order, droneStatus: 'drone_arrived_customer', droneId: order.droneId || payload?.droneId };
+            })
+          );
+          break;
+        }
         default:
           break;
       }
     },
-    [fetchOrders, fetchReviews]
+    [fetchOrders, fetchReviews, upsertDroneTracking]
   );
 
   useEffect(() => {
@@ -867,6 +1003,44 @@ function RestaurantDashboard() {
     updateOrderStatus(order._id, 'Cancelled', 'Đơn hàng đã được hủy.');
   };
 
+  const handleConfirmDronePickup = async (order) => {
+    const orderId = order?._id || order?.id;
+    if (!orderId || !order?.droneId) return;
+    setPickupLoadingId(orderId);
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      await axios.post(
+        `${ORDER_API_BASE.replace(/\/$/, '')}/api/order/drone-pickup`,
+        { orderId, droneId: order.droneId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      fetchOrders({ silent: true });
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Không thể xác nhận đã chất hàng cho drone.');
+    } finally {
+      setPickupLoadingId('');
+    }
+  };
+
+  const handleMarkDroneArrivedRestaurant = async (order) => {
+    const orderId = order?._id || order?.id;
+    if (!orderId || !order?.droneId) return;
+    setArrivedLoadingId(orderId);
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      await axios.post(
+        `${ORDER_API_BASE.replace(/\/$/, '')}/api/drone/arrived-restaurant`,
+        { orderId, droneId: order.droneId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      fetchOrders({ silent: true });
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Không thể đánh dấu drone đã tới nhà hàng.');
+    } finally {
+      setArrivedLoadingId('');
+    }
+  };
+
   const formatCurrency = (value) => {
     const amount = typeof value === 'number' ? value : Number(value);
     if (Number.isNaN(amount)) {
@@ -881,6 +1055,39 @@ function RestaurantDashboard() {
       return value;
     }
     return number.toLocaleString('vi-VN');
+  };
+
+  const payoutInfo = useMemo(() => {
+    const pending = (cashflowSnapshot.settlements || []).filter((s) =>
+      ['pending', 'ready', 'processing'].includes((s.status || '').toLowerCase())
+    );
+    if (!pending.length) {
+      return { nextDue: null, daysLeft: null };
+    }
+    const sorted = [...pending].sort((a, b) => {
+      const aDue = new Date(a.payoutDueAt || a.periodEnd || a.periodStart || 0).getTime();
+      const bDue = new Date(b.payoutDueAt || b.periodEnd || b.periodStart || 0).getTime();
+      return aDue - bDue;
+    });
+    const next = sorted[0];
+    const nextDue = next?.payoutDueAt || next?.periodEnd || null;
+    return { nextDue, daysLeft: daysUntil(nextDue) };
+  }, [cashflowSnapshot.settlements]);
+
+  const formatDateShort = (value) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('vi-VN');
+  };
+
+  const daysUntil = (future, from = Date.now()) => {
+    const target = future instanceof Date ? future.getTime() : new Date(future).getTime();
+    const base = from instanceof Date ? from.getTime() : new Date(from).getTime();
+    if (Number.isNaN(target) || Number.isNaN(base)) {
+      return null;
+    }
+    return Math.max(0, Math.ceil((target - base) / (24 * 60 * 60 * 1000)));
   };
 
   const financialMetrics = useMemo(() => {
@@ -1402,6 +1609,9 @@ function RestaurantDashboard() {
     const trimmedOwner = updatedProfile.ownerName?.trim();
     const trimmedLocation = updatedProfile.location?.trim();
     const trimmedContact = updatedProfile.contactNumber?.trim();
+    const trimmedBankNumber = updatedProfile.bankAccountNumber?.trim() || '';
+    const trimmedBankName = updatedProfile.bankName?.trim() || '';
+    const trimmedBankHolder = updatedProfile.bankAccountName?.trim() || '';
     const trimmedUrl = updatedProfile.profilePictureUrl?.trim() || '';
 
     if (!trimmedName || !trimmedOwner || !trimmedLocation || !trimmedContact) {
@@ -1434,6 +1644,9 @@ function RestaurantDashboard() {
       formData.append('ownerName', trimmedOwner);
       formData.append('location', trimmedLocation);
       formData.append('contactNumber', trimmedContact);
+      formData.append('bankAccountNumber', trimmedBankNumber);
+      formData.append('bankName', trimmedBankName);
+      formData.append('bankAccountName', trimmedBankHolder);
 
       if (updatedProfile.profileImageMode === 'file' && updatedProfile.profilePictureFile) {
         formData.append('profilePicture', updatedProfile.profilePictureFile);
@@ -1829,6 +2042,48 @@ function RestaurantDashboard() {
                         }
                       />
                     </label>
+                    <label>
+                      <span className="field-label">Số tài khoản</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.bankAccountNumber || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            bankAccountNumber: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Ngân hàng</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.bankName || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            bankName: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">Chủ tài khoản</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.bankAccountName || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            bankAccountName: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
                   </div>
                 </div>
                 <div className="form-actions">
@@ -1871,6 +2126,18 @@ function RestaurantDashboard() {
                     <li>
                       <span>Liên hệ</span>
                       <strong>{restaurant.contactNumber || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Số tài khoản</span>
+                      <strong>{restaurant.bankAccountNumber || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Ngân hàng</span>
+                      <strong>{restaurant.bankName || 'Chưa cập nhật'}</strong>
+                    </li>
+                    <li>
+                      <span>Chủ tài khoản</span>
+                      <strong>{restaurant.bankAccountName || 'Chưa cập nhật'}</strong>
                     </li>
                   </ul>
                 </div>
@@ -2595,6 +2862,18 @@ function RestaurantDashboard() {
                   const grandTotal = Number.isFinite(Number(order.totalPrice))
                     ? Number(order.totalPrice)
                     : itemsTotal + shippingFee;
+                  const tracking = droneTracking[order._id] || droneTracking[order.id];
+                  const droneStage = mapDroneStage(order.droneStatus || order.status);
+                  const showArrivedBtn =
+                    order.droneStatus &&
+                    ['waiting_for_drone', 'drone_assigned', 'drone_enroute_to_restaurant'].includes(
+                      (order.droneStatus || '').toLowerCase()
+                    ) &&
+                    order.droneId;
+                  const showPickupBtn = order.droneStatus === 'drone_arrived_restaurant' && order.droneId;
+                  const lat = Number(tracking?.lat);
+                  const lng = Number(tracking?.lng);
+                  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
                   return (
                     <div className="order-card" key={order._id}>
@@ -2618,6 +2897,39 @@ function RestaurantDashboard() {
                         {order.paymentStatus || 'Pending'}
                       </p>
                     </div>
+                    {(droneStage || tracking) && (
+                      <div
+                        style={{
+                          margin: '8px 0 12px',
+                          padding: '12px',
+                          borderRadius: 12,
+                          background: 'rgba(56, 189, 248, 0.08)',
+                          border: '1px solid rgba(56, 189, 248, 0.24)',
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>
+                          Drone {tracking?.droneId || order.droneId || 'chưa gán'}{' '}
+                          {Number.isFinite(Number(tracking?.battery)) ? `• 🔋 ${tracking.battery}%` : ''}
+                        </div>
+                        <div className="order-meta">
+                          {droneStage || 'Đang theo dõi trạng thái giao hàng'}
+                          {tracking?.status ? ` • ${tracking.status}` : ''}
+                        </div>
+                        {hasCoords && (
+                          <div className="order-meta" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                            GPS: {lat.toFixed(4)}, {lng.toFixed(4)}{' '}
+                            <a
+                              href={`https://www.google.com/maps?q=${lat},${lng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: '#0ea5e9', marginLeft: 4 }}
+                            >
+                              Xem bản đồ
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="order-items">
                       <h4>Món đã đặt</h4>
                       <ul>
@@ -2635,6 +2947,32 @@ function RestaurantDashboard() {
                       <p><strong>Phí giao hàng:</strong> {formatCurrency(shippingFee)}</p>
                       <p><strong>Tổng tiền:</strong> {formatCurrency(grandTotal)}</p>
                       <div className="order-actions">
+                        {droneStage && (
+                          <div className="d-flex align-items-center gap-2 flex-wrap">
+                            <span className="badge bg-info text-dark">{droneStage}</span>
+                            {showArrivedBtn && (
+                              <button
+                                className="order-secondary-btn"
+                                onClick={() => handleMarkDroneArrivedRestaurant(order)}
+                                disabled={arrivedLoadingId === order._id}
+                              >
+                                {arrivedLoadingId === order._id ? 'Đang xác nhận...' : 'Drone đã tới nhà hàng'}
+                              </button>
+                            )}
+                            {showPickupBtn && (
+                              <button
+                                className="order-primary-btn"
+                                onClick={() => handleConfirmDronePickup(order)}
+                                disabled={pickupLoadingId === order._id}
+                              >
+                                {pickupLoadingId === order._id ? 'Đang xác nhận...' : 'Đã chất hàng, cho drone bay'}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {order.droneStatus === 'drone_arrived_restaurant' && order.droneId && (
+                          <></>
+                        )}
                         {ORDER_CANCELABLE_STATUSES.has(order.status) && (
                           <button className="order-secondary-btn" onClick={() => handleCancelOrder(order)}>
                             Hủy đơn
@@ -2988,14 +3326,23 @@ function RestaurantDashboard() {
               <>
                 <div className="finance-overview">
                   <div className="finance-card primary">
-                    <h3>Số tiền chờ chuyển</h3>
+                    <h3>Đang được Admin giữ</h3>
                     <p>{formatCurrency(cashflowSnapshot.wallet?.pendingAmount || 0)}</p>
-                    <span>Tự động đối soát theo chu kỳ</span>
+                    <span>Tiền món sau hoa hồng · chờ đủ kỳ 7 ngày</span>
                   </div>
                   <div className="finance-card accent">
                     <h3>Tổng đã thanh toán</h3>
                     <p>{formatCurrency(cashflowSnapshot.wallet?.totalPaid || 0)}</p>
                     <span>Đã hoàn tất qua các kỳ trước</span>
+                  </div>
+                  <div className="finance-card success">
+                    <h3>Kỳ payout gần nhất</h3>
+                    <p>{payoutInfo.nextDue ? formatDateShort(payoutInfo.nextDue) : '—'}</p>
+                    <span>
+                      {payoutInfo.daysLeft !== null
+                        ? `Còn ${payoutInfo.daysLeft} ngày tới hạn chuyển`
+                        : 'Chờ đơn hoàn tất để lên lịch'}
+                    </span>
                   </div>
                   <div className="finance-card neutral">
                     <h3>Lần cập nhật gần nhất</h3>
@@ -3019,10 +3366,12 @@ function RestaurantDashboard() {
                       <thead>
                         <tr>
                           <th>Kỳ</th>
+                          <th>Đáo hạn payout</th>
                           <th>Doanh số</th>
                           <th>Phí nền tảng</th>
                           <th>Chuyển cho nhà hàng</th>
                           <th>Trạng thái</th>
+                          <th>Thao tác</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3038,6 +3387,18 @@ function RestaurantDashboard() {
                                 </span>
                               </div>
                             </td>
+                            <td>
+                              <div className="sa-stack">
+                                <strong>{formatDateShort(settlement.payoutDueAt)}</strong>
+                                <span className="sa-meta">
+                                  {settlement.payoutDueAt
+                                    ? `Còn ${
+                                        daysUntil(settlement.payoutDueAt) ?? '—'
+                                      } ngày`
+                                    : 'Sẽ tự đặt sau khi tính toán'}
+                                </span>
+                              </div>
+                            </td>
                             <td>{formatCurrency(settlement.grossSales)}</td>
                             <td>{formatCurrency(settlement.fees)}</td>
                             <td>{formatCurrency(settlement.netTransfer)}</td>
@@ -3046,11 +3407,38 @@ function RestaurantDashboard() {
                                 className={`sa-status badge ${settlement.status?.toLowerCase() || ''}`}
                               >
                                 {settlement.status === 'paid'
-                                  ? 'Đã thanh toán'
+                                  ? 'Admin đã chuyển'
+                                  : settlement.status === 'processing'
+                                  ? 'Admin đang chuyển'
                                   : settlement.status === 'ready'
-                                  ? 'Sẵn sàng'
-                                  : 'Đang xử lý'}
+                                  ? 'Chờ đến ngày chuyển'
+                                  : 'Chờ lịch'}
                               </span>
+                              <span
+                                className={`sa-status badge ${
+                                  settlement.restaurantConfirmation === 'confirmed'
+                                    ? 'success'
+                                    : 'warning'
+                                }`}
+                              >
+                                {settlement.restaurantConfirmation === 'confirmed'
+                                  ? 'Đã xác nhận nhận tiền'
+                                  : 'Chờ xác nhận'}
+                              </span>
+                            </td>
+                            <td>
+                              {settlement.status === 'paid' &&
+                              settlement.restaurantConfirmation !== 'confirmed' ? (
+                                <button
+                                  className="sa-button primary"
+                                  type="button"
+                                  onClick={() => handleConfirmPayoutReceived(settlement._id)}
+                                >
+                                  Tôi đã nhận tiền
+                                </button>
+                              ) : (
+                                <span className="sa-meta">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}

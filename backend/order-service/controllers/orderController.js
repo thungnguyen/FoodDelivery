@@ -5,6 +5,8 @@ import buildOrderRooms from "../utils/realtimeRooms.js";
 import { handleOrderStatusFinancials } from "../services/orderFinanceService.js";
 import { applyPromotionToOrder } from "../services/orderPromotionService.js";
 import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
+import { geocode } from "../utils/geocode.js";
+import { assignDroneToOrderInternal } from "./droneFlowController.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
 
@@ -12,6 +14,13 @@ const CANONICAL_STATUSES = [
     "Pending",
     "Confirmed",
     "Preparing",
+    "waiting_for_drone",
+    "drone_assigned",
+    "drone_enroute_to_restaurant",
+    "drone_arrived_restaurant",
+    "drone_picked_food",
+    "drone_delivering",
+    "drone_arrived_customer",
     "Delivering",
     "Completed",
     "Cancelled",
@@ -34,7 +43,21 @@ const STATUS_ALIASES = {
     canceled: "Cancelled",
     "failed/undeliverable": "Failed",
     failed: "Failed",
-    refunded: "Refunded"
+    refunded: "Refunded",
+    waiting_for_drone: "waiting_for_drone",
+    "waiting for drone": "waiting_for_drone",
+    drone_assigned: "drone_assigned",
+    "drone assigned": "drone_assigned",
+    drone_enroute_to_restaurant: "drone_enroute_to_restaurant",
+    "drone enroute to restaurant": "drone_enroute_to_restaurant",
+    drone_arrived_restaurant: "drone_arrived_restaurant",
+    "drone arrived restaurant": "drone_arrived_restaurant",
+    drone_picked_food: "drone_picked_food",
+    "drone picked food": "drone_picked_food",
+    drone_delivering: "drone_delivering",
+    "drone delivering": "drone_delivering",
+    drone_arrived_customer: "drone_arrived_customer",
+    "drone arrived customer": "drone_arrived_customer"
 };
 
 const CLOSED_STATUSES = new Set(["Completed", "Cancelled", "Failed", "Refunded"]);
@@ -44,7 +67,8 @@ const STATUS_TRANSITIONS = {
     restaurant: {
         Pending: ["Confirmed", "Cancelled"],
         Confirmed: ["Preparing", "Cancelled"],
-        Preparing: ["Delivering", "Cancelled"],
+        Preparing: ["waiting_for_drone", "Cancelled"],
+        waiting_for_drone: [],
         Delivering: []
     }
 };
@@ -249,6 +273,8 @@ export const createOrder = async (req, res) => {
             items = [],
             cartItems,
             deliveryAddress,
+            deliveryLat,
+            deliveryLng,
             paymentMethod,
             paymentStatus,
             status,
@@ -271,6 +297,8 @@ export const createOrder = async (req, res) => {
                 customerEmail,
                 customerPhone,
                 deliveryAddress,
+                deliveryLat,
+                deliveryLng,
                 paymentMethod,
                 paymentStatus,
                 status,
@@ -318,6 +346,16 @@ export const createOrder = async (req, res) => {
 
         const normalizedPaymentMethod = (paymentMethod || "cash").toLowerCase() === "card" ? "card" : "cash";
 
+        let resolvedLat = Number.isFinite(Number(deliveryLat)) ? Number(deliveryLat) : undefined;
+        let resolvedLng = Number.isFinite(Number(deliveryLng)) ? Number(deliveryLng) : undefined;
+        if (!resolvedLat || !resolvedLng) {
+            const geo = await geocode(deliveryAddress);
+            if (geo) {
+                resolvedLat = geo.lat;
+                resolvedLng = geo.lng;
+            }
+        }
+
         const order = new Order({
             customerId,  // Manually inputted customerId
             customerName,
@@ -330,6 +368,8 @@ export const createOrder = async (req, res) => {
             shippingFee: normalizedShippingFee,
             totalPrice,
             deliveryAddress,
+            deliveryLat: resolvedLat,
+            deliveryLng: resolvedLng,
             paymentMethod: normalizedPaymentMethod,
             paymentStatus: normalizedPaymentStatus,
             status: normalizedStatus,
@@ -536,6 +576,7 @@ export const updateOrderStatus = async (req, res) => {
     let eventPayload = null;
     let completionPayload = null;
     let cancellationNotice = null;
+    const realtimeEvents = [];
 
     try {
         await session.withTransaction(async () => {
@@ -565,19 +606,28 @@ export const updateOrderStatus = async (req, res) => {
             }
 
             const roleTransitions = STATUS_TRANSITIONS[role];
+            let nextStatus = requestedStatus;
+
+            if (
+                role === "restaurant" &&
+                currentStatus === "Preparing" &&
+                requestedStatus === "Delivering"
+            ) {
+                nextStatus = "waiting_for_drone";
+            }
 
             if (role === "admin") {
-                order.status = requestedStatus;
+                order.status = nextStatus;
             } else if (roleTransitions) {
                 const allowedNext = roleTransitions[currentStatus] || [];
-                if (!allowedNext.includes(requestedStatus)) {
+                if (!allowedNext.includes(nextStatus)) {
                     const transitionError = new Error(
-                        `Transition from ${currentStatus} to ${requestedStatus} is not allowed for role ${role}.`
+                        `Transition from ${currentStatus} to ${nextStatus} is not allowed for role ${role}.`
                     );
                     transitionError.statusCode = 400;
                     throw transitionError;
                 }
-                order.status = requestedStatus;
+                order.status = nextStatus;
             } else {
                 const roleError = new Error("Role not permitted to update order status.");
                 roleError.statusCode = 403;
@@ -585,6 +635,25 @@ export const updateOrderStatus = async (req, res) => {
             }
 
             normalizeOrderStatusInPlace(order);
+            if ((order.status && order.status.startsWith("drone_")) || order.status === "waiting_for_drone") {
+                order.droneStatus = order.status;
+            }
+            if (order.status === "waiting_for_drone") {
+                realtimeEvents.push({
+                    event: "order_waiting_for_drone",
+                    payload: {
+                        orderId: order._id,
+                        restaurantId: order.restaurantId,
+                        customerId: order.customerId,
+                        status: order.status
+                    },
+                    rooms: buildOrderRooms({
+                        orderId: order._id,
+                        customerId: order.customerId,
+                        restaurantId: order.restaurantId
+                    })
+                });
+            }
 
             const financeSummary = await handleOrderStatusFinancials({
                 order,
@@ -654,6 +723,28 @@ export const updateOrderStatus = async (req, res) => {
     if (eventPayload) {
         emitEvent(eventPayload);
     }
+    if (realtimeEvents.length) {
+        realtimeEvents.forEach((evt) => emitEvent(evt));
+    }
+
+    if (orderResponse?.status === "waiting_for_drone" && !orderResponse?.droneId) {
+        const customerLocation =
+            typeof orderResponse.deliveryLat === "number" && typeof orderResponse.deliveryLng === "number"
+                ? { lat: orderResponse.deliveryLat, lng: orderResponse.deliveryLng }
+                : null;
+        const hubId = orderResponse.droneHubId;
+        assignDroneToOrderInternal({
+            orderId: orderResponse._id,
+            hubId,
+            customerLocation
+        })
+            .then((result) => {
+                if (!result?.ok) {
+                    console.warn("[drone-auto-assign] failed", result?.message || result?.statusCode);
+                }
+            })
+            .catch((err) => console.error("[drone-auto-assign] unexpected error", err));
+    }
 
     if (cancellationNotice) {
         await emitCancellationNotifications({
@@ -713,8 +804,8 @@ export const markOrderAsReceived = async (req, res) => {
                 return;
             }
 
-            if (currentStatus !== "Delivering") {
-                const invalidStatusError = new Error("Order must be in Delivering status before it can be completed.");
+            if (!["Delivering", "drone_delivering", "drone_arrived_customer"].includes(currentStatus)) {
+                const invalidStatusError = new Error("Order must be in delivering state before it can be completed.");
                 invalidStatusError.statusCode = 400;
                 throw invalidStatusError;
             }

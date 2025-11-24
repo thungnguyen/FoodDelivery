@@ -22,6 +22,10 @@ const restaurantSchema = new mongoose.Schema(
       type: String,
       required: true, 
     },
+    locationCoords: {
+      lat: { type: Number },
+      lng: { type: Number },
+    },
     contactNumber: {
       type: String,
       required: true,
@@ -80,6 +84,21 @@ const restaurantSchema = new mongoose.Schema(
     availability: {
       type: Boolean,
       default: false,
+    },
+    bankAccountNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    bankAccountName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    bankName: {
+      type: String,
+      trim: true,
+      default: '',
     },
   },
   { timestamps: true }

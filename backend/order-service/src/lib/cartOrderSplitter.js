@@ -3,6 +3,7 @@ import emitEvent from "../../utils/eventBus.js";
 import buildOrderRooms from "../../utils/realtimeRooms.js";
 import { publish as publishRabbitEvent } from "../rabbitmq.js";
 import { applyPromotionToOrder } from "../../services/orderPromotionService.js";
+import { geocode } from "../../utils/geocode.js";
 
 const DEFAULT_STATUS = "Pending";
 const DEFAULT_PAYMENT_METHOD = "cash";
@@ -192,6 +193,21 @@ export const createOrdersFromCart = async (payload = {}) => {
     if (!deliveryAddress) {
         throw new Error("Delivery address is required to create orders.");
     }
+    let resolvedLat =
+        Number.isFinite(Number(payload.deliveryLat)) && Number.isFinite(Number(payload.deliveryLng))
+            ? Number(payload.deliveryLat)
+            : null;
+    let resolvedLng =
+        Number.isFinite(Number(payload.deliveryLat)) && Number.isFinite(Number(payload.deliveryLng))
+            ? Number(payload.deliveryLng)
+            : null;
+    if (!resolvedLat || !resolvedLng) {
+        const geo = await geocode(deliveryAddress);
+        if (geo) {
+            resolvedLat = geo.lat;
+            resolvedLng = geo.lng;
+        }
+    }
 
     const paymentIntentId = payload.paymentIntentId || payload.paymentIntent?.id || payload.stripePaymentIntentId;
     const paymentId = payload.paymentId || payload.paymentRecordId || payload.payment?._id;
@@ -241,6 +257,8 @@ export const createOrdersFromCart = async (payload = {}) => {
                     shippingFee,
                     totalPrice,
                     deliveryAddress,
+                    deliveryLat: resolvedLat || undefined,
+                    deliveryLng: resolvedLng || undefined,
                     paymentMethod: normalizedPaymentMethod === "card" ? "card" : "cash",
                     paymentStatus: normalizedPaymentStatus,
                     status: normalizedStatus,

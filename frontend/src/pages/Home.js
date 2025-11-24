@@ -85,7 +85,7 @@ function Home() {
               </motion.div>
             </Link>
 
-            <Link to="/driver" className="role-card-link">
+            <Link to="/drone-center/dashboard" className="role-card-link">
               <motion.div
                 className="role-card driver-card"
                 whileHover={{ scale: 1.05, y: -10 }}
@@ -95,8 +95,8 @@ function Home() {
                 transition={{ duration: 0.4, delay: 0.3 }}
               >
                 <div className="role-card-icon">🛸+</div>
-                <h3>Drone Manage</h3>
-                <p>Join our team and earn money delivering</p>
+                <h3>Drone Center</h3>
+                <p>Giám sát, gán drone, xem map & simulator</p>
                 <div className="role-card-arrow">→</div>
               </motion.div>
             </Link>

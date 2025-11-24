@@ -41,6 +41,13 @@ const orderSchema = new mongoose.Schema(
                 "Confirmed",
                 "Preparing",
                 "Delivering",
+                "waiting_for_drone",
+                "drone_assigned",
+                "drone_enroute_to_restaurant",
+                "drone_arrived_restaurant",
+                "drone_picked_food",
+                "drone_delivering",
+                "drone_arrived_customer",
                 "Completed",
                 "Cancelled",
                 "Failed",
@@ -48,6 +55,23 @@ const orderSchema = new mongoose.Schema(
             ],
             default: "Pending"
         },
+        droneStatus: {
+            type: String,
+            enum: [
+                "waiting_for_drone",
+                "drone_assigned",
+                "drone_enroute_to_restaurant",
+                "drone_arrived_restaurant",
+                "drone_picked_food",
+                "drone_delivering",
+                "drone_arrived_customer"
+            ],
+            default: null
+        },
+        droneId: { type: String },
+        droneHubId: { type: String },
+        deliveryLat: { type: Number },
+        deliveryLng: { type: Number },
         deliveryAddress: { type: String, required: true },
         deliveryFeedback: {
             rating: {

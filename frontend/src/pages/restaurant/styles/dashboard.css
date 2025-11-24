@@ -1412,7 +1412,215 @@
     min-width: 600px;
   }
 
-  .sa-list.columns li {
-    width: 100%;
-  }
+.sa-list.columns li {
+  width: 100%;
+}
+}
+
+.status-pill {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+/* Drone Orders page */
+.drone-orders-shell {
+  min-height: 100vh;
+  padding: 32px 40px;
+  background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.2), transparent 40%),
+    radial-gradient(circle at 80% 10%, rgba(45, 212, 191, 0.15), transparent 40%),
+    linear-gradient(135deg, #0b1224, #0f172a 50%, #0b1c30);
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.drone-orders-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.drone-orders-hero h1 {
+  margin: 2px 0 4px;
+  font-size: 28px;
+  letter-spacing: 0.2px;
+}
+
+.drone-orders-hero .muted {
+  color: #94a3b8;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  color: #38bdf8;
+  margin: 0;
+}
+
+.hero-filters {
+  display: flex;
+  gap: 10px;
+}
+
+.hero-filters input,
+.hero-filters select {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  color: #e2e8f0;
+  padding: 10px 12px;
+}
+
+.drone-orders-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.metric-card .metric-label {
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.metric-card .metric-value {
+  font-size: 30px;
+  font-weight: 800;
+  margin: 6px 0;
+}
+
+.metric-card .metric-value.accent {
+  color: #38bdf8;
+}
+
+.metric-card .metric-value.info {
+  color: #a5b4fc;
+}
+
+.metric-card .metric-value.success {
+  color: #34d399;
+}
+
+.metric-card .metric-sub {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.glass {
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
+.drone-orders-panel {
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.pill.waiting {
+  color: #fcd34d;
+  border-color: rgba(252, 211, 77, 0.3);
+}
+.pill.info {
+  color: #a5b4fc;
+  border-color: rgba(165, 180, 252, 0.3);
+}
+.pill.accent {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+.pill.success {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+.pill.primary {
+  color: #c4d2ff;
+  border-color: rgba(99, 102, 241, 0.35);
+}
+.pill.neutral {
+  color: #e5e7eb;
+  border-color: rgba(229, 231, 235, 0.2);
+}
+.pill.light {
+  color: #e2e8f0;
+}
+
+.drone-orders-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.drone-orders-table th,
+.drone-orders-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.drone-orders-table th {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.drone-orders-table .mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  color: #e2e8f0;
+}
+
+.drone-orders-table .muted {
+  color: #94a3b8;
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn.small {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.loading-line {
+  color: #e2e8f0;
+  padding: 12px 0;
 }

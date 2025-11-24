@@ -19,6 +19,28 @@ const formatCurrency = (value) => {
   return `${value.toLocaleString("vi-VN")} VND`;
 };
 
+const DRONE_STAGE_LABELS = {
+  waiting_for_drone: "Chờ gán drone",
+  drone_assigned: "Drone đang rời hub",
+  drone_enroute_to_restaurant: "Đang tới nhà hàng",
+  drone_arrived_restaurant: "Drone đã tới, chờ nhà hàng",
+  drone_picked_food: "Đang giao cho khách",
+  drone_delivering: "Đang giao cho khách",
+  drone_arrived_customer: "Đã tới điểm giao, chờ xác nhận",
+};
+
+const mapDroneStage = (status = "") => {
+  const normalized = status.toLowerCase();
+  if (normalized === "waiting_for_drone") return DRONE_STAGE_LABELS.waiting_for_drone;
+  if (normalized === "drone_assigned") return DRONE_STAGE_LABELS.drone_assigned;
+  if (normalized === "drone_enroute_to_restaurant") return DRONE_STAGE_LABELS.drone_enroute_to_restaurant;
+  if (normalized === "drone_arrived_restaurant") return DRONE_STAGE_LABELS.drone_arrived_restaurant;
+  if (normalized === "drone_picked_food") return DRONE_STAGE_LABELS.drone_picked_food;
+  if (normalized === "drone_delivering") return DRONE_STAGE_LABELS.drone_delivering;
+  if (normalized === "drone_arrived_customer") return DRONE_STAGE_LABELS.drone_arrived_customer;
+  return "";
+};
+
 function Orders() {
   const [orders, setOrders] = useState([]);
   const [restaurantNames, setRestaurantNames] = useState({});
@@ -29,6 +51,7 @@ function Orders() {
   const [feedbackDrafts, setFeedbackDrafts] = useState({});
   const [receivingOrderId, setReceivingOrderId] = useState(null);
   const [toastState, setToastState] = useState({ show: false, message: "" });
+  const [droneTracking, setDroneTracking] = useState({});
   const navigate = useNavigate();
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
@@ -150,6 +173,19 @@ function Orders() {
     });
   }, [orders]);
 
+  const upsertDroneTracking = useCallback((orderId, payload = {}) => {
+    if (!orderId) return;
+    setDroneTracking((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] || {}),
+        ...payload,
+        orderId,
+        updatedAt: payload.updatedAt || new Date().toISOString(),
+      },
+    }));
+  }, []);
+
   const handleRealtimeEvent = useCallback(
     (message) => {
       if (!message || typeof message !== "object") return;
@@ -257,11 +293,72 @@ function Orders() {
           });
           break;
         }
+        case "drone-location-update":
+        case "drone-status-update": {
+          const orderId = payload?.orderId || payload?.currentOrderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: payload?.status,
+            lat: payload?.lat,
+            lng: payload?.lng,
+            battery: payload?.battery,
+          });
+          if (payload?.status) {
+            setOrders((prev) =>
+              prev.map((order) => {
+                const oid = order?._id || order?.id;
+                if (!oid || String(oid) !== normalizedId) return order;
+                return {
+                  ...order,
+                  droneId: order.droneId || payload.droneId,
+                  droneStatus: payload.status,
+                };
+              })
+            );
+          }
+          break;
+        }
+        case "restaurant_wait_pickup": {
+          const orderId = payload?.orderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: "drone_arrived_restaurant",
+          });
+          setOrders((prev) =>
+            prev.map((order) => {
+              const oid = order?._id || order?.id;
+              if (!oid || String(oid) !== normalizedId) return order;
+              return { ...order, droneStatus: "drone_arrived_restaurant", droneId: order.droneId || payload?.droneId };
+            })
+          );
+          break;
+        }
+        case "customer_wait_confirm": {
+          const orderId = payload?.orderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: "drone_arrived_customer",
+          });
+          setOrders((prev) =>
+            prev.map((order) => {
+              const oid = order?._id || order?.id;
+              if (!oid || String(oid) !== normalizedId) return order;
+              return { ...order, droneStatus: "drone_arrived_customer", droneId: order.droneId || payload?.droneId };
+            })
+          );
+          break;
+        }
         default:
           break;
       }
     },
-    [fetchOrders]
+    [fetchOrders, upsertDroneTracking]
   );
 
   useEffect(() => {
@@ -718,7 +815,9 @@ function Orders() {
       const orderKey = orderId ? String(orderId) : "";
       const normalizedStatus = categorizeOrder(order.status);
       const canCancelOrder = normalizedStatus === "pending";
-      const canConfirmReceipt = normalizedStatus === "delivering" && Boolean(orderKey);
+      const canConfirmReceipt =
+        Boolean(orderKey) &&
+        ["delivering", "drone_delivering", "drone_arrived_customer"].includes(normalizedStatus);
       const isReceiving = Boolean(orderKey && receivingOrderId === orderKey);
       const orderFeedback = order.orderFeedback || {};
       const driverFeedback = order.deliveryFeedback || {};
@@ -841,6 +940,40 @@ function Orders() {
               )}
             </div>
           </div>
+
+          {(() => {
+            const tracking = droneTracking[orderKey];
+            const stageText = mapDroneStage(order.droneStatus || order.status);
+            if (!tracking && !stageText) return null;
+            const lat = Number(tracking?.lat);
+            const lng = Number(tracking?.lng);
+            const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+            return (
+              <div className="alert alert-info mt-3 mb-0">
+                <div className="fw-semibold mb-1">
+                  Drone {tracking?.droneId || order.droneId || "chưa gán"}{" "}
+                  {Number.isFinite(Number(tracking?.battery)) ? `• 🔋 ${tracking.battery}%` : ""}
+                </div>
+                <div className="small text-muted">
+                  {stageText || "Đang theo dõi trạng thái giao hàng"}
+                  {tracking?.status ? ` • ${tracking.status}` : ""}
+                </div>
+                {hasCoords && (
+                  <div className="small mono">
+                    GPS: {lat.toFixed(4)}, {lng.toFixed(4)}{" "}
+                    <a
+                      href={`https://www.google.com/maps?q=${lat},${lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ms-1"
+                    >
+                      Xem trên bản đồ
+                    </a>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {canRate && (
             <div className="mt-3 pt-3 border-top">

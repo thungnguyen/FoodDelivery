@@ -15,13 +15,22 @@ const settlementSchema = new mongoose.Schema(
     restaurantId: { type: String, required: true },
     periodStart: { type: Date, required: true },
     periodEnd: { type: Date, required: true },
+    payoutDueAt: { type: Date },
+    holdDays: { type: Number, default: 7 },
     grossSales: { type: Number, default: 0 },
     fees: { type: Number, default: 0 },
     netTransfer: { type: Number, default: 0 },
-    status: { type: String, enum: ["pending", "ready", "paid"], default: "pending" },
+    status: { type: String, enum: ["pending", "ready", "processing", "paid"], default: "pending" },
     transactions: [settlementTransactionSchema],
     notes: { type: String, default: "" },
-    paidAt: { type: Date }
+    paidAt: { type: Date },
+    payoutInitiatedAt: { type: Date },
+    restaurantConfirmation: {
+      type: String,
+      enum: ["pending", "confirmed", "rejected"],
+      default: "pending"
+    },
+    restaurantConfirmedAt: { type: Date }
   },
   { timestamps: true }
 );

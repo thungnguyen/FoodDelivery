@@ -7,6 +7,7 @@ import Restaurant from '../models/Restaurant.js';
 import SuperAdmin from '../models/SuperAdmin.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import upload from '../middleware/uploadMiddleware.js';
+import { geocode } from '../utils/geocode.js';
 import { sendEmail } from '../utils/emailService.js';
 import bcrypt from 'bcryptjs';
 
@@ -55,7 +56,7 @@ const generateOtpCode = () => {
 
 // Register a new restaurant (awaiting admin approval)
 router.post('/register', upload.single('profilePicture'), async (req, res) => {
-  const { name, taxCode, ownerName, location, contactNumber, email } = req.body;
+  const { name, taxCode, ownerName, location, contactNumber, email, locationLat, locationLng } = req.body;
   const profilePicture = req.file ? `/uploads/${req.file.filename}` : '';
 
   const trimmed = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -98,11 +99,22 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       taxCode: requiredFields.taxCode,
       ownerName: requiredFields.ownerName,
       location: requiredFields.location,
+      locationCoords:
+        Number.isFinite(Number(locationLat)) && Number.isFinite(Number(locationLng))
+          ? { lat: Number(locationLat), lng: Number(locationLng) }
+          : undefined,
       contactNumber: requiredFields.contactNumber,
       profilePicture,
       admin: { email: requiredFields.email },
       onboardingPasswordMustChange: true,
     });
+
+    if (!newRestaurant.locationCoords?.lat) {
+      const coords = await geocode(newRestaurant.location);
+      if (coords) {
+        newRestaurant.locationCoords = { lat: coords.lat, lng: coords.lng };
+      }
+    }
 
     await newRestaurant.save();
 
@@ -470,7 +482,16 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
 // Update restaurant details
 router.put('/update', authMiddleware, upload.single('profilePicture'), async (req, res) => {
-  const { name, ownerName, location, contactNumber, profilePictureUrl } = req.body || {};
+  const {
+    name,
+    ownerName,
+    location,
+    contactNumber,
+    profilePictureUrl,
+    bankAccountNumber,
+    bankAccountName,
+    bankName,
+  } = req.body || {};
 
   const updates = {};
   const trimmedName = typeof name === 'string' ? name.trim() : '';
@@ -478,11 +499,34 @@ router.put('/update', authMiddleware, upload.single('profilePicture'), async (re
   const trimmedLocation = typeof location === 'string' ? location.trim() : '';
   const trimmedContact = typeof contactNumber === 'string' ? contactNumber.trim() : '';
   const trimmedImageUrl = typeof profilePictureUrl === 'string' ? profilePictureUrl.trim() : '';
+  const trimmedBankNumber = typeof bankAccountNumber === 'string' ? bankAccountNumber.trim() : '';
+  const trimmedBankName = typeof bankName === 'string' ? bankName.trim() : '';
+  const trimmedBankHolder = typeof bankAccountName === 'string' ? bankAccountName.trim() : '';
 
   if (trimmedName) updates.name = trimmedName;
   if (trimmedOwner) updates.ownerName = trimmedOwner;
-  if (trimmedLocation) updates.location = trimmedLocation;
+  if (trimmedLocation) {
+    updates.location = trimmedLocation;
+    const coords = await geocode(trimmedLocation);
+    if (coords) {
+      updates.locationCoords = { lat: coords.lat, lng: coords.lng };
+    }
+  }
   if (trimmedContact) updates.contactNumber = trimmedContact;
+  if (trimmedBankNumber) updates.bankAccountNumber = trimmedBankNumber;
+  if (trimmedBankName) updates.bankName = trimmedBankName;
+  if (trimmedBankHolder) updates.bankAccountName = trimmedBankHolder;
+  if (trimmedLocation) {
+    updates.location = trimmedLocation;
+    if (!updates.locationCoords) {
+      try {
+        const coords = await geocode(trimmedLocation);
+        updates.locationCoords = { lat: coords.lat, lng: coords.lng };
+      } catch (err) {
+        // ignore geocode failure
+      }
+    }
+  }
 
   if (req.file) {
     updates.profilePicture = `/uploads/${req.file.filename}`;
@@ -629,6 +673,26 @@ router.get('/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+// Force geocode restaurant location
+router.put('/:id/geocode', async (req, res) => {
+  try {
+    const restaurant = await Restaurant.findById(req.params.id);
+    if (!restaurant) {
+      return res.status(404).json({ message: 'Restaurant not found' });
+    }
+    const coords = await geocode(restaurant.location);
+    if (coords) {
+      restaurant.locationCoords = { lat: coords.lat, lng: coords.lng };
+      await restaurant.save();
+      return res.json({ message: 'Geocoded', locationCoords: restaurant.locationCoords });
+    }
+    return res.status(400).json({ message: 'Geocode failed' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to geocode location' });
   }
 });
 

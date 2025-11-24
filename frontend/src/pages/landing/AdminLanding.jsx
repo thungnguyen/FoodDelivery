@@ -63,6 +63,16 @@ function AdminLanding() {
               Register Admin Account
             </motion.button>
           </Link>
+
+          <Link to="/super-admin/drone-orders">
+            <motion.button
+              className="landing-btn secondary"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Open Drone Control
+            </motion.button>
+          </Link>
         </div>
 
         <Link to="/" className="back-link">

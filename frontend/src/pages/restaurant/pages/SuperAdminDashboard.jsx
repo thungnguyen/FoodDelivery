@@ -359,6 +359,24 @@ const formatPaymentStatus = (value) => {
   }
 };
 
+const addDaysSafe = (value, days) => {
+  const base = value ? new Date(value) : new Date();
+  const ms = base.getTime();
+  if (Number.isNaN(ms)) {
+    return null;
+  }
+  return new Date(ms + days * 24 * 60 * 60 * 1000);
+};
+
+const daysUntil = (future, from = Date.now()) => {
+  const target = future instanceof Date ? future.getTime() : new Date(future).getTime();
+  const base = from instanceof Date ? from.getTime() : new Date(from).getTime();
+  if (Number.isNaN(target) || Number.isNaN(base)) {
+    return null;
+  }
+  return Math.max(0, Math.ceil((target - base) / (24 * 60 * 60 * 1000)));
+};
+
 const formatDriverStatus = (value) => {
   const status = typeof value === 'string' ? value.trim().toLowerCase() : '';
   switch (status) {
@@ -434,6 +452,9 @@ const normalizeRestaurants = (raw = []) => {
         approvedAt: item.approvedAt,
         rejectedAt: item.rejectedAt,
         createdAt: item.createdAt,
+        bankAccountNumber: item.bankAccountNumber || item.bankNumber || '',
+        bankAccountName: item.bankAccountName || item.bankHolder || '',
+        bankName: item.bankName || '',
         totalMenus: item.menuItems?.length ?? item.menuCount ?? 0,
         categories: item.categories || item.cuisines || [],
         preparationTime: item.preparationTime || item.avgPreparationTime || 0,
@@ -469,9 +490,11 @@ const normalizeDrivers = (raw = []) => {
 const DEFAULT_FINANCE_RULES = {
   vatRate: 0.1,
   commissionRate: 0.2,
-  restaurantShippingShare: 0.1,
-  driverShippingShare: 0.9,
+  restaurantShippingShare: 0,
+  driverShippingShare: 0,
 };
+
+const DRONE_PAYOUT_CYCLE_DAYS = 7;
 
 const roundCurrency = (value) => {
   const numeric = Number(value);
@@ -530,16 +553,11 @@ const deriveFinancialSummaryFromOrder = (order = {}) => {
     toNumeric(order.maintenanceFee ?? order.financialSummary?.maintenanceFee, 0)
   );
 
-  const restaurantShippingShare = roundCurrency(
-    shippingFee * DEFAULT_FINANCE_RULES.restaurantShippingShare
-  );
-  const driverPayout = roundCurrency(
-    shippingFee * DEFAULT_FINANCE_RULES.driverShippingShare
-  );
+  const restaurantShippingShare = 0;
+  const driverPayout = 0;
+  const droneRevenue = shippingFee;
 
-  const netRestaurant = roundCurrency(
-    itemsNet - commissionAmount - maintenanceFee + restaurantShippingShare
-  );
+  const netRestaurant = roundCurrency(Math.max(0, itemsNet - commissionAmount - maintenanceFee));
 
   return {
     fundSource,
@@ -553,9 +571,10 @@ const deriveFinancialSummaryFromOrder = (order = {}) => {
     driverPayout,
     driverServiceFee: 0,
     restaurantShippingShare,
+    droneRevenue,
     netRestaurant,
     taxLiability: roundCurrency(toNumeric(order.taxLiability, 0)),
-    totalHeld: 0,
+    totalHeld: netRestaurant,
     settlementDirection: null,
     restaurantWalletBalance: 0,
     processedAt: order.updatedAt || order.completedAt || order.deliveredAt || null,
@@ -587,9 +606,10 @@ const normalizeFinancialSummary = (rawSummary, order) => {
     restaurantShippingShare: toNumeric(
       summary.restaurantShippingShare ?? summary.restaurantShare
     ),
+    droneRevenue: toNumeric(summary.droneRevenue ?? summary.droneFee ?? summary.shippingFee ?? order?.shippingFee),
     netRestaurant: toNumeric(summary.netRestaurant ?? summary.restaurantNet),
     taxLiability: toNumeric(summary.taxLiability),
-    totalHeld: toNumeric(summary.totalHeld),
+    totalHeld: toNumeric(summary.totalHeld ?? summary.netRestaurant ?? summary.restaurantNet),
     settlementDirection: summary.settlementDirection || summary.settlementStatus || null,
     restaurantWalletBalance: toNumeric(summary.restaurantWalletBalance),
     processedAt: summary.processedAt || summary.updatedAt || summary.calculatedAt || null,
@@ -823,6 +843,14 @@ function SuperAdminDashboard() {
   const [cashflowLoading, setCashflowLoading] = useState(false);
   const [cashflowError, setCashflowError] = useState('');
   const [payingSettlementId, setPayingSettlementId] = useState(null);
+  const [payoutAnchor] = useState(() => Date.now());
+
+  const restaurantDirectory = useMemo(() => {
+    return restaurants.reduce((acc, restaurant) => {
+      acc[String(restaurant.id)] = restaurant;
+      return acc;
+    }, {});
+  }, [restaurants]);
 
   const lastRefreshLabel = useMemo(() => formatDateTime(lastRefreshedAt), [lastRefreshedAt]);
 
@@ -2028,6 +2056,91 @@ function SuperAdminDashboard() {
     }
   };
 
+  const handleConfirmRestaurantReceipt = async (settlementId) => {
+    if (!settlementId) return;
+    try {
+      const res = await fetch(`${SETTLEMENT_SERVICE_URL}/api/settlements/${settlementId}/confirm`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || 'Không thể xác nhận nhà hàng đã nhận tiền');
+      }
+      fetchCashflowOverview();
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const payoutWindow = useMemo(() => {
+    const start = new Date(payoutAnchor);
+    const due = addDaysSafe(start, DRONE_PAYOUT_CYCLE_DAYS);
+    return {
+      start,
+      due,
+      daysLeft: due ? daysUntil(due) : null,
+    };
+  }, [payoutAnchor]);
+
+  const settlementByRestaurant = useMemo(() => {
+    const map = {};
+    settlements.forEach((settlement) => {
+      const restaurantId = String(settlement.restaurantId || '');
+      if (!restaurantId) return;
+      const status = String(settlement.status || '').toLowerCase();
+      if (!['pending', 'ready', 'processing'].includes(status)) {
+        return;
+      }
+      const due = new Date(
+        settlement.payoutDueAt || settlement.periodEnd || settlement.periodStart || 0
+      ).getTime();
+      const existing = map[restaurantId];
+      if (!existing || due < existing.dueMs) {
+        map[restaurantId] = {
+          settlementId: settlement._id || settlement.id,
+          netTransfer: settlement.netTransfer,
+          dueMs: due || Date.now(),
+        };
+      }
+    });
+    return map;
+  }, [settlements]);
+
+  const settlementRollup = useMemo(
+    () =>
+      settlements.reduce(
+        (acc, settlement) => {
+          const net = Number(
+            settlement.netTransfer ?? settlement.netAmount ?? settlement.amount ?? 0
+          );
+          const status = String(settlement.status || '').toLowerCase();
+          const isPaid = ['paid', 'completed', 'done', 'settled'].includes(status);
+          const confirmed =
+            Boolean(settlement.restaurantConfirmedAt) ||
+            String(
+              settlement.restaurantConfirmation || settlement.restaurantConfirmationStatus || ''
+            ).toLowerCase() === 'confirmed';
+          if (isPaid) {
+            acc.paidAmount += net;
+          } else {
+            acc.pendingAmount += net;
+          }
+          if (confirmed) {
+            acc.confirmedAmount += net;
+          } else if (isPaid) {
+            acc.awaitingConfirmation += net;
+          }
+          return acc;
+        },
+        { pendingAmount: 0, paidAmount: 0, awaitingConfirmation: 0, confirmedAmount: 0 }
+      ),
+    [settlements]
+  );
+
   const financialSummary = useMemo(() => {
     const settled = ordersHydrated.filter(
       (order) =>
@@ -2038,43 +2151,54 @@ function SuperAdminDashboard() {
       (acc, order) => {
         const summary = order.financialSummary || {};
         acc.totalOrders += 1;
-        acc.grossItems += Number(summary.grossItems || 0);
-        acc.shippingFee += Number(summary.shippingFee || 0);
-        acc.platformCommission += Number(summary.commissionAmount || 0);
-        acc.maintenanceFee += Number(summary.maintenanceFee || 0);
-        acc.restaurantShippingShare += Number(summary.restaurantShippingShare || 0);
-        acc.driverShipping += Number(summary.driverPayout || 0);
-        acc.restaurantNet += Number(summary.netRestaurant || 0);
+        const grossItems = Number(summary.grossItems || 0);
+        const shippingFee = Number(summary.shippingFee || 0);
+        const droneRevenue = Number(
+          summary.droneRevenue ?? summary.shippingFee ?? 0
+        );
+        const commissionAmount = Number(summary.commissionAmount || 0);
+        const maintenanceFee = Number(summary.maintenanceFee || 0);
+        const restaurantNet = Number(summary.netRestaurant || 0);
+        acc.grossItems += grossItems;
+        acc.shippingFee += shippingFee;
+        acc.droneRevenue += droneRevenue;
+        acc.platformCommission += commissionAmount;
+        acc.maintenanceFee += maintenanceFee;
+        acc.restaurantNet += restaurantNet;
+        acc.heldForRestaurant += Number(summary.totalHeld ?? restaurantNet);
         return acc;
       },
       {
         totalOrders: 0,
         grossItems: 0,
         shippingFee: 0,
+        droneRevenue: 0,
         platformCommission: 0,
         maintenanceFee: 0,
-        restaurantShippingShare: 0,
-        driverShipping: 0,
         restaurantNet: 0,
+        heldForRestaurant: 0,
       }
     );
 
-    const platformRevenue = totals.platformCommission + totals.maintenanceFee;
     const restaurantItemShare = Math.max(0, totals.grossItems - totals.platformCommission);
-    const totalRevenue = totals.grossItems + totals.shippingFee;
+    const totalCollected = totals.grossItems + totals.shippingFee;
+    const adminRevenue =
+      totals.platformCommission + totals.maintenanceFee + totals.droneRevenue;
 
     return {
       totalOrders: totals.totalOrders,
-      totalRevenue,
+      totalRevenue: totalCollected,
+      totalCollected,
       grossItems: totals.grossItems,
       shippingFee: totals.shippingFee,
+      droneRevenue: totals.droneRevenue,
       platformCommission: totals.platformCommission,
       maintenanceFee: totals.maintenanceFee,
-      platformRevenue,
+      platformRevenue: adminRevenue,
+      adminRevenue,
       restaurantItemShare,
-      restaurantShippingShare: totals.restaurantShippingShare,
-      driverShipping: totals.driverShipping,
       restaurantNet: totals.restaurantNet,
+      heldForRestaurant: totals.heldForRestaurant,
     };
   }, [ordersHydrated]);
 
@@ -2932,155 +3056,294 @@ function SuperAdminDashboard() {
     );
   };
 
-  const renderFinance = () => (
-    <section className="sa-section">
-      <header className="sa-section-header">
-        <div>
-          <h2>
-            <span className="sa-icon">{SECTION_ICONS.finance}</span>Đối soát & Tài chính
-          </h2>
-          <p>Phân tách dòng tiền theo tỷ lệ 80/20 món ăn và 90/10 phí giao hàng.</p>
+  const renderFinance = () => {
+    const payoutDueLabel = payoutWindow.due
+      ? payoutWindow.due.toLocaleDateString('vi-VN')
+      : '—';
+    const pendingPayoutAmount =
+      settlements.length > 0
+        ? settlementRollup.pendingAmount
+        : financialSummary.heldForRestaurant;
+    const resolvePayoutDue = (settlement) => {
+      if (!settlement) {
+        return addDaysSafe(payoutAnchor, DRONE_PAYOUT_CYCLE_DAYS);
+      }
+      if (settlement.payoutDueAt) {
+        const due = new Date(settlement.payoutDueAt);
+        if (!Number.isNaN(due.getTime())) {
+          return due;
+        }
+      }
+      const base = settlement.periodEnd || settlement.periodStart || payoutAnchor;
+      return addDaysSafe(base, DRONE_PAYOUT_CYCLE_DAYS);
+    };
+
+    return (
+      <section className="sa-section">
+        <header className="sa-section-header">
+          <div>
+            <h2>
+              <span className="sa-icon">{SECTION_ICONS.finance}</span>Đối soát & Dòng tiền 7 ngày
+            </h2>
+            <p>
+              Tiền khách thanh toán đi vào ví Admin, giữ 7 ngày rồi admin chủ động payout từng nhà
+              hàng; phí giao bằng drone thuộc về Admin.
+            </p>
+          </div>
+        </header>
+        {renderAlert({
+          type: 'info',
+          message: `Kỳ payout hiện tại kết thúc ${payoutDueLabel}${
+            payoutWindow.daysLeft !== null ? ` · còn ${payoutWindow.daysLeft} ngày` : ''
+          }. Hệ thống sẽ nhắc admin chuyển khoản và cập nhật trạng thái từng nhà hàng.`,
+        })}
+        <div className="sa-grid finance">
+          <div className="sa-card">
+            <h3>Tiền đã thu về ví Admin</h3>
+            <p className="sa-highlight">{formatCurrency(financialSummary.totalCollected)}</p>
+            <span>Từ {financialSummary.totalOrders} đơn đã thanh toán</span>
+          </div>
+          <div className="sa-card">
+            <h3>Chu kỳ payout {DRONE_PAYOUT_CYCLE_DAYS} ngày</h3>
+            <p className="sa-highlight">{payoutDueLabel}</p>
+            <span>
+              {payoutWindow.daysLeft !== null
+                ? `Còn ${payoutWindow.daysLeft} ngày tới hạn`
+                : 'Đang chờ lịch'}
+            </span>
+          </div>
+          <div className="sa-card">
+            <h3>Đang giữ để trả nhà hàng</h3>
+            <p className="sa-highlight">{formatCurrency(pendingPayoutAmount)}</p>
+            <span>Tiền món sau khi trừ hoa hồng, giữ đủ {DRONE_PAYOUT_CYCLE_DAYS} ngày</span>
+          </div>
+          <div className="sa-card">
+            <h3>Đã chuyển cho nhà hàng</h3>
+            <p className="sa-highlight">{formatCurrency(settlementRollup.paidAmount)}</p>
+            <span>
+              {settlementRollup.awaitingConfirmation > 0
+                ? `Chờ nhà hàng xác nhận ${formatCurrency(
+                    settlementRollup.awaitingConfirmation
+                  )}`
+                : 'Nhà hàng xác nhận sẽ tự cập nhật'}
+            </span>
+          </div>
+          <div className="sa-card">
+            <h3>Hoa hồng & phí drone (Admin)</h3>
+            <p className="sa-highlight">{formatCurrency(financialSummary.adminRevenue)}</p>
+            <span>Hoa hồng món ăn + phí duy trì + phí giao bằng drone</span>
+          </div>
+          <div className="sa-card">
+            <h3>Phí drone thu được</h3>
+            <p className="sa-highlight">{formatCurrency(financialSummary.droneRevenue)}</p>
+            <span>Toàn bộ thuộc về Admin, không chia tài xế</span>
+          </div>
         </div>
-      </header>
-      <div className="sa-grid finance">
-        <div className="sa-card">
-          <h3>Tổng giá trị đã đối soát</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.totalRevenue)}</p>
-          <span>{financialSummary.totalOrders} đơn hoàn tất</span>
-        </div>
-        <div className="sa-card">
-          <h3>Giá trị món ăn</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.grossItems)}</p>
-          <span>80% chuyển cho nhà hàng · 20% cho nền tảng</span>
-        </div>
-        <div className="sa-card">
-          <h3>Hoa hồng nền tảng (20%)</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.platformCommission)}</p>
-          <span>Phí duy trì: {formatCurrency(financialSummary.maintenanceFee)}</span>
-        </div>
-        <div className="sa-card">
-          <h3>Nhà hàng nhận từ món ăn</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantItemShare)}</p>
-          <span>Chưa trừ phí duy trì định kỳ</span>
-        </div>
-        <div className="sa-card">
-          <h3>Phí giao hàng thu được</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.shippingFee)}</p>
-          <span>Chia 90% tài xế · 10% thưởng nhà hàng</span>
-        </div>
-        <div className="sa-card">
-          <h3>Chi cho tài xế (90% ship)</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.driverShipping)}</p>
-        </div>
-        <div className="sa-card">
-          <h3>Nhà hàng hưởng (10% ship)</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantShippingShare)}</p>
+        <div className="sa-card note">
+          <h4>Quy trình dòng tiền mới</h4>
+          <p>
+            Khi khách thanh toán, toàn bộ tiền (món ăn + phí drone) nằm ở ví Admin. Sau 7 ngày hệ
+            thống nhắc payout; admin bấm &quot;Chuyển tiền&quot; cho từng nhà hàng. Nhà hàng sẽ có
+            nút &quot;Đã nhận tiền&quot; để xác nhận, trạng thái hiển thị lại ở đây.
+          </p>
         </div>
         <div className="sa-card stretch">
-          <h3>Nhà hàng nhận ròng</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.restaurantNet)}</p>
-          <span>= 80% món - 20% hoa hồng - phí duy trì + 10% phí ship</span>
-        </div>
-        <div className="sa-card stretch">
-          <h3>Thu ròng nền tảng</h3>
-          <p className="sa-highlight">{formatCurrency(financialSummary.platformRevenue)}</p>
-          <span>Hoa hồng món ăn + phí duy trì</span>
-        </div>
-      </div>
-      <div className="sa-card note">
-        <h4>Dòng tiền & ví nội bộ</h4>
-        <p>
-          Số liệu lấy từ ledger: tiền món vào ví nền tảng, hoa hồng chuyển sang ví doanh thu,
-          90% phí ship về ví tài xế, 10% phí ship cộng vào ví công nợ nhà hàng. Báo cáo đối soát
-          dùng các số dư này để lập lịch payout.
-        </p>
-      </div>
-      <div className="sa-card stretch">
-        <h3>Ví nhà hàng có công nợ</h3>
-        {cashflowLoading ? (
-          <p>Đang tải dữ liệu ví...</p>
-        ) : cashflowError ? (
-          <p className="sa-error">{cashflowError}</p>
-        ) : wallets.length === 0 ? (
-          <p>Chưa ghi nhận ví nhà hàng nào.</p>
-        ) : (
-          <ul className="sa-list compact">
-            {wallets.slice(0, 5).map((wallet) => (
-              <li key={wallet._id}>
-                <div className="sa-stack">
-                  <strong>{wallet.restaurantId}</strong>
-                  <span className="sa-meta">
-                    Tổng đã trả: {formatCurrency(wallet.totalPaid || 0)}
-                  </span>
-                </div>
-                <strong>{formatCurrency(wallet.pendingAmount || 0)}</strong>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <div className="sa-table-wrapper">
-        <h3>Kỳ đối soát cần thanh toán</h3>
-        {cashflowLoading ? (
-          <p>Đang tải đối soát...</p>
-        ) : settlements.length === 0 ? (
-          <p className="sa-placeholder">Chưa có đợt đối soát nào từ Settlement Service.</p>
-        ) : (
-          <table className="sa-table">
-            <thead>
-              <tr>
-                <th>Nhà hàng</th>
-                <th>Kỳ</th>
-                <th>Doanh số</th>
-                <th>Phí</th>
-                <th>Cần chuyển</th>
-                <th>Trạng thái</th>
-                <th>Hành động</th>
-              </tr>
-            </thead>
-            <tbody>
-              {settlements.slice(0, 10).map((settlement) => (
-                <tr key={settlement._id}>
-                  <td>{settlement.restaurantId}</td>
-                  <td>
-                    {new Date(settlement.periodStart).toLocaleDateString('vi-VN')} -{' '}
-                    {new Date(settlement.periodEnd).toLocaleDateString('vi-VN')}
-                  </td>
-                  <td>{formatCurrency(settlement.grossSales)}</td>
-                  <td>{formatCurrency(settlement.fees)}</td>
-                  <td>{formatCurrency(settlement.netTransfer)}</td>
-                  <td>
-                    <span className={`sa-status badge ${settlement.status}`}>
-                      {settlement.status}
-                    </span>
-                  </td>
-                  <td>
-                    {settlement.status === 'paid' ? (
-                      <span className="sa-meta">
-                        Đã thanh toán{' '}
-                        {settlement.paidAt
-                          ? new Date(settlement.paidAt).toLocaleDateString('vi-VN')
-                          : ''}
-                      </span>
-                    ) : (
-                      <button
-                        className="sa-button primary"
-                        type="button"
-                        onClick={() => handlePaySettlement(settlement._id)}
-                        disabled={payingSettlementId === settlement._id}
-                      >
-                        {payingSettlementId === settlement._id ? 'Đang thanh toán...' : 'Thanh toán'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
+          <h3>Ví nhà hàng đang chờ trả</h3>
+          {cashflowLoading ? (
+            <p>Đang tải dữ liệu ví...</p>
+          ) : cashflowError ? (
+            <p className="sa-error">{cashflowError}</p>
+          ) : wallets.length === 0 ? (
+            <p>Chưa ghi nhận ví nhà hàng nào.</p>
+          ) : (
+            <ul className="sa-list compact">
+              {wallets.slice(0, 5).map((wallet) => (
+                <li key={wallet._id}>
+                  {(() => {
+                    const key = String(wallet.restaurantId);
+                    const info = restaurantDirectory[key] || {};
+                    const pendingSettlement = settlementByRestaurant[key];
+                    return (
+                      <>
+                        <div className="sa-stack">
+                          <strong>{info.name || wallet.restaurantId}</strong>
+                          <span className="sa-meta">
+                            Đã trả: {formatCurrency(wallet.totalPaid || 0)}
+                          </span>
+                          <span className="sa-meta">
+                            STK: {info.bankAccountNumber || 'Chưa cập nhật'}{' '}
+                            {info.bankName ? `(${info.bankName})` : ''}
+                          </span>
+                          {info.bankAccountName && (
+                            <span className="sa-meta">Chủ TK: {info.bankAccountName}</span>
+                          )}
+                        </div>
+                        <strong>{formatCurrency(wallet.pendingAmount || 0)}</strong>
+                        {pendingSettlement ? (
+                          <button
+                            className="sa-button primary"
+                            type="button"
+                            onClick={() => handlePaySettlement(pendingSettlement.settlementId)}
+                            disabled={payingSettlementId === pendingSettlement.settlementId}
+                          >
+                            {payingSettlementId === pendingSettlement.settlementId
+                              ? 'Đang chuyển...'
+                              : 'Chuyển tiền'}
+                          </button>
+                        ) : (
+                          <span className="sa-meta">Chưa có kỳ payout mở</span>
+                        )}
+                      </>
+                    );
+                  })()}
+                </li>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </section>
-  );
+            </ul>
+          )}
+        </div>
+        <div className="sa-table-wrapper">
+          <h3>Kỳ payout theo nhà hàng</h3>
+          {cashflowLoading ? (
+            <p>Đang tải đối soát...</p>
+          ) : settlements.length === 0 ? (
+            <p className="sa-placeholder">Chưa có đợt đối soát nào từ Settlement Service.</p>
+          ) : (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Nhà hàng</th>
+                  <th>Kỳ 7 ngày</th>
+                  <th>Đáo hạn payout</th>
+                  <th>Giữ hộ nhà hàng</th>
+                  <th>Ngân hàng</th>
+                  <th>Phí admin (hoa hồng + drone)</th>
+                  <th>Trạng thái</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settlements.slice(0, 10).map((settlement) => {
+                  const settlementId = settlement._id || settlement.id;
+                  const payoutDue = resolvePayoutDue(settlement);
+                  const dueLabel = payoutDue
+                    ? payoutDue.toLocaleDateString('vi-VN')
+                    : '—';
+                  const daysLeft = payoutDue ? daysUntil(payoutDue) : null;
+                  const status = String(settlement.status || 'pending').toLowerCase();
+                  const isPaid = ['paid', 'completed', 'done', 'settled'].includes(status);
+                  const confirmed =
+                    Boolean(settlement.restaurantConfirmedAt) ||
+                    String(
+                      settlement.restaurantConfirmation ||
+                        settlement.restaurantConfirmationStatus ||
+                        ''
+                    ).toLowerCase() === 'confirmed';
+                  const statusLabel =
+                    status === 'paid'
+                      ? 'Đã chuyển'
+                      : status === 'processing'
+                      ? 'Đang xử lý'
+                      : 'Chờ chuyển';
+                  const restaurantInfo = restaurantDirectory[String(settlement.restaurantId)] || {};
+
+                  return (
+                    <tr key={settlementId}>
+                      <td>
+                        <div className="sa-stack">
+                          <strong>
+                            {restaurantInfo.name || settlement.restaurantId}
+                          </strong>
+                          <span className="sa-meta">{settlement.restaurantId}</span>
+                        </div>
+                      </td>
+                      <td>
+                        {settlement.periodStart
+                          ? new Date(settlement.periodStart).toLocaleDateString('vi-VN')
+                          : '—'}{' '}
+                        -{' '}
+                        {settlement.periodEnd
+                          ? new Date(settlement.periodEnd).toLocaleDateString('vi-VN')
+                          : '—'}
+                      </td>
+                      <td>
+                        <div className="sa-stack">
+                          <strong>{dueLabel}</strong>
+                          <span className="sa-meta">
+                            {daysLeft !== null ? `Còn ${daysLeft} ngày` : 'Đang lên lịch'}
+                          </span>
+                        </div>
+                      </td>
+                      <td>{formatCurrency(settlement.netTransfer)}</td>
+                      <td>
+                        <div className="sa-stack">
+                          <strong>
+                            {restaurantInfo.bankAccountNumber || 'Chưa cập nhật'}
+                          </strong>
+                          <span className="sa-meta">{restaurantInfo.bankName || ''}</span>
+                          {restaurantInfo.bankAccountName && (
+                            <span className="sa-meta">Chủ TK: {restaurantInfo.bankAccountName}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>{formatCurrency(settlement.fees)}</td>
+                      <td>
+                        <div className="sa-stack">
+                          <span className={`sa-status badge ${status}`}>{statusLabel}</span>
+                          <span
+                            className={`sa-status badge ${confirmed ? 'success' : 'warning'}`}
+                          >
+                            {confirmed ? 'Nhà hàng đã nhận' : 'Chờ nhà hàng xác nhận'}
+                          </span>
+                          {settlement.paidAt && (
+                            <span className="sa-meta">
+                              Đã chuyển{' '}
+                              {new Date(settlement.paidAt).toLocaleDateString('vi-VN')}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="sa-stack">
+                          {isPaid ? (
+                            <span className="sa-meta">
+                              Đã chuyển{' '}
+                              {settlement.paidAt
+                                ? new Date(settlement.paidAt).toLocaleDateString('vi-VN')
+                                : ''}
+                            </span>
+                          ) : (
+                            <button
+                              className="sa-button primary"
+                              type="button"
+                              onClick={() => handlePaySettlement(settlementId)}
+                              disabled={payingSettlementId === settlementId}
+                            >
+                              {payingSettlementId === settlementId
+                                ? 'Đang chuyển...'
+                                : 'Chuyển tiền'}
+                            </button>
+                          )}
+                          {isPaid && !confirmed && (
+                            <button
+                              className="sa-button"
+                              type="button"
+                              onClick={() => handleConfirmRestaurantReceipt(settlementId)}
+                            >
+                              Đánh dấu nhà hàng đã nhận
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    );
+  };
 
   const renderPromotions = () => (
     <section className="sa-section">
