@@ -76,7 +76,9 @@ const SuperAdminDroneOrders = () => {
   const [autoRoute, setAutoRoute] = useState([]);
   const [routeMeta, setRouteMeta] = useState(null);
   const [actionLoading, setActionLoading] = useState('');
+  const [autoSimRunning, setAutoSimRunning] = useState(false);
   const token = getAuthToken(AUTH_ROLES.SUPER_ADMIN);
+  const simTimerRef = React.useRef(null);
 
   useEffect(() => {
     addLeafletAssets();
@@ -193,6 +195,63 @@ const SuperAdminDroneOrders = () => {
     if (result) setError('');
   };
 
+  const runAutoFlight = async () => {
+    if (!selectedOrder || !selectedOrder.droneId) {
+      setError('Chọn đơn và drone trước khi auto bay');
+      return;
+    }
+    if (autoSimRunning) return;
+    const orderId = selectedOrder._id || selectedOrder.id;
+    const droneId = selectedOrder.droneId;
+    let waypoints = routePoints;
+    if (!waypoints.length) {
+      waypoints = (await handleAutoRoute(orderId, droneId, selectedOrder.droneHubId)) || [];
+    }
+    if (!waypoints.length) {
+      setError('Chưa có tuyến bay để mô phỏng.');
+      return;
+    }
+    setAutoSimRunning(true);
+    let index = 0;
+    const battery = selectedDrone?.battery ?? 90;
+    const postLocation = async (wp) => {
+      await axios.post(`${DELIVERY_SERVICE_URL}/api/drone/update-location`, {
+        droneId,
+        lat: wp.lat,
+        lng: wp.lng,
+        battery,
+        status: 'delivering',
+        currentOrderId: orderId,
+        hubId: selectedOrder.droneHubId,
+      });
+    };
+
+    const tick = async () => {
+      if (index >= waypoints.length) {
+        await handleReturn(orderId, droneId);
+        clearInterval(simTimerRef.current);
+        simTimerRef.current = null;
+        setAutoSimRunning(false);
+        return;
+      }
+      const wp = waypoints[index];
+      await postLocation(wp);
+      // Emit key milestones
+      if (index === 1) {
+        await handleArrivedRestaurant(orderId, droneId);
+        await handlePickup(orderId, droneId);
+      }
+      if (index === waypoints.length - 2) {
+        await handleArrivedCustomer(orderId, droneId);
+      }
+      index += 1;
+    };
+
+    // start
+    await tick();
+    simTimerRef.current = setInterval(tick, 1500);
+  };
+
   const handleReturn = async (orderId, droneId) => {
     const result = await callAction('/api/drone/return', { orderId, droneId });
     if (result) setError('');
@@ -212,8 +271,10 @@ const SuperAdminDroneOrders = () => {
       const waypoints = Array.isArray(data.waypoints) ? data.waypoints : [];
       setAutoRoute(waypoints);
       setRouteMeta({ distance: data.distanceMeters, eta: data.etaSeconds });
+      return waypoints;
     } catch (err) {
       setError(err?.response?.data?.message || 'Không thể tải tuyến bay');
+      return [];
     }
   };
 
@@ -235,6 +296,13 @@ const SuperAdminDroneOrders = () => {
       setRouteMeta(null);
     }
   }, [selectedOrder]);
+
+  useEffect(() => () => {
+    if (simTimerRef.current) {
+      clearInterval(simTimerRef.current);
+      simTimerRef.current = null;
+    }
+  }, []);
 
   return (
     <div className="drone-orders-shell">
@@ -415,11 +483,19 @@ const SuperAdminDroneOrders = () => {
                 <button className="btn text small" onClick={() => handleCancelDrone(selectedOrder._id)}>
                   Cancel Drone
                 </button>
+                <button
+                  className="btn primary small"
+                  disabled={autoSimRunning}
+                  onClick={runAutoFlight}
+                  title="Mô phỏng bay tự động giống simulator"
+                >
+                  {autoSimRunning ? 'Đang bay mô phỏng...' : 'Auto bay (simulate)'}
+                </button>
               </div>
 
               <div className="glass" style={{ padding: 12, marginBottom: 12 }}>
-                  <div className="flex between" style={{ marginBottom: 6 }}>
-                    <strong>Tuyến bay</strong>
+                <div className="flex between" style={{ marginBottom: 6 }}>
+                  <strong>Tuyến bay</strong>
                     <button
                       className="btn text small"
                     disabled={!selectedOrder.droneId}
