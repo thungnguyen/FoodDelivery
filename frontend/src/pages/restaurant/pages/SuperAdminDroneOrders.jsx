@@ -2,7 +2,26 @@ import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { ORDER_SERVICE_URL, DELIVERY_SERVICE_URL } from '../../../utils/serviceUrls';
 import { getAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
+import DroneMapCanvas from '../../drone-center/components/DroneMapCanvas';
 import '../styles/dashboard.css';
+
+const addLeafletAssets = () => {
+  if (typeof document === 'undefined') return;
+  const cssHref = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  if (!document.querySelector(`link[href="${cssHref}"]`)) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = cssHref;
+    document.head.appendChild(link);
+  }
+  if (!window.L && !document.querySelector('script[data-drone-center-leaflet]')) {
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.setAttribute('data-drone-center-leaflet', 'true');
+    document.body.appendChild(script);
+  }
+};
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Tất cả' },
@@ -48,13 +67,19 @@ const statusClass = (value) => {
 
 const SuperAdminDroneOrders = () => {
   const [orders, setOrders] = useState([]);
+  const [drones, setDrones] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedOrderId, setSelectedOrderId] = useState('');
+  const [autoRoute, setAutoRoute] = useState([]);
+  const [routeMeta, setRouteMeta] = useState(null);
+  const [actionLoading, setActionLoading] = useState('');
   const token = getAuthToken(AUTH_ROLES.SUPER_ADMIN);
 
   useEffect(() => {
+    addLeafletAssets();
     const fetchOrders = async () => {
       setLoading(true);
       try {
@@ -68,6 +93,11 @@ const SuperAdminDroneOrders = () => {
           ? response.data.orders
           : response.data?.data || [];
         setOrders(list);
+        if (!selectedOrderId && list.length) {
+          setSelectedOrderId(list[0]._id || list[0].id);
+        } else if (selectedOrderId && list.length && !list.find((o) => (o._id || o.id) === selectedOrderId)) {
+          setSelectedOrderId(list[0]._id || list[0].id);
+        }
         setError('');
       } catch (err) {
         setError('Không thể tải đơn drone');
@@ -76,7 +106,20 @@ const SuperAdminDroneOrders = () => {
       }
     };
     fetchOrders();
-  }, [statusFilter, token]);
+  }, [statusFilter, token, selectedOrderId]);
+
+  useEffect(() => {
+    const fetchDrones = async () => {
+      try {
+        const res = await axios.get(`${DELIVERY_SERVICE_URL}/api/drones`);
+        const payload = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        setDrones(payload);
+      } catch (err) {
+        // silent
+      }
+    };
+    fetchDrones();
+  }, []);
 
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -101,6 +144,7 @@ const SuperAdminDroneOrders = () => {
 
   const callAction = async (path, body = {}) => {
     try {
+      setActionLoading(path);
       const res = await axios.post(`${DELIVERY_SERVICE_URL}${path}`, body, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -108,6 +152,8 @@ const SuperAdminDroneOrders = () => {
     } catch (err) {
       setError(err?.response?.data?.message || 'Thao tác thất bại');
       return null;
+    } finally {
+      setActionLoading('');
     }
   };
 
@@ -131,6 +177,64 @@ const SuperAdminDroneOrders = () => {
       setError('');
     }
   };
+
+  const handleArrivedRestaurant = async (orderId, droneId) => {
+    const result = await callAction('/api/drone/arrived-restaurant', { orderId, droneId });
+    if (result) setError('');
+  };
+
+  const handlePickup = async (orderId, droneId) => {
+    const result = await callAction('/api/order/drone-pickup', { orderId, droneId });
+    if (result) setError('');
+  };
+
+  const handleArrivedCustomer = async (orderId, droneId) => {
+    const result = await callAction('/api/drone/arrived-customer', { orderId, droneId });
+    if (result) setError('');
+  };
+
+  const handleReturn = async (orderId, droneId) => {
+    const result = await callAction('/api/drone/return', { orderId, droneId });
+    if (result) setError('');
+  };
+
+  const handleAutoRoute = async (orderId, droneId, hubId) => {
+    if (!orderId) return;
+    setRouteMeta(null);
+    setAutoRoute([]);
+    try {
+      const res = await axios.post(
+        `${DELIVERY_SERVICE_URL}/api/drone/auto-route`,
+        { orderId, droneId, hubId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      const data = res.data?.data || {};
+      const waypoints = Array.isArray(data.waypoints) ? data.waypoints : [];
+      setAutoRoute(waypoints);
+      setRouteMeta({ distance: data.distanceMeters, eta: data.etaSeconds });
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Không thể tải tuyến bay');
+    }
+  };
+
+  const selectedOrder = useMemo(
+    () => filteredOrders.find((o) => (o._id || o.id) === selectedOrderId),
+    [filteredOrders, selectedOrderId]
+  );
+  const selectedDrone = useMemo(
+    () => (selectedOrder ? drones.find((d) => d.droneId === selectedOrder.droneId) : null),
+    [drones, selectedOrder]
+  );
+  const routePoints = useMemo(() => autoRoute || [], [autoRoute]);
+
+  useEffect(() => {
+    if (selectedOrder && selectedOrder.droneId) {
+      handleAutoRoute(selectedOrder._id || selectedOrder.id, selectedOrder.droneId, selectedOrder.droneHubId);
+    } else {
+      setAutoRoute([]);
+      setRouteMeta(null);
+    }
+  }, [selectedOrder]);
 
   return (
     <div className="drone-orders-shell">
@@ -179,77 +283,179 @@ const SuperAdminDroneOrders = () => {
         </div>
       </section>
 
-      <div className="drone-orders-panel glass">
-        <div className="panel-heading">
-          <div>
-            <h3>Danh sách đơn drone</h3>
-            {error && <div className="error-text">{error}</div>}
+      <div className="drone-orders-panel glass" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 12 }}>
+        <div>
+          <div className="panel-heading">
+            <div>
+              <h3>Danh sách đơn drone</h3>
+              {error && <div className="error-text">{error}</div>}
+            </div>
+            <div className="pill light">Realtime sync</div>
           </div>
-          <div className="pill light">Realtime sync</div>
+
+          {loading ? (
+            <div className="loading-line">Đang tải...</div>
+          ) : (
+            <div className="table-wrap">
+              <table className="drone-orders-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Khách</th>
+                    <th>Drone</th>
+                    <th>Trạng thái</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((order) => (
+                    <tr
+                      key={order._id}
+                      className={selectedOrderId === (order._id || order.id) ? 'active' : ''}
+                      onClick={() => setSelectedOrderId(order._id || order.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>
+                        <div className="mono">{order._id}</div>
+                        <div className="muted">{order.deliveryAddress}</div>
+                      </td>
+                      <td>
+                        <div>{order.customerName || order.customerId}</div>
+                        <div className="muted">{order.customerPhone}</div>
+                      </td>
+                      <td>{order.droneId || '—'}</td>
+                      <td>
+                        <span className={statusClass(order.droneStatus || order.status)}>
+                          {STATUS_LABELS[order.droneStatus] || order.droneStatus || order.status}
+                        </span>
+                      </td>
+                      <td>
+                        <button className="btn text small" onClick={() => handleAssign(order._id)}>
+                          Force assign
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!filteredOrders.length && (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        Chưa có đơn drone.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {loading ? (
-          <div className="loading-line">Đang tải...</div>
-        ) : (
-          <div className="table-wrap">
-            <table className="drone-orders-table">
-              <thead>
-                <tr>
-                  <th>Order</th>
-                  <th>Khách</th>
-                  <th>Nhà hàng</th>
-                  <th>Drone</th>
-                  <th>Trạng thái</th>
-                  <th>Hành động</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredOrders.map((order) => (
-                  <tr key={order._id}>
-                    <td>
-                      <div className="mono">{order._id}</div>
-                      <div className="muted">Total: {order.totalPrice || '--'} </div>
-                    </td>
-                    <td>
-                      <div>{order.customerName || order.customerId}</div>
-                      <div className="muted">{order.customerPhone}</div>
-                    </td>
-                    <td>
-                      <div>{order.restaurantName || order.restaurantId}</div>
-                      <div className="muted">{order.deliveryAddress}</div>
-                    </td>
-                    <td>{order.droneId || '—'}</td>
-                    <td>
-                      <span className={statusClass(order.droneStatus || order.status)}>
-                        {STATUS_LABELS[order.droneStatus] || order.droneStatus || order.status}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="action-group">
-                        <button className="btn primary small" onClick={() => handleAssign(order._id)}>
-                          Force Assign
-                        </button>
-                        <button className="btn ghost small" onClick={() => handleForceReturn(order._id, order.droneId)}>
-                          Force Return
-                        </button>
-                        <button className="btn text small" onClick={() => handleCancelDrone(order._id)}>
-                          Cancel Drone
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!filteredOrders.length && (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      Chưa có đơn drone.
-                    </td>
-                  </tr>
+        <div className="glass" style={{ padding: 16, borderRadius: 12 }}>
+          {selectedOrder ? (
+            <>
+              <div className="flex between" style={{ alignItems: 'flex-start', marginBottom: 8 }}>
+                <div>
+                  <div className="mono">{selectedOrder._id}</div>
+                  <div className="muted">
+                    {selectedOrder.customerName || selectedOrder.customerId} • {selectedOrder.restaurantName || selectedOrder.restaurantId}
+                  </div>
+                </div>
+                <span className={statusClass(selectedOrder.droneStatus || selectedOrder.status)}>
+                  {STATUS_LABELS[selectedOrder.droneStatus] || selectedOrder.droneStatus || selectedOrder.status}
+                </span>
+              </div>
+
+              <div className="chip-row" style={{ marginBottom: 10, gap: 6 }}>
+                <span className="pill ghost">Drone: {selectedOrder.droneId || '—'}</span>
+                <span className="pill ghost">Hub: {selectedOrder.droneHubId || '—'}</span>
+              </div>
+
+              <div className="action-group" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                <button
+                  className="btn primary small"
+                  disabled={actionLoading === '/api/admin/drone/assign'}
+                  onClick={() => handleAssign(selectedOrder._id)}
+                >
+                  {actionLoading === '/api/admin/drone/assign' ? 'Đang gán...' : 'Gán drone'}
+                </button>
+                <button
+                  className="btn ghost small"
+                  disabled={!selectedOrder.droneId}
+                  onClick={() => handleArrivedRestaurant(selectedOrder._id, selectedOrder.droneId)}
+                >
+                  Đã tới nhà hàng
+                </button>
+                <button
+                  className="btn ghost small"
+                  disabled={!selectedOrder.droneId}
+                  onClick={() => handlePickup(selectedOrder._id, selectedOrder.droneId)}
+                >
+                  Đã lấy hàng
+                </button>
+                <button
+                  className="btn ghost small"
+                  disabled={!selectedOrder.droneId}
+                  onClick={() => handleArrivedCustomer(selectedOrder._id, selectedOrder.droneId)}
+                >
+                  Đã tới khách
+                </button>
+                <button
+                  className="btn ghost small"
+                  disabled={!selectedOrder.droneId}
+                  onClick={() => handleReturn(selectedOrder._id, selectedOrder.droneId)}
+                >
+                  Return hub
+                </button>
+                <button
+                  className="btn text small"
+                  disabled={!selectedOrder.droneId}
+                  onClick={() => handleForceReturn(selectedOrder._id, selectedOrder.droneId)}
+                >
+                  Force Return
+                </button>
+                <button className="btn text small" onClick={() => handleCancelDrone(selectedOrder._id)}>
+                  Cancel Drone
+                </button>
+              </div>
+
+              <div className="glass" style={{ padding: 12, marginBottom: 12 }}>
+                  <div className="flex between" style={{ marginBottom: 6 }}>
+                    <strong>Tuyến bay</strong>
+                    <button
+                      className="btn text small"
+                    disabled={!selectedOrder.droneId}
+                    onClick={() => handleAutoRoute(selectedOrder._id, selectedOrder.droneId, selectedOrder.droneHubId)}
+                  >
+                    Load auto-route
+                  </button>
+                  </div>
+                {routeMeta && (
+                  <div className="muted" style={{ marginBottom: 6 }}>
+                    Distance: {routeMeta.distance ? `${Math.round(routeMeta.distance / 10) / 100} km` : '--'} • ETA:{' '}
+                    {routeMeta.eta ? `${Math.round(routeMeta.eta / 60)} phút` : '--'}
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-        )}
+                <DroneMapCanvas
+                  drones={
+                    selectedDrone
+                      ? [
+                          {
+                            ...selectedDrone,
+                            location: selectedDrone.location || { lat: selectedDrone.lat, lng: selectedDrone.lng },
+                          },
+                        ]
+                      : []
+                  }
+                  hubs={[]}
+                  focusDroneId={selectedOrder.droneId}
+                  routePoints={routePoints}
+                  height={300}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="muted">Chọn đơn để điều phối.</div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -13,7 +13,8 @@ import { REALTIME_SERVICE_URL } from '../../utils/serviceUrls';
 
 const DroneCenterContext = createContext(null);
 
-const OFFLINE_THRESHOLD_MS = 10_000;
+// Consider a drone offline only if no update for 2 minutes (helps avoid rapid flip to offline in demo)
+const OFFLINE_THRESHOLD_MS = 120_000;
 
 const DEFAULT_HUBS = [
   {
@@ -361,6 +362,11 @@ export const DroneCenterProvider = ({ children }) => {
         recordEvent({ type: 'drone_route_complete', timestamp: new Date().toISOString(), ...payload });
       }
     });
+    socket.on('order_auto_route_loaded', (payload = {}) => {
+      if (payload) {
+        recordEvent({ type: 'order_auto_route_loaded', timestamp: new Date().toISOString(), ...payload });
+      }
+    });
     };
 
     tryConnect();
@@ -375,6 +381,7 @@ export const DroneCenterProvider = ({ children }) => {
         activeSocket.off('customer_wait_confirm');
         activeSocket.off('drone_waypoint_update');
         activeSocket.off('drone_route_complete');
+        activeSocket.off('order_auto_route_loaded');
         activeSocket.disconnect();
       }
     };

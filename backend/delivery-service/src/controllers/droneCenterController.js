@@ -185,6 +185,8 @@ export const updateDroneLocation = async (req, res) => {
       battery: drone.battery,
       status: drone.status,
       hubId: drone.hubId,
+      currentOrderId: drone.currentOrderId,
+      location: drone.location,
       updatedAt: drone.updatedAt,
     };
     emitDroneLocation(payload);

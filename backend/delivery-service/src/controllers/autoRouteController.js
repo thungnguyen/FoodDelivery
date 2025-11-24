@@ -1,8 +1,16 @@
 import Hub from '../models/Hub.js';
 import emitEvent from '../utils/eventBus.js';
+import { normalizeBaseUrl } from '../utils/url.js';
 
-const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://localhost:5005';
-const RESTAURANT_SERVICE_URL = process.env.RESTAURANT_SERVICE_URL || 'http://localhost:5002';
+const ORDER_SERVICE_URL = normalizeBaseUrl(process.env.ORDER_SERVICE_URL, 'http://localhost:5005', [
+  '/api/orders',
+  '/api',
+]);
+const RESTAURANT_SERVICE_URL = normalizeBaseUrl(
+  process.env.RESTAURANT_SERVICE_URL,
+  'http://localhost:5002',
+  ['/api/restaurants', '/api']
+);
 const SERVICE_KEY = process.env.SERVICE_INTERNAL_KEY || 'super-admin-internal-key';
 
 const fetchJson = async (url) => {
@@ -71,26 +79,39 @@ export const generateAutoRoute = async (req, res) => {
 
     const hub = hubId ? await Hub.findById(hubId) : await Hub.findOne();
 
-    const restaurantPoint =
+    let restaurantPoint =
       restaurant?.locationCoords && typeof restaurant.locationCoords.lat === 'number'
         ? { lat: restaurant.locationCoords.lat, lng: restaurant.locationCoords.lng, type: 'restaurant' }
         : null;
-    const customerPoint =
+    let customerPoint =
       typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number'
         ? { lat: order.deliveryLat, lng: order.deliveryLng, type: 'customer' }
         : null;
-    const hubPoint =
+    let hubPoint =
       hub && typeof hub.location?.lat === 'number'
         ? { lat: hub.location.lat, lng: hub.location.lng, type: 'hub', id: hub._id.toString() }
         : null;
 
+    // Fallbacks to avoid missing coordinates
+    if (!hubPoint && restaurantPoint) {
+      hubPoint = { ...restaurantPoint, type: 'hub', id: hub?._id?.toString() || 'fallback-hub' };
+    } else if (!hubPoint && customerPoint) {
+      hubPoint = { ...customerPoint, type: 'hub', id: hub?._id?.toString() || 'fallback-hub' };
+    }
+    if (!restaurantPoint && hubPoint) {
+      restaurantPoint = { ...hubPoint, type: 'restaurant' };
+    }
+    if (!customerPoint && restaurantPoint) {
+      customerPoint = { ...restaurantPoint, type: 'customer' };
+    } else if (!customerPoint && hubPoint) {
+      customerPoint = { ...hubPoint, type: 'customer' };
+    }
+
     if (!hubPoint || !restaurantPoint || !customerPoint) {
-      return res
-        .status(400)
-        .json({
-          message: 'Missing hub/restaurant/customer coordinates for auto-route',
-          data: { hub: hubPoint, restaurant: restaurantPoint, customer: customerPoint },
-        });
+      return res.status(400).json({
+        message: 'Missing hub/restaurant/customer coordinates for auto-route',
+        data: { hub: hubPoint, restaurant: restaurantPoint, customer: customerPoint },
+      });
     }
 
     const MAX_DRONE_RADIUS_M = 4000;

@@ -13,8 +13,8 @@ import {
 const router = express.Router();
 
 router.post("/admin/drone/assign", protect, authorizeRoles("admin", "superAdmin"), assignDroneToOrder);
-router.post("/drone/arrived-restaurant", protect, authorizeRoles("admin", "superAdmin"), droneArrivedRestaurant);
-router.post("/order/drone-pickup", protect, authorizeRoles("admin", "superAdmin"), dronePickupOrder);
+router.post("/drone/arrived-restaurant", protect, authorizeRoles("admin", "superAdmin", "restaurant"), droneArrivedRestaurant);
+router.post("/order/drone-pickup", protect, authorizeRoles("admin", "superAdmin", "restaurant"), dronePickupOrder);
 router.post("/drone/arrived-customer", protect, authorizeRoles("admin", "superAdmin"), droneArrivedCustomer);
 router.post("/drone/return", protect, authorizeRoles("admin", "superAdmin"), droneReturnToHub);
 router.post("/admin/drone-force-return", protect, authorizeRoles("admin", "superAdmin"), forceReturnDrone);

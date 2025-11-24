@@ -1,8 +1,14 @@
 import express from 'express';
+import { normalizeBaseUrl } from '../utils/url.js';
 
 const router = express.Router();
 
-const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://localhost:5005';
+// Inside docker the order-service is reachable via service name; fall back to local only for dev
+const ORDER_SERVICE_URL = normalizeBaseUrl(
+  process.env.ORDER_SERVICE_URL,
+  'http://order-service:5005',
+  ['/api/orders', '/api']
+);
 const SERVICE_KEY = process.env.SERVICE_INTERNAL_KEY || 'super-admin-internal-key';
 
 const forward = (path) => async (req, res) => {

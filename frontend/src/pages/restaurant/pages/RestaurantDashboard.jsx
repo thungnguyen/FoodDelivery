@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import axios from 'axios';
 import '../styles/rdashboard.css';
 import { io } from 'socket.io-client';
 import {
@@ -62,6 +63,13 @@ const ORDER_STATUS_LABELS = {
   Pending: 'Chờ xác nhận',
   Canceled: 'Đã hủy',
   'Ready for Delivery': 'Chờ tài xế',
+  waiting_for_drone: 'Chờ drone',
+  drone_assigned: 'Drone đã gán',
+  drone_enroute_to_restaurant: 'Drone tới nhà hàng',
+  drone_arrived_restaurant: 'Drone đợi lấy hàng',
+  drone_picked_food: 'Drone đã lấy hàng',
+  drone_delivering: 'Drone đang giao',
+  drone_arrived_customer: 'Drone chờ khách',
 };
 
 const ORDER_STATUS_ACTIONS = {
@@ -79,6 +87,28 @@ const ORDER_CANCELABLE_STATUSES = new Set([
   'Pending', // backward compatibility
 ]);
 
+const DRONE_STAGE_LABELS = {
+  waiting_for_drone: 'Chờ gán drone',
+  drone_assigned: 'Drone đang rời hub',
+  drone_enroute_to_restaurant: 'Drone tới nhà hàng',
+  drone_arrived_restaurant: 'Drone chờ nhà hàng',
+  drone_picked_food: 'Drone đã lấy hàng',
+  drone_delivering: 'Đang giao cho khách',
+  drone_arrived_customer: 'Chờ khách xác nhận',
+};
+
+const mapDroneStage = (status = '') => {
+  const normalized = status.toLowerCase();
+  if (normalized === 'waiting_for_drone') return DRONE_STAGE_LABELS.waiting_for_drone;
+  if (normalized === 'drone_assigned') return DRONE_STAGE_LABELS.drone_assigned;
+  if (normalized === 'drone_enroute_to_restaurant') return DRONE_STAGE_LABELS.drone_enroute_to_restaurant;
+  if (normalized === 'drone_arrived_restaurant') return DRONE_STAGE_LABELS.drone_arrived_restaurant;
+  if (normalized === 'drone_picked_food') return DRONE_STAGE_LABELS.drone_picked_food;
+  if (normalized === 'drone_delivering') return DRONE_STAGE_LABELS.drone_delivering;
+  if (normalized === 'drone_arrived_customer') return DRONE_STAGE_LABELS.drone_arrived_customer;
+  return '';
+};
+
 const ORDER_STATUS_CLASSES = {
   'Pending Confirmation': 'status-pending',
   Confirmed: 'status-confirmed',
@@ -94,6 +124,13 @@ const ORDER_STATUS_CLASSES = {
   Pending: 'status-pending',
   'Ready for Delivery': 'status-ready',
   Canceled: 'status-canceled',
+  waiting_for_drone: 'status-ready',
+  drone_assigned: 'status-out',
+  drone_enroute_to_restaurant: 'status-out',
+  drone_arrived_restaurant: 'status-ready',
+  drone_picked_food: 'status-out',
+  drone_delivering: 'status-out',
+  drone_arrived_customer: 'status-delivered',
 };
 
 function RestaurantDashboard() {
@@ -136,6 +173,7 @@ function RestaurantDashboard() {
     totalReviews: 0,
     totalOrders: 0,
   });
+  const [droneTracking, setDroneTracking] = useState({});
   const [walletSnapshot, setWalletSnapshot] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
@@ -150,6 +188,8 @@ function RestaurantDashboard() {
   const [cashflowError, setCashflowError] = useState('');
   const ORDER_API_BASE = ORDER_SERVICE_URL;
   const [foodAvailabilityUpdating, setFoodAvailabilityUpdating] = useState({});
+  const [pickupLoadingId, setPickupLoadingId] = useState('');
+  const [arrivedLoadingId, setArrivedLoadingId] = useState('');
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
   const restaurantRoomRef = useRef(null);
@@ -638,6 +678,19 @@ function RestaurantDashboard() {
     [ORDER_API_BASE, handleUnauthorizedError, fetchWalletSummary]
   );
 
+  const upsertDroneTracking = useCallback((orderId, payload = {}) => {
+    if (!orderId) return;
+    setDroneTracking((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] || {}),
+        ...payload,
+        orderId,
+        updatedAt: payload.updatedAt || new Date().toISOString(),
+      },
+    }));
+  }, []);
+
   const handleRealtimeEvent = useCallback(
     (message) => {
       if (!message || typeof message !== 'object') return;
@@ -740,11 +793,72 @@ function RestaurantDashboard() {
           fetchReviews({ silent: true });
           break;
         }
+        case 'drone-location-update':
+        case 'drone-status-update': {
+          const orderId = payload?.orderId || payload?.currentOrderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: payload?.status,
+            lat: payload?.lat,
+            lng: payload?.lng,
+            battery: payload?.battery,
+          });
+          if (payload?.status) {
+            setOrders((prev) =>
+              prev.map((order) => {
+                const oid = order?._id || order?.id;
+                if (!oid || String(oid) !== normalizedId) return order;
+                return {
+                  ...order,
+                  droneId: order.droneId || payload.droneId,
+                  droneStatus: payload.status,
+                };
+              })
+            );
+          }
+          break;
+        }
+        case 'restaurant_wait_pickup': {
+          const orderId = payload?.orderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: 'drone_arrived_restaurant',
+          });
+          setOrders((prev) =>
+            prev.map((order) => {
+              const oid = order?._id || order?.id;
+              if (!oid || String(oid) !== normalizedId) return order;
+              return { ...order, droneStatus: 'drone_arrived_restaurant', droneId: order.droneId || payload?.droneId };
+            })
+          );
+          break;
+        }
+        case 'customer_wait_confirm': {
+          const orderId = payload?.orderId;
+          if (!orderId) break;
+          const normalizedId = String(orderId);
+          upsertDroneTracking(normalizedId, {
+            droneId: payload?.droneId,
+            status: 'drone_arrived_customer',
+          });
+          setOrders((prev) =>
+            prev.map((order) => {
+              const oid = order?._id || order?.id;
+              if (!oid || String(oid) !== normalizedId) return order;
+              return { ...order, droneStatus: 'drone_arrived_customer', droneId: order.droneId || payload?.droneId };
+            })
+          );
+          break;
+        }
         default:
           break;
       }
     },
-    [fetchOrders, fetchReviews]
+    [fetchOrders, fetchReviews, upsertDroneTracking]
   );
 
   useEffect(() => {
@@ -887,6 +1001,44 @@ function RestaurantDashboard() {
       return;
     }
     updateOrderStatus(order._id, 'Cancelled', 'Đơn hàng đã được hủy.');
+  };
+
+  const handleConfirmDronePickup = async (order) => {
+    const orderId = order?._id || order?.id;
+    if (!orderId || !order?.droneId) return;
+    setPickupLoadingId(orderId);
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      await axios.post(
+        `${ORDER_API_BASE.replace(/\/$/, '')}/api/order/drone-pickup`,
+        { orderId, droneId: order.droneId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      fetchOrders({ silent: true });
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Không thể xác nhận đã chất hàng cho drone.');
+    } finally {
+      setPickupLoadingId('');
+    }
+  };
+
+  const handleMarkDroneArrivedRestaurant = async (order) => {
+    const orderId = order?._id || order?.id;
+    if (!orderId || !order?.droneId) return;
+    setArrivedLoadingId(orderId);
+    try {
+      const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+      await axios.post(
+        `${ORDER_API_BASE.replace(/\/$/, '')}/api/drone/arrived-restaurant`,
+        { orderId, droneId: order.droneId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      fetchOrders({ silent: true });
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Không thể đánh dấu drone đã tới nhà hàng.');
+    } finally {
+      setArrivedLoadingId('');
+    }
   };
 
   const formatCurrency = (value) => {
@@ -2710,6 +2862,18 @@ function RestaurantDashboard() {
                   const grandTotal = Number.isFinite(Number(order.totalPrice))
                     ? Number(order.totalPrice)
                     : itemsTotal + shippingFee;
+                  const tracking = droneTracking[order._id] || droneTracking[order.id];
+                  const droneStage = mapDroneStage(order.droneStatus || order.status);
+                  const showArrivedBtn =
+                    order.droneStatus &&
+                    ['waiting_for_drone', 'drone_assigned', 'drone_enroute_to_restaurant'].includes(
+                      (order.droneStatus || '').toLowerCase()
+                    ) &&
+                    order.droneId;
+                  const showPickupBtn = order.droneStatus === 'drone_arrived_restaurant' && order.droneId;
+                  const lat = Number(tracking?.lat);
+                  const lng = Number(tracking?.lng);
+                  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
                   return (
                     <div className="order-card" key={order._id}>
@@ -2733,6 +2897,39 @@ function RestaurantDashboard() {
                         {order.paymentStatus || 'Pending'}
                       </p>
                     </div>
+                    {(droneStage || tracking) && (
+                      <div
+                        style={{
+                          margin: '8px 0 12px',
+                          padding: '12px',
+                          borderRadius: 12,
+                          background: 'rgba(56, 189, 248, 0.08)',
+                          border: '1px solid rgba(56, 189, 248, 0.24)',
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>
+                          Drone {tracking?.droneId || order.droneId || 'chưa gán'}{' '}
+                          {Number.isFinite(Number(tracking?.battery)) ? `• 🔋 ${tracking.battery}%` : ''}
+                        </div>
+                        <div className="order-meta">
+                          {droneStage || 'Đang theo dõi trạng thái giao hàng'}
+                          {tracking?.status ? ` • ${tracking.status}` : ''}
+                        </div>
+                        {hasCoords && (
+                          <div className="order-meta" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                            GPS: {lat.toFixed(4)}, {lng.toFixed(4)}{' '}
+                            <a
+                              href={`https://www.google.com/maps?q=${lat},${lng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: '#0ea5e9', marginLeft: 4 }}
+                            >
+                              Xem bản đồ
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="order-items">
                       <h4>Món đã đặt</h4>
                       <ul>
@@ -2750,6 +2947,32 @@ function RestaurantDashboard() {
                       <p><strong>Phí giao hàng:</strong> {formatCurrency(shippingFee)}</p>
                       <p><strong>Tổng tiền:</strong> {formatCurrency(grandTotal)}</p>
                       <div className="order-actions">
+                        {droneStage && (
+                          <div className="d-flex align-items-center gap-2 flex-wrap">
+                            <span className="badge bg-info text-dark">{droneStage}</span>
+                            {showArrivedBtn && (
+                              <button
+                                className="order-secondary-btn"
+                                onClick={() => handleMarkDroneArrivedRestaurant(order)}
+                                disabled={arrivedLoadingId === order._id}
+                              >
+                                {arrivedLoadingId === order._id ? 'Đang xác nhận...' : 'Drone đã tới nhà hàng'}
+                              </button>
+                            )}
+                            {showPickupBtn && (
+                              <button
+                                className="order-primary-btn"
+                                onClick={() => handleConfirmDronePickup(order)}
+                                disabled={pickupLoadingId === order._id}
+                              >
+                                {pickupLoadingId === order._id ? 'Đang xác nhận...' : 'Đã chất hàng, cho drone bay'}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {order.droneStatus === 'drone_arrived_restaurant' && order.droneId && (
+                          <></>
+                        )}
                         {ORDER_CANCELABLE_STATUSES.has(order.status) && (
                           <button className="order-secondary-btn" onClick={() => handleCancelOrder(order)}>
                             Hủy đơn

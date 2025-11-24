@@ -176,6 +176,10 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.drone-table tr.active {
+  background: rgba(56, 189, 248, 0.08);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -269,6 +273,28 @@
 
 .text-muted {
   color: #94a3b8;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+  letter-spacing: 0.2px;
+}
+
+.card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.card.glass {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.24);
 }
 
 .list {

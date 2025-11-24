@@ -6,6 +6,7 @@ import { handleOrderStatusFinancials } from "../services/orderFinanceService.js"
 import { applyPromotionToOrder } from "../services/orderPromotionService.js";
 import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
 import { geocode } from "../utils/geocode.js";
+import { assignDroneToOrderInternal } from "./droneFlowController.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
 
@@ -724,6 +725,25 @@ export const updateOrderStatus = async (req, res) => {
     }
     if (realtimeEvents.length) {
         realtimeEvents.forEach((evt) => emitEvent(evt));
+    }
+
+    if (orderResponse?.status === "waiting_for_drone" && !orderResponse?.droneId) {
+        const customerLocation =
+            typeof orderResponse.deliveryLat === "number" && typeof orderResponse.deliveryLng === "number"
+                ? { lat: orderResponse.deliveryLat, lng: orderResponse.deliveryLng }
+                : null;
+        const hubId = orderResponse.droneHubId;
+        assignDroneToOrderInternal({
+            orderId: orderResponse._id,
+            hubId,
+            customerLocation
+        })
+            .then((result) => {
+                if (!result?.ok) {
+                    console.warn("[drone-auto-assign] failed", result?.message || result?.statusCode);
+                }
+            })
+            .catch((err) => console.error("[drone-auto-assign] unexpected error", err));
     }
 
     if (cancellationNotice) {

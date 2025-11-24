@@ -2,7 +2,16 @@ import Order from "../models/orderModel.js";
 import emitEvent from "../utils/eventBus.js";
 import buildOrderRooms from "../utils/realtimeRooms.js";
 
-const DELIVERY_SERVICE_URL = process.env.DELIVERY_SERVICE_URL || "http://localhost:5003";
+const stripTrailingSlash = (value = "") => value.replace(/\/+$/, "");
+const normalizeBaseUrl = (rawValue, fallback) => {
+    let base = stripTrailingSlash(rawValue || fallback || "");
+    if (base.endsWith("/api")) {
+        base = base.slice(0, -4);
+    }
+    return stripTrailingSlash(base) || stripTrailingSlash(fallback || "");
+};
+
+const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://localhost:5003");
 
 const MAX_DRONE_GAP_FACTOR = 1.1;
 
@@ -131,29 +140,14 @@ const syncOrderDroneStatus = async ({ order, status, droneId, session }) => {
     await emitEvent({ event: "drone-status-update", payload: payload.payload, broadcast: true });
 };
 
-const fallbackToShipper = async (orderId) => {
-    const order = await Order.findById(orderId);
-    if (!order) return null;
-    order.status = "Delivering";
-    order.droneStatus = null;
-    order.droneId = null;
-    await order.save();
-    await emitEvent({
-        event: "order-status-update",
-        payload: { orderId: order._id, status: order.status },
-        rooms: buildOrderRooms({
-            orderId: order._id,
-            customerId: order.customerId,
-            restaurantId: order.restaurantId
-        })
-    });
-    return order;
-};
-
-export const assignDroneToOrder = async (req, res) => {
-    const { orderId, hubId, restaurantLocation, customerLocation } = req.body || {};
+export const assignDroneToOrderInternal = async ({
+    orderId,
+    hubId,
+    restaurantLocation,
+    customerLocation
+} = {}) => {
     if (!orderId) {
-        return res.status(400).json({ message: "orderId is required" });
+        return { ok: false, statusCode: 400, message: "orderId is required" };
     }
 
     const { data: droneResponse } = await fetchJson(`${DELIVERY_SERVICE_URL}/api/drones`);
@@ -174,19 +168,22 @@ export const assignDroneToOrder = async (req, res) => {
 
     const rangeCheck = validateRange({ hub, restaurantLocation, customerLocation });
     if (!rangeCheck.ok) {
-        const fallback = await fallbackToShipper(orderId);
-        return res.status(400).json({
-            message: "Drone route out of range; fallback to shipper",
+        return {
+            ok: false,
+            statusCode: 400,
+            message: "Drone route out of range; order is still waiting_for_drone",
             reason: rangeCheck.reason,
-            distance: rangeCheck.distance,
-            fallback: Boolean(fallback)
-        });
+            distance: rangeCheck.distance
+        };
     }
 
     const picked = pickNearestIdleDrone(droneList, hubId, targetLocation);
     if (!picked) {
-        const fallback = await fallbackToShipper(orderId);
-        return res.status(404).json({ message: "No idle drone available", fallback: Boolean(fallback) });
+        return {
+            ok: false,
+            statusCode: 404,
+            message: "No idle drone available; order remains waiting_for_drone"
+        };
     }
 
     const session = await Order.startSession();
@@ -204,27 +201,45 @@ export const assignDroneToOrder = async (req, res) => {
             order.droneId = picked.droneId || picked.id || picked._id;
             order.droneHubId = hubId || picked.hubId || order.droneHubId;
             await syncOrderDroneStatus({ order, status: "drone_assigned", droneId: order.droneId, session });
+            await syncOrderDroneStatus({ order, status: "drone_enroute_to_restaurant", droneId: order.droneId, session });
         });
     } catch (error) {
         await session.endSession();
         const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ message: error.message || "Failed to assign drone" });
+        return { ok: false, statusCode, message: error.message || "Failed to assign drone" };
     }
     await session.endSession();
 
     await updateRemoteDrone(picked.droneId || picked.id || picked._id, {
-        status: "assigned",
+        status: "drone_enroute_to_restaurant",
         currentOrderId: orderId,
         hubId: hubId || picked.hubId
     });
 
-    return res.status(200).json({
-        message: "Drone assigned",
+    return {
+        ok: true,
+        statusCode: 200,
         data: {
             orderId: order._id,
             droneId: order.droneId,
             status: "drone_assigned"
         }
+    };
+};
+
+export const assignDroneToOrder = async (req, res) => {
+    const result = await assignDroneToOrderInternal(req.body || {});
+    if (!result.ok) {
+        const statusCode = result.statusCode || 500;
+        return res.status(statusCode).json({
+            message: result.message || "Failed to assign drone",
+            reason: result.reason,
+            distance: result.distance
+        });
+    }
+    return res.status(result.statusCode || 200).json({
+        message: "Drone assigned",
+        data: result.data
     });
 };
 
