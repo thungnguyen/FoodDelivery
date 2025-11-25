@@ -14,17 +14,14 @@ const runtimeHostBase = (() => {
   if (typeof window === 'undefined' || !window.location) {
     return '';
   }
-  const { protocol, hostname } = window.location;
-  if (!protocol || !hostname) {
-    return '';
-  }
-  return `${protocol}//${hostname}`;
+  return window.location.origin || '';
 })();
 
 const buildDynamicUrl = (port) => (runtimeHostBase ? `${runtimeHostBase}:${port}` : '');
 
 export const AUTH_SERVICE_URL = fallback(
   process.env.REACT_APP_AUTH_URL || process.env.REACT_APP_BACKEND_URL,
+  runtimeHostBase,
   buildDynamicUrl(process.env.REACT_APP_AUTH_PORT || 5000),
   'http://localhost:5000'
 );
