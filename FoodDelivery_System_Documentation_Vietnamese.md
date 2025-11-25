@@ -438,3 +438,65 @@ DFD Level 1 đi sâu vào bước đặt món: Frontend gửi dữ liệu tới 
 - Công nghệ sử dụng: Node.js 20, Express.js, RabbitMQ, MongoDB/PostgreSQL, Socket.IO, Stripe, Docker Compose.  
 - Bài giảng Công nghệ Phần mềm – Khoa CNTT, Đại học Sài Gòn (HK2/2024–2025).  
 - Tài liệu này được biên soạn theo chuẩn IEEE 830 – Software Requirements Specification và IEEE 1471 – Architecture Description Framework, phản ánh đầy đủ quá trình kỹ nghệ phần mềm từ yêu cầu đến kiểm thử cho dự án SkyDish.
+
+## Phụ lục – Lược đồ trình tự toàn hệ thống
+```sequenceDiagram
+    participant C as Khách hàng (Web)
+    participant FE as Frontend React
+    participant Auth as Auth Service
+    participant Rest as Restaurant Service
+    participant Ord as Order Service
+    participant Pay as Payment Service
+    participant Del as Delivery Service
+    participant RT as Realtime Gateway (Socket.IO)
+    participant Str as Stripe API
+    participant RPortal as Portal Nhà hàng
+    participant DApp as Ứng dụng tài xế
+
+    C->>FE: Mở ứng dụng, đăng nhập/đăng ký
+    FE->>Auth: POST /auth/login
+    Auth-->>FE: JWT cho phiên làm việc
+
+    C->>FE: Duyệt menu, chọn món
+    FE->>Rest: GET /restaurants + /food-items
+    Rest-->>FE: Trả menu + trạng thái mở cửa
+
+    FE->>Ord: POST /api/orders (JWT, giỏ hàng, địa chỉ)
+    Ord->>Rest: Kiểm tra nhà hàng/khả dụng món
+    Rest-->>Ord: OK hoặc từ chối
+
+    Ord->>Pay: POST /api/payment/process (orderId, total)
+    Pay->>Str: Tạo PaymentIntent
+    Str-->>Pay: Trả clientSecret
+    Pay-->>FE: Gửi clientSecret cho Stripe SDK
+    FE->>Str: Confirm thanh toán (client side)
+
+    Str-->>Pay: Webhook payment_intent.succeeded
+    Pay->>Ord: PATCH đơn với trạng thái paid
+
+    Ord->>Del: POST /delivery/create (assign driver)
+    Ord->>RT: POST /internal/events order.created
+    RT-->>C: Đơn mới + trạng thái ban đầu
+    RT-->>RPortal: Đơn mới cho bếp/nhà hàng
+
+    Del-->>DApp: Gửi nhiệm vụ giao hàng
+    RPortal->>Ord: Cập nhật Preparing/Ready
+    DApp->>Del: Update trạng thái Pickup/Delivering
+    Del->>Ord: PATCH trạng thái đơn
+
+    Ord->>RT: Gửi events order.updated
+    RT-->>C: Cập nhật realtime cho khách
+
+    C->>FE: Xác nhận đã nhận món
+    FE->>Ord: PATCH /orders/:id/confirm
+    Ord->>Pay: Capture/hoàn tất thanh toán
+    Pay->>Str: Capture PaymentIntent
+    Str-->>Pay: Kết quả capture
+    Pay-->>Ord: payment = captured
+
+    Ord->>RT: events order.completed
+    RT-->>C: Đơn hoàn tất + yêu cầu đánh giá
+    RT-->>RPortal: Đơn hoàn tất
+    RT-->>DApp: Hoàn thành nhiệm vụ giao
+
+```
