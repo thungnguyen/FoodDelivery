@@ -216,6 +216,44 @@ Sơ đồ thể hiện rõ khóa ngoại `restaurants.userId`, `foods.restaurant
 | orders – payments | 1:1 | Reference | `payments.orderId` (và `orders.paymentId`) | Mỗi đơn tương ứng một giao dịch Stripe để đối soát |
 | orders – rating | 1:1 | Embed | `orders.rating.score/comment` | Đánh giá nhỏ gọn, chỉ tồn tại khi đơn hoàn tất, không cần collection riêng |
 
+### 4.4 Lược đồ cơ sở dữ liệu quan hệ (Relational)
+```mermaid
+flowchart LR
+    classDef base fill:#eef3ff,stroke:#2859c0,rx:6,ry:6,color:#0b1b40
+    classDef assoc fill:#fff2cc,stroke:#c27c00,rx:2,ry:2,color:#3d2b00,stroke-width:2
+
+    USERS["USERS<br/>- id (uuid, PK)<br/>- name<br/>- email (unique)<br/>- password_hash<br/>- role<br/>- phone<br/>- status<br/>- created_at<br/>- updated_at"]:::base
+
+    RESTAURANTS["RESTAURANTS<br/>- id (uuid, PK)<br/>- owner_id (FK users)<br/>- name<br/>- address<br/>- phone<br/>- description<br/>- is_active<br/>- rating_avg<br/>- created_at"]:::base
+
+    FOODS["FOODS<br/>- id (uuid, PK)<br/>- restaurant_id (FK)<br/>- name<br/>- category<br/>- price<br/>- description<br/>- image_url<br/>- available<br/>- created_at"]:::base
+
+    ADDRESSES["ADDRESSES<br/>- id (uuid, PK)<br/>- user_id (FK)<br/>- label<br/>- line1<br/>- city<br/>- latitude<br/>- longitude<br/>- created_at"]:::base
+
+    ORDERS["ORDERS<br/>- id (uuid, PK)<br/>- user_id (FK)<br/>- restaurant_id (FK)<br/>- payment_id (FK)<br/>- delivery_task_id (FK)<br/>- address_id (FK)<br/>- total<br/>- status<br/>- note<br/>- created_at<br/>- delivered_at"]:::base
+
+    PAYMENTS["PAYMENTS<br/>- id (uuid, PK)<br/>- order_id (FK)<br/>- provider_intent_id<br/>- amount<br/>- currency<br/>- status<br/>- method<br/>- created_at"]:::base
+
+    ORDER_ITEMS{{"ORDER_ITEMS<br/>- id (uuid, PK)<br/>- order_id (FK)<br/>- food_id (FK)<br/>- quantity<br/>- unit_price<br/>- line_total"}}:::assoc
+
+    DRIVERS["DRIVERS<br/>- id (uuid, PK)<br/>- name<br/>- phone<br/>- status<br/>- vehicle_type<br/>- rating_avg<br/>- created_at"]:::base
+
+    DELIVERY_TASKS{{"DELIVERY_TASKS<br/>- id (uuid, PK)<br/>- order_id (FK)<br/>- driver_id (FK)<br/>- status<br/>- pickup_eta<br/>- dropoff_eta<br/>- path<br/>- assigned_at<br/>- completed_at"}}:::assoc
+
+    USERS -->|owns| RESTAURANTS
+    USERS -->|places| ORDERS
+    USERS -->|stores| ADDRESSES
+    ADDRESSES -->|used_by| ORDERS
+    RESTAURANTS -->|offers| FOODS
+    RESTAURANTS -->|receives| ORDERS
+    ORDERS -->|billed_by| PAYMENTS
+    ORDERS -->|contains| ORDER_ITEMS
+    FOODS -->|line_item| ORDER_ITEMS
+    ORDERS -->|delivered_by| DELIVERY_TASKS
+    DRIVERS -->|assigned| DELIVERY_TASKS
+```
+Sơ đồ dùng hình chữ nhật cho thực thể cơ sở (base entity) và hình thoi cho thực thể kết hợp/associative (`ORDER_ITEMS`, `DELIVERY_TASKS`). Thuộc tính chính và khóa FK được liệt kê để bao quát đầy đủ bảng và vai trò của từng thực thể trong hệ thống.
+
 ## 5. Các sơ đồ hệ thống (UML + DFD)
 
 ### 5.1 Sơ đồ Use Case
@@ -500,3 +538,183 @@ DFD Level 1 đi sâu vào bước đặt món: Frontend gửi dữ liệu tới 
     RT-->>DApp: Hoàn thành nhiệm vụ giao
 
 ```
+
+## Phụ lục – Lược đồ ERD (áp dụng Drone cho giao hàng)
+```mermaid
+erDiagram
+    USER {
+        uuid id PK
+        string email "unique"
+        string password_hash
+        string role "customer|owner|driver|admin"
+        string full_name
+        string phone
+        string status "active|suspended"
+        datetime created_at
+        datetime updated_at
+    }
+    CUSTOMER {
+        uuid id PK
+        uuid user_id FK
+        string default_address
+        float default_lat
+        float default_lng
+        int loyalty_points
+    }
+    RESTAURANT_OWNER {
+        uuid id PK
+        uuid user_id FK
+        string business_license
+        string kyc_status "pending|approved|rejected"
+        datetime onboarded_at
+    }
+    DRIVER {
+        uuid id PK
+        uuid user_id FK
+        string vehicle_type "bike|car|van|drone_operator"
+        string license_number
+        string status "available|busy|offline"
+        float rating
+    }
+    RESTAURANT {
+        uuid id PK
+        uuid owner_id FK
+        string name
+        string address
+        float lat
+        float lng
+        string opening_hours "JSON"
+        string status "open|closed|paused"
+        decimal service_fee
+        int prep_time_avg_min
+    }
+    FOOD_ITEM {
+        uuid id PK
+        uuid restaurant_id FK
+        string name
+        string description
+        decimal price
+        boolean is_available
+        int prep_time_min
+        string category
+    }
+    ORDER {
+        uuid id PK
+        uuid customer_id FK
+        uuid restaurant_id FK
+        decimal subtotal
+        decimal delivery_fee
+        decimal total_amount
+        string status "pending|preparing|delivering|completed|cancelled"
+        string shipping_address
+        float ship_lat
+        float ship_lng
+        string note
+        datetime created_at
+    }
+    ORDER_ITEM {
+        uuid id PK
+        uuid order_id FK
+        uuid food_item_id FK
+        int quantity
+        decimal unit_price
+        string options_json
+    }
+    PAYMENT {
+        uuid id PK
+        uuid order_id FK
+        string provider "Stripe"
+        string intent_id
+        decimal amount
+        string currency
+        string status "requires_payment_method|succeeded|failed|refunded"
+        datetime captured_at
+    }
+    DELIVERY {
+        uuid id PK
+        uuid order_id FK
+        string delivery_type "bike|drone"
+        string status "created|dispatch|enroute|delivered|failed"
+        uuid driver_id "nullable"
+        uuid drone_mission_id "nullable"
+        datetime eta
+        datetime pickup_time
+        datetime dropoff_time
+        string tracking_code
+    }
+    DRONE {
+        uuid id PK
+        string code "unique"
+        string model
+        decimal max_payload_kg
+        int battery_percent
+        string status "available|assigned|charging|maintenance"
+        string firmware_version
+    }
+    DRONE_MISSION {
+        uuid id PK
+        uuid delivery_id FK
+        uuid drone_id FK
+        string route_plan_geojson
+        float pickup_lat
+        float pickup_lng
+        float dropoff_lat
+        float dropoff_lng
+        int cruise_alt_m
+        string status "planned|armed|airborne|completed|aborted"
+        datetime started_at
+        datetime ended_at
+    }
+    FLIGHT_EVENT {
+        uuid id PK
+        uuid mission_id FK
+        datetime recorded_at
+        float lat
+        float lng
+        int altitude_m
+        float speed_mps
+        int battery_percent
+        string event_type "telemetry|warning|geofence|return_home"
+        string note
+    }
+    DRONE_MAINTENANCE {
+        uuid id PK
+        uuid drone_id FK
+        string type "battery_check|firmware_update|motor_inspection"
+        datetime scheduled_at
+        datetime completed_at
+        string technician
+        string notes
+    }
+    DELIVERY_EVENT {
+        uuid id PK
+        uuid delivery_id FK
+        string status
+        string actor "system|driver|drone|customer"
+        string message
+        datetime created_at
+    }
+
+    USER ||--o{ CUSTOMER : "tài khoản khách"
+    USER ||--o{ RESTAURANT_OWNER : "tài khoản nhà hàng"
+    USER ||--o{ DRIVER : "tài khoản tài xế"
+    RESTAURANT_OWNER ||--|| RESTAURANT : "sở hữu"
+    RESTAURANT ||--o{ FOOD_ITEM : "cung cấp"
+    CUSTOMER ||--o{ ORDER : "đặt"
+    RESTAURANT ||--o{ ORDER : "xử lý"
+    ORDER ||--|{ ORDER_ITEM : "bao gồm"
+    FOOD_ITEM ||--o{ ORDER_ITEM : "xuất hiện"
+    ORDER ||--|| PAYMENT : "1-1"
+    ORDER ||--|| DELIVERY : "tạo giao"
+    DELIVERY ||--o| DRIVER : "giao xe máy"
+    DELIVERY ||--o| DRONE_MISSION : "giao drone"
+    DRONE ||--o{ DRONE_MISSION : "thực hiện"
+    DRONE_MISSION ||--o{ FLIGHT_EVENT : "telemetry/log"
+    DRONE ||--o{ DRONE_MAINTENANCE : "bảo trì"
+    DELIVERY ||--o{ DELIVERY_EVENT : "theo dõi trạng thái"
+```
+Diễn giải nhanh:
+- `DELIVERY` liên kết 1-1 với `ORDER`; mỗi giao hàng chọn **một trong hai**: `DRIVER` (xe máy) hoặc `DRONE_MISSION` (bay).
+- `DRONE_MISSION` chứa plan bay (tọa độ, độ cao, thời gian), `FLIGHT_EVENT` lưu log vị trí/battery theo thời gian thực.
+- `DRONE_MAINTENANCE` quản lịch kiểm tra, pin, hiệu chuẩn; giúp khóa drone khỏi nhận nhiệm vụ khi đang bảo trì.
+- `DELIVERY_EVENT` ghi nhận trạng thái (Created → Dispatch → Enroute → Delivered) phục vụ realtime cho khách, nhà hàng, admin.

@@ -1,15 +1,7 @@
 import Order from "../models/orderModel.js";
 import emitEvent from "../utils/eventBus.js";
 import buildOrderRooms from "../utils/realtimeRooms.js";
-
-const stripTrailingSlash = (value = "") => value.replace(/\/+$/, "");
-const normalizeBaseUrl = (rawValue, fallback) => {
-    let base = stripTrailingSlash(rawValue || fallback || "");
-    if (base.endsWith("/api")) {
-        base = base.slice(0, -4);
-    }
-    return stripTrailingSlash(base) || stripTrailingSlash(fallback || "");
-};
+import { normalizeBaseUrl } from "../utils/url.js";
 
 const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://localhost:5003");
 
@@ -64,20 +56,22 @@ const updateRemoteDrone = async (droneId, payload = {}) => {
 
 const pickNearestIdleDrone = (drones, hubId, targetLocation) => {
     if (!Array.isArray(drones) || !drones.length) return null;
-    const idle = drones.filter(
-        (drone) =>
-            drone &&
-            typeof drone === "object" &&
-            (drone.status || "").toLowerCase() === "idle" &&
-            (!hubId || drone.hubId === hubId)
-    );
-    if (!idle.length) {
+    // Cho phép các trạng thái khác idle để demo, miễn không offline/retired.
+    const allowed = new Set(["", "idle", "returning", "assigned", "picking", "drone_arriving_restaurant"]);
+    const candidates = drones.filter((drone) => {
+        if (!drone || typeof drone !== "object") return false;
+        const status = (drone.status || "").toLowerCase();
+        if (!allowed.has(status)) return false;
+        if (hubId && drone.hubId && drone.hubId !== hubId) return false;
+        return true;
+    });
+    if (!candidates.length) {
         return null;
     }
     if (!targetLocation || typeof targetLocation.lat !== "number" || typeof targetLocation.lng !== "number") {
-        return idle[0];
+        return candidates[0];
     }
-    const sorted = [...idle].sort((a, b) => {
+    const sorted = [...candidates].sort((a, b) => {
         const da = haversineKm(a.location || {}, targetLocation);
         const db = haversineKm(b.location || {}, targetLocation);
         return da - db;
@@ -85,32 +79,29 @@ const pickNearestIdleDrone = (drones, hubId, targetLocation) => {
     return sorted[0];
 };
 
-const validateRange = ({ hub, restaurantLocation, customerLocation }) => {
-    if (!hub || !hub.location || typeof hub.location.lat !== "number" || typeof hub.location.lng !== "number") {
-        return { ok: true };
+const fetchHubs = async () => {
+    const url = `${DELIVERY_SERVICE_URL}/api/hubs`;
+    try {
+        return await fetchJson(url);
+    } catch (err) {
+        return { ok: false, data: [] };
     }
-    const radius = Number(hub.radiusKm || 0);
-    if (!radius) return { ok: true };
+};
 
-    const hubLoc = hub.location;
-    if (restaurantLocation) {
-        const distHubRestaurant = haversineKm(hubLoc, restaurantLocation);
-        if (distHubRestaurant > radius * MAX_DRONE_GAP_FACTOR) {
-            return { ok: false, reason: "restaurant_out_of_range", distance: distHubRestaurant };
-        }
-    }
-    if (customerLocation) {
-        const distHubCustomer = haversineKm(hubLoc, customerLocation);
-        if (distHubCustomer > radius * MAX_DRONE_GAP_FACTOR) {
-            return { ok: false, reason: "customer_out_of_range", distance: distHubCustomer };
-        }
-    }
-    if (restaurantLocation && customerLocation) {
-        const distRoute = haversineKm(restaurantLocation, customerLocation);
-        if (distRoute > radius * 2) {
-            return { ok: false, reason: "route_out_of_range", distance: distRoute };
-        }
-    }
+const pickNearestHubId = async (targetLocation) => {
+    const { data } = await fetchHubs();
+    const hubs = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    if (!hubs.length) return null;
+    if (!targetLocation) return hubs[0]._id || hubs[0].id || hubs[0]._id || null;
+    const ranked = [...hubs]
+        .filter((hub) => typeof hub.location?.lat === "number" && typeof hub.location?.lng === "number")
+        .sort((a, b) => haversineKm(a.location, targetLocation) - haversineKm(b.location, targetLocation));
+    const best = ranked[0] || hubs[0];
+    return best?._id?.toString?.() || best.id || best._id || null;
+};
+
+const validateRange = ({ hub, restaurantLocation, customerLocation }) => {
+    // Demo: bỏ chặn bán kính để luôn cho phép tính tuyến.
     return { ok: true };
 };
 
@@ -164,6 +155,16 @@ export const assignDroneToOrderInternal = async ({
         if (!targetLocation && hub && typeof hub.location?.lat === "number" && typeof hub.location?.lng === "number") {
             targetLocation = hub.location;
         }
+    } else {
+        const chosenHubId = await pickNearestHubId(targetLocation || customerLocation || restaurantLocation);
+        if (chosenHubId) {
+            hubId = chosenHubId;
+            const { data: hubResponse } = await fetchJson(`${DELIVERY_SERVICE_URL}/api/hubs/${chosenHubId}`);
+            hub = hubResponse?.data || hubResponse;
+            if (!targetLocation && hub?.location?.lat && hub?.location?.lng) {
+                targetLocation = hub.location;
+            }
+        }
     }
 
     const rangeCheck = validateRange({ hub, restaurantLocation, customerLocation });
@@ -201,7 +202,7 @@ export const assignDroneToOrderInternal = async ({
             order.droneId = picked.droneId || picked.id || picked._id;
             order.droneHubId = hubId || picked.hubId || order.droneHubId;
             await syncOrderDroneStatus({ order, status: "drone_assigned", droneId: order.droneId, session });
-            await syncOrderDroneStatus({ order, status: "drone_enroute_to_restaurant", droneId: order.droneId, session });
+            await syncOrderDroneStatus({ order, status: "drone_arriving_restaurant", droneId: order.droneId, session });
         });
     } catch (error) {
         await session.endSession();
@@ -211,7 +212,7 @@ export const assignDroneToOrderInternal = async ({
     await session.endSession();
 
     await updateRemoteDrone(picked.droneId || picked.id || picked._id, {
-        status: "drone_enroute_to_restaurant",
+        status: "drone_arriving_restaurant",
         currentOrderId: orderId,
         hubId: hubId || picked.hubId
     });
@@ -260,7 +261,7 @@ export const droneArrivedRestaurant = async (req, res) => {
             }
             await syncOrderDroneStatus({
                 order,
-                status: "drone_arrived_restaurant",
+                status: "drone_arriving_restaurant",
                 droneId,
                 session
             });
@@ -336,7 +337,7 @@ export const droneArrivedCustomer = async (req, res) => {
             }
             await syncOrderDroneStatus({
                 order,
-                status: "drone_arrived_customer",
+                status: "drone_arriving_customer",
                 droneId,
                 session
             });
@@ -366,7 +367,7 @@ export const droneReturnToHub = async (req, res) => {
     if (orderId) {
         const order = await Order.findById(orderId);
         if (order) {
-            order.droneStatus = "drone_arrived_customer";
+            order.droneStatus = "drone_arriving_customer";
             await order.save();
             await emitEvent({
                 event: "order.drone.status",

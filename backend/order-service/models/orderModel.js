@@ -40,14 +40,19 @@ const orderSchema = new mongoose.Schema(
                 "Pending",
                 "Confirmed",
                 "Preparing",
+                "Ready",
                 "Delivering",
                 "waiting_for_drone",
                 "drone_assigned",
+                // Legacy/compat
                 "drone_enroute_to_restaurant",
                 "drone_arrived_restaurant",
-                "drone_picked_food",
                 "drone_delivering",
                 "drone_arrived_customer",
+                "drone_arriving_restaurant",
+                "drone_picked_food",
+                "drone_arriving_customer",
+                "returning",
                 "Completed",
                 "Cancelled",
                 "Failed",
@@ -60,11 +65,15 @@ const orderSchema = new mongoose.Schema(
             enum: [
                 "waiting_for_drone",
                 "drone_assigned",
+                // Legacy/compat
                 "drone_enroute_to_restaurant",
                 "drone_arrived_restaurant",
-                "drone_picked_food",
                 "drone_delivering",
-                "drone_arrived_customer"
+                "drone_arrived_customer",
+                "drone_arriving_restaurant",
+                "drone_picked_food",
+                "drone_arriving_customer",
+                "returning"
             ],
             default: null
         },

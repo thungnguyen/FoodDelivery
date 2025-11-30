@@ -36,6 +36,84 @@ const shuffleArray = (input) => {
   return arr;
 };
 
+const computeFullAddress = (address = {}) => {
+  const parts = [address.street, address.ward, address.district, address.city]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean);
+  return parts.join(', ');
+};
+
+const parseCoordinates = (raw) => {
+  if (!raw) return null;
+  if (Array.isArray(raw) && raw.length === 2) {
+    const lng = Number(raw[0]);
+    const lat = Number(raw[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+    return null;
+  }
+  if (typeof raw === 'object') {
+    const lat = Number(raw.lat ?? raw.latitude);
+    const lng = Number(raw.lng ?? raw.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+  }
+  return null;
+};
+
+const buildAddressFromPayload = (payload = {}) => {
+  const addressInput = payload.address && typeof payload.address === 'object' ? payload.address : {};
+  const normalise = (value) => (typeof value === 'string' ? value.trim() : '');
+
+  const street = normalise(addressInput.street ?? payload.street);
+  const ward = normalise(addressInput.ward ?? payload.ward);
+  const district = normalise(addressInput.district ?? payload.district);
+  const city = normalise(addressInput.city ?? payload.city);
+  const fullAddress =
+    normalise(addressInput.fullAddress ?? payload.fullAddress) ||
+    computeFullAddress({ street, ward, district, city }) ||
+    normalise(payload.location);
+
+  const coordinates =
+    parseCoordinates(addressInput.location?.coordinates) ||
+    parseCoordinates(addressInput.location) ||
+    parseCoordinates(addressInput.coordinates) ||
+    parseCoordinates({ lat: payload.locationLat, lng: payload.locationLng });
+
+  const address = {};
+  if (street) address.street = street;
+  if (ward) address.ward = ward;
+  if (district) address.district = district;
+  if (city) address.city = city;
+  if (fullAddress) address.fullAddress = fullAddress;
+  if (coordinates) {
+    address.location = { type: 'Point', coordinates };
+  }
+  return address;
+};
+
+const ensureAddressCoordinates = async (address) => {
+  if (!address || address.location?.coordinates) {
+    return address;
+  }
+  if (!address.fullAddress) {
+    return address;
+  }
+  const coords = await geocode(address.fullAddress);
+  if (coords) {
+    return {
+      ...address,
+      location: {
+        type: 'Point',
+        coordinates: [coords.lng, coords.lat],
+      },
+    };
+  }
+  return address;
+};
+
 const generateTemporaryPassword = (length = 10) => {
   const baseChars = [
     randomFrom(PASSWORD_LETTERS),
@@ -56,22 +134,22 @@ const generateOtpCode = () => {
 
 // Register a new restaurant (awaiting admin approval)
 router.post('/register', upload.single('profilePicture'), async (req, res) => {
-  const { name, taxCode, ownerName, location, contactNumber, email, locationLat, locationLng } = req.body;
+  const { name, taxCode, ownerName, contactNumber, email } = req.body;
   const profilePicture = req.file ? `/uploads/${req.file.filename}` : '';
+  const address = buildAddressFromPayload(req.body);
 
   const trimmed = (value) => (typeof value === 'string' ? value.trim() : '');
   const requiredFields = {
     name: trimmed(name),
     taxCode: trimmed(taxCode),
     ownerName: trimmed(ownerName),
-    location: trimmed(location),
     contactNumber: trimmed(contactNumber),
     email: trimmed(email).toLowerCase(),
   };
 
   try {
-    if (Object.values(requiredFields).some((item) => !item)) {
-      return res.status(400).json({ message: 'Vui lòng điền đầy đủ thông tin bắt buộc.' });
+    if (Object.values(requiredFields).some((item) => !item) || !address.fullAddress) {
+      return res.status(400).json({ message: 'Vui lòng điền đầy đủ thông tin bắt buộc (bao gồm địa chỉ).' });
     }
 
     const existingRestaurant = await Restaurant.findOne({
@@ -98,22 +176,20 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       name: requiredFields.name,
       taxCode: requiredFields.taxCode,
       ownerName: requiredFields.ownerName,
-      location: requiredFields.location,
-      locationCoords:
-        Number.isFinite(Number(locationLat)) && Number.isFinite(Number(locationLng))
-          ? { lat: Number(locationLat), lng: Number(locationLng) }
-          : undefined,
+      address,
+      legacyLocation: address.fullAddress && !address.street && !address.city ? address.fullAddress : undefined,
       contactNumber: requiredFields.contactNumber,
       profilePicture,
       admin: { email: requiredFields.email },
       onboardingPasswordMustChange: true,
     });
 
-    if (!newRestaurant.locationCoords?.lat) {
-      const coords = await geocode(newRestaurant.location);
-      if (coords) {
-        newRestaurant.locationCoords = { lat: coords.lat, lng: coords.lng };
-      }
+    newRestaurant.address = await ensureAddressCoordinates(newRestaurant.address);
+    if (newRestaurant.address?.location?.coordinates) {
+      newRestaurant.locationCoords = {
+        lat: newRestaurant.address.location.coordinates[1],
+        lng: newRestaurant.address.location.coordinates[0],
+      };
     }
 
     await newRestaurant.save();
@@ -126,6 +202,7 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
     const adminRecords = await SuperAdmin.find().select('email').lean();
     const adminEmails = adminRecords.map((record) => record.email);
     const recipients = Array.from(new Set([...manualRecipients, ...adminEmails]));
+    const locationLabel = newRestaurant.address?.fullAddress || newRestaurant.legacyLocation || '';
 
     if (recipients.length) {
       const subject = `Yêu cầu duyệt nhà hàng mới: ${newRestaurant.name}`;
@@ -135,7 +212,7 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
         <p><strong>Tên nhà hàng:</strong> ${newRestaurant.name}</p>
         <p><strong>Mã số thuế:</strong> ${newRestaurant.taxCode}</p>
         <p><strong>Chủ sở hữu:</strong> ${newRestaurant.ownerName}</p>
-        <p><strong>Địa điểm:</strong> ${newRestaurant.location}</p>
+        <p><strong>Địa điểm:</strong> ${locationLabel}</p>
         <p><strong>Email quản trị:</strong> ${newRestaurant.admin.email}</p>
         <p><strong>Số liên hệ:</strong> ${newRestaurant.contactNumber}</p>
         <p>Vui lòng đăng nhập trang Super Admin để duyệt: <a href="${reviewUrl}">${reviewUrl}</a></p>
@@ -145,7 +222,7 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
         `- Tên: ${newRestaurant.name}`,
         `- Mã số thuế: ${newRestaurant.taxCode}`,
         `- Chủ sở hữu: ${newRestaurant.ownerName}`,
-        `- Địa điểm: ${newRestaurant.location}`,
+        `- Địa điểm: ${locationLabel}`,
         `- Email quản trị: ${newRestaurant.admin.email}`,
         `- Số liên hệ: ${newRestaurant.contactNumber}`,
         `Đăng nhập trang Super Admin để duyệt: ${reviewUrl}`,
@@ -484,8 +561,8 @@ router.get('/profile', authMiddleware, async (req, res) => {
 router.put('/update', authMiddleware, upload.single('profilePicture'), async (req, res) => {
   const {
     name,
+    taxCode,
     ownerName,
-    location,
     contactNumber,
     profilePictureUrl,
     bankAccountNumber,
@@ -493,61 +570,84 @@ router.put('/update', authMiddleware, upload.single('profilePicture'), async (re
     bankName,
   } = req.body || {};
 
-  const updates = {};
+  const addressUpdates = buildAddressFromPayload(req.body);
   const trimmedName = typeof name === 'string' ? name.trim() : '';
+  const trimmedTax = typeof taxCode === 'string' ? taxCode.trim() : '';
   const trimmedOwner = typeof ownerName === 'string' ? ownerName.trim() : '';
-  const trimmedLocation = typeof location === 'string' ? location.trim() : '';
   const trimmedContact = typeof contactNumber === 'string' ? contactNumber.trim() : '';
   const trimmedImageUrl = typeof profilePictureUrl === 'string' ? profilePictureUrl.trim() : '';
   const trimmedBankNumber = typeof bankAccountNumber === 'string' ? bankAccountNumber.trim() : '';
   const trimmedBankName = typeof bankName === 'string' ? bankName.trim() : '';
   const trimmedBankHolder = typeof bankAccountName === 'string' ? bankAccountName.trim() : '';
 
-  if (trimmedName) updates.name = trimmedName;
-  if (trimmedOwner) updates.ownerName = trimmedOwner;
-  if (trimmedLocation) {
-    updates.location = trimmedLocation;
-    const coords = await geocode(trimmedLocation);
-    if (coords) {
-      updates.locationCoords = { lat: coords.lat, lng: coords.lng };
-    }
-  }
-  if (trimmedContact) updates.contactNumber = trimmedContact;
-  if (trimmedBankNumber) updates.bankAccountNumber = trimmedBankNumber;
-  if (trimmedBankName) updates.bankName = trimmedBankName;
-  if (trimmedBankHolder) updates.bankAccountName = trimmedBankHolder;
-  if (trimmedLocation) {
-    updates.location = trimmedLocation;
-    if (!updates.locationCoords) {
-      try {
-        const coords = await geocode(trimmedLocation);
-        updates.locationCoords = { lat: coords.lat, lng: coords.lng };
-      } catch (err) {
-        // ignore geocode failure
-      }
-    }
-  }
-
-  if (req.file) {
-    updates.profilePicture = `/uploads/${req.file.filename}`;
-  } else if (trimmedImageUrl) {
-    updates.profilePicture = trimmedImageUrl;
-  }
-
-  if (!Object.keys(updates).length) {
-    return res.status(400).json({ message: 'Không có thông tin nào được cập nhật.' });
-  }
-
   try {
-    const updatedRestaurant = await Restaurant.findByIdAndUpdate(
-      req.user.id,
-      { $set: updates },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedRestaurant) {
+    const restaurant = await Restaurant.findById(req.user.id);
+    if (!restaurant) {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
+
+    let changed = false;
+
+    if (trimmedName) {
+      restaurant.name = trimmedName;
+      changed = true;
+    }
+    if (trimmedTax) {
+      restaurant.taxCode = trimmedTax;
+      changed = true;
+    } else if (!restaurant.taxCode) {
+      restaurant.taxCode = 'N/A';
+      changed = true;
+    }
+    if (trimmedOwner) {
+      restaurant.ownerName = trimmedOwner;
+      changed = true;
+    }
+    if (trimmedContact) {
+      restaurant.contactNumber = trimmedContact;
+      changed = true;
+    }
+    if (trimmedBankNumber) {
+      restaurant.bankAccountNumber = trimmedBankNumber;
+      changed = true;
+    }
+    if (trimmedBankName) {
+      restaurant.bankName = trimmedBankName;
+      changed = true;
+    }
+    if (trimmedBankHolder) {
+      restaurant.bankAccountName = trimmedBankHolder;
+      changed = true;
+    }
+
+    if (addressUpdates && Object.keys(addressUpdates).length) {
+      restaurant.address = { ...(restaurant.address?.toObject?.() || {}), ...addressUpdates };
+      restaurant.legacyLocation = restaurant.legacyLocation || addressUpdates.fullAddress;
+      restaurant.markModified('address');
+      changed = true;
+    }
+
+    if (req.file) {
+      restaurant.profilePicture = `/uploads/${req.file.filename}`;
+      changed = true;
+    } else if (trimmedImageUrl) {
+      restaurant.profilePicture = trimmedImageUrl;
+      changed = true;
+    }
+
+    if (!changed) {
+      return res.status(400).json({ message: 'Không có thông tin nào được cập nhật.' });
+    }
+
+    restaurant.address = await ensureAddressCoordinates(restaurant.address);
+    if (restaurant.address?.location?.coordinates) {
+      restaurant.locationCoords = {
+        lat: restaurant.address.location.coordinates[1],
+        lng: restaurant.address.location.coordinates[0],
+      };
+    }
+
+    const updatedRestaurant = await restaurant.save();
 
     res.status(200).json({ message: 'Profile updated successfully', restaurant: updatedRestaurant });
   } catch (err) {
@@ -683,9 +783,16 @@ router.put('/:id/geocode', async (req, res) => {
     if (!restaurant) {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
-    const coords = await geocode(restaurant.location);
+    const fullAddress = restaurant.address?.fullAddress || restaurant.legacyLocation;
+    const coords = await geocode(fullAddress);
     if (coords) {
+      restaurant.address = {
+        ...(restaurant.address?.toObject?.() || {}),
+        fullAddress: fullAddress || computeFullAddress(restaurant.address),
+        location: { type: 'Point', coordinates: [coords.lng, coords.lat] },
+      };
       restaurant.locationCoords = { lat: coords.lat, lng: coords.lng };
+      restaurant.markModified('address');
       await restaurant.save();
       return res.json({ message: 'Geocoded', locationCoords: restaurant.locationCoords });
     }

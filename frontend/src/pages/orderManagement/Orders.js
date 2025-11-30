@@ -5,6 +5,7 @@ import {
   RESTAURANT_SERVICE_URL,
   AUTH_SERVICE_URL,
   REALTIME_SERVICE_URL,
+  DELIVERY_SERVICE_URL,
 } from "../../utils/serviceUrls";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Spinner, Badge, Form, Toast, ToastContainer } from "react-bootstrap";
@@ -13,6 +14,7 @@ import { io } from "socket.io-client";
 import { BsStar, BsStarFill } from "react-icons/bs";
 import { computeShippingFee, roundCurrency } from "../../utils/pricing";
 import CustomerLayout from "../../components/customer/CustomerLayout";
+import DroneMapCanvas from "../drone-center/components/DroneMapCanvas";
 
 const formatCurrency = (value) => {
   if (typeof value !== "number") return "0 VND";
@@ -41,6 +43,13 @@ const mapDroneStage = (status = "") => {
   return "";
 };
 
+const extractPoint = (raw = {}) => {
+  const lat = Number(raw.lat ?? raw.latitude ?? raw.deliveryLat);
+  const lng = Number(raw.lng ?? raw.longitude ?? raw.deliveryLng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  return null;
+};
+
 function Orders() {
   const [orders, setOrders] = useState([]);
   const [restaurantNames, setRestaurantNames] = useState({});
@@ -52,6 +61,9 @@ function Orders() {
   const [receivingOrderId, setReceivingOrderId] = useState(null);
   const [toastState, setToastState] = useState({ show: false, message: "" });
   const [droneTracking, setDroneTracking] = useState({});
+  const [trackingVisible, setTrackingVisible] = useState({});
+  const [routeCache, setRouteCache] = useState({});
+  const trackingTimersRef = useRef({});
   const navigate = useNavigate();
   const socketRef = useRef(null);
   const subscribedOrdersRef = useRef(new Set());
@@ -186,6 +198,42 @@ function Orders() {
     }));
   }, []);
 
+  const loadRoute = useCallback(
+    async (orderId) => {
+      if (!orderId || routeCache[orderId]) return;
+      try {
+        const res = await axios.post(`${DELIVERY_SERVICE_URL}/api/drone/auto-route`, { orderId });
+        const waypoints = res.data?.data?.waypoints || [];
+        if (waypoints.length) {
+          setRouteCache((prev) => ({ ...prev, [orderId]: waypoints }));
+        }
+      } catch (_err) {
+        // silent; fallback route may still display
+      }
+    },
+    [routeCache]
+  );
+
+  const fetchDroneSnapshot = useCallback(async (orderId, droneId) => {
+    if (!droneId || !orderId) return;
+    try {
+      const res = await axios.get(`${DELIVERY_SERVICE_URL}/api/drones/${encodeURIComponent(droneId)}`);
+      const drone = res.data?.data || res.data;
+      if (drone?.location?.lat && drone?.location?.lng) {
+        upsertDroneTracking(String(orderId), {
+          droneId: drone.droneId || drone.code || droneId,
+          lat: drone.location.lat,
+          lng: drone.location.lng,
+          battery: typeof drone.batteryLevel === "number" ? drone.batteryLevel : drone.battery,
+          status: drone.status,
+          updatedAt: drone.updatedAt,
+        });
+      }
+    } catch (_err) {
+      // silent
+    }
+  }, [upsertDroneTracking]);
+
   const handleRealtimeEvent = useCallback(
     (message) => {
       if (!message || typeof message !== "object") return;
@@ -294,6 +342,7 @@ function Orders() {
           break;
         }
         case "drone-location-update":
+        case "drone:tracking:update":
         case "drone-status-update": {
           const orderId = payload?.orderId || payload?.currentOrderId;
           if (!orderId) break;
@@ -301,9 +350,9 @@ function Orders() {
           upsertDroneTracking(normalizedId, {
             droneId: payload?.droneId,
             status: payload?.status,
-            lat: payload?.lat,
-            lng: payload?.lng,
-            battery: payload?.battery,
+            lat: payload?.lat ?? payload?.location?.lat,
+            lng: payload?.lng ?? payload?.location?.lng,
+            battery: payload?.battery ?? payload?.batteryLevel,
           });
           if (payload?.status) {
             setOrders((prev) =>
@@ -394,6 +443,22 @@ function Orders() {
       subscribedOrdersRef.current.clear();
     };
   }, [handleRealtimeEvent]);
+
+  // Poll drone snapshot when người dùng mở map realtime
+  useEffect(() => {
+    Object.values(trackingTimersRef.current || {}).forEach((timerId) => clearInterval(timerId));
+    trackingTimersRef.current = {};
+    orders.forEach((order) => {
+      const key = String(order._id || order.id);
+      if (!trackingVisible[key] || !order.droneId) return;
+      fetchDroneSnapshot(key, order.droneId);
+      trackingTimersRef.current[key] = setInterval(() => fetchDroneSnapshot(key, order.droneId), 6000);
+    });
+    return () => {
+      Object.values(trackingTimersRef.current || {}).forEach((timerId) => clearInterval(timerId));
+      trackingTimersRef.current = {};
+    };
+  }, [fetchDroneSnapshot, orders, trackingVisible]);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -948,27 +1013,67 @@ function Orders() {
             const lat = Number(tracking?.lat);
             const lng = Number(tracking?.lng);
             const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+            const fallbackRoute = (() => {
+              const points = [];
+              const hubPt = extractPoint(order.hubLocation || order.droneHubLocation);
+              const restaurantPt = extractPoint(order.restaurantLocation || order.restaurantAddress || order.restaurant);
+              const customerPt =
+                extractPoint({ lat: order.deliveryLat, lng: order.deliveryLng }) ||
+                extractPoint(order.deliveryLocation) ||
+                extractPoint(order.customerLocation);
+              if (hubPt) points.push({ ...hubPt, type: "hub", label: "Hub" });
+              if (restaurantPt) points.push({ ...restaurantPt, type: "restaurant", label: "Restaurant" });
+              if (customerPt) points.push({ ...customerPt, type: "customer", label: "Customer" });
+              return points;
+            })();
+            const cachedRoute = routeCache[orderKey];
+            const routePoints = hasCoords
+              ? [{ lat, lng, type: "drone", label: tracking?.droneId || order.droneId || "Drone" }]
+              : cachedRoute && cachedRoute.length
+              ? cachedRoute.map((wp) => ({ lat: wp.lat, lng: wp.lng, type: wp.type?.toLowerCase(), label: wp.type }))
+              : fallbackRoute;
+            const trackingOpen = Boolean(trackingVisible[orderKey]);
             return (
               <div className="alert alert-info mt-3 mb-0">
                 <div className="fw-semibold mb-1">
                   Drone {tracking?.droneId || order.droneId || "chưa gán"}{" "}
                   {Number.isFinite(Number(tracking?.battery)) ? `• 🔋 ${tracking.battery}%` : ""}
                 </div>
-                <div className="small text-muted">
-                  {stageText || "Đang theo dõi trạng thái giao hàng"}
-                  {tracking?.status ? ` • ${tracking.status}` : ""}
+                <div className="small text-muted d-flex flex-wrap gap-2 align-items-center">
+                  <span>
+                    {stageText || "Đang theo dõi trạng thái giao hàng"}
+                    {tracking?.status ? ` • ${tracking.status}` : ""}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant={trackingOpen ? "outline-light" : "light"}
+                    onClick={() =>
+                      setTrackingVisible((prev) => {
+                        const next = !prev[orderKey];
+                        if (next) loadRoute(orderKey);
+                        return { ...prev, [orderKey]: next };
+                      })
+                    }
+                  >
+                    {trackingOpen ? "Ẩn realtime drone" : "Xem realtime drone"}
+                  </Button>
                 </div>
-                {hasCoords && (
-                  <div className="small mono">
-                    GPS: {lat.toFixed(4)}, {lng.toFixed(4)}{" "}
-                    <a
-                      href={`https://www.google.com/maps?q=${lat},${lng}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ms-1"
-                    >
-                      Xem trên bản đồ
-                    </a>
+                {trackingOpen && hasCoords && (
+                  <div className="mt-2">
+                    <div className="small mono">
+                      GPS: {lat.toFixed(4)}, {lng.toFixed(4)}{" "}
+                      <a
+                        href={`https://www.google.com/maps?q=${lat},${lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ms-1"
+                      >
+                        Mở Google Maps
+                      </a>
+                    </div>
+                    <div style={{ marginTop: 8, borderRadius: 8, overflow: "hidden" }}>
+                      <DroneMapCanvas drones={[]} hubs={[]} routePoints={routePoints} height={220} />
+                    </div>
                   </div>
                 )}
               </div>

@@ -14,7 +14,7 @@ import autoRoute from './routes/autoRoute.js';
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://192.168.1.4:3000')
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://192.168.31.10:3000')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -42,10 +42,12 @@ const PORT = process.env.PORT || 5003;
 const server = http.createServer(app);
 initDroneSocket(server, allowedOrigins.length ? allowedOrigins : ['*']);
 
+const MONGO_URI = process.env.DELIVERY_DB_URI || process.env.DRONE_MONGO_URI || process.env.MONGO_URI;
+
 mongoose
-  .connect(process.env.MONGO_URI, {})
+  .connect(MONGO_URI, { dbName: process.env.DELIVERY_DB_NAME })
   .then(() => {
-    console.log('✅ Delivery service connected to MongoDB');
+    console.log('✅ Delivery service connected to MongoDB', process.env.DELIVERY_DB_NAME || '');
     server.listen(PORT, () => {
       console.log(`🚚 Delivery service + drone socket listening on port ${PORT}`);
     });

@@ -10,6 +10,7 @@ import React, {
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { REALTIME_SERVICE_URL } from '../../utils/serviceUrls';
+import { getAuthToken, AUTH_ROLES } from '../../utils/authTokens';
 
 const DroneCenterContext = createContext(null);
 
@@ -20,12 +21,14 @@ const DEFAULT_HUBS = [
   {
     id: 'hub-hcm',
     name: 'HCM Central Hub',
+    code: 'HCM',
     location: { lat: 10.776, lng: 106.7 },
     radiusKm: 12,
   },
   {
     id: 'hub-hn',
     name: 'HN West Hub',
+    code: 'HN',
     location: { lat: 21.0285, lng: 105.8 },
     radiusKm: 10,
   },
@@ -74,7 +77,7 @@ const DEFAULT_DRONES = [
   },
 ];
 
-const DRONE_API_BASE =
+const DRONE_API_BASE_URL =
   process.env.REACT_APP_DRONE_API_URL ||
   process.env.REACT_APP_DELIVERY_URL ||
   process.env.REACT_APP_BACKEND_URL ||
@@ -82,53 +85,49 @@ const DRONE_API_BASE =
 
 const REALTIME_URL = process.env.REACT_APP_DRONE_REALTIME_URL || REALTIME_SERVICE_URL;
 
-const normalizeLocation = (raw = {}) => ({
-  lat: Number(raw.lat ?? raw.latitude ?? 0),
-  lng: Number(raw.lng ?? raw.longitude ?? raw.long ?? 0),
-});
+const normalizeLocation = (raw = {}) => {
+  if (Array.isArray(raw.coordinates) && raw.coordinates.length === 2) {
+    return { lng: Number(raw.coordinates[0]), lat: Number(raw.coordinates[1]) };
+  }
+  if (Array.isArray(raw.currentLocation?.coordinates) && raw.currentLocation.coordinates.length === 2) {
+    return { lng: Number(raw.currentLocation.coordinates[0]), lat: Number(raw.currentLocation.coordinates[1]) };
+  }
+  return {
+    lat: Number(raw.lat ?? raw.latitude ?? raw.currentLocation?.lat ?? 0),
+    lng: Number(raw.lng ?? raw.longitude ?? raw.currentLocation?.lng ?? raw.long ?? 0),
+  };
+};
 
 const normalizeDrone = (raw = {}) => {
-  const location = normalizeLocation(raw.location || raw);
+  const location = normalizeLocation(raw.currentLocation || raw.location || raw);
   return {
-    droneId: raw.droneId || raw.id || raw._id || '',
-    name: raw.name || raw.label || raw.droneId || 'Unnamed Drone',
-    battery: typeof raw.battery === 'number' ? raw.battery : Number(raw.battery ?? 0),
-    status: raw.status || 'idle',
+    droneId: raw.code || raw.droneId || raw.id || raw._id || '',
+    name: raw.name || raw.label || raw.droneId || raw.code || 'Unnamed Drone',
+    battery:
+      typeof raw.batteryLevel === 'number'
+        ? raw.batteryLevel
+        : typeof raw.battery === 'number'
+        ? raw.battery
+        : Number(raw.batteryLevel ?? raw.battery ?? 0),
+    status: raw.status ? raw.status.toLowerCase() : 'idle',
     hubId: raw.hubId || raw.hub || '',
     currentOrderId: raw.currentOrderId || raw.orderId || raw.currentOrder || '',
     location,
     updatedAt: raw.updatedAt || raw.lastUpdate || raw.timestamp || new Date().toISOString(),
+    maintenanceStatus: raw.maintenanceStatus,
+    nextMaintenanceDueAt: raw.nextMaintenanceDueAt,
   };
 };
 
 const normalizeHub = (raw = {}) => ({
-  id: raw.id || raw._id || raw.hubId || raw.name,
+  id: raw.id || raw._id || raw.hubId || raw.code || raw.name,
   name: raw.name || raw.label || 'Hub',
-  location: normalizeLocation(raw.location || raw),
+  code: raw.code,
+  location: normalizeLocation(raw.address?.location || raw.location || raw),
+  address: raw.address,
   radiusKm: Number(raw.radiusKm ?? raw.radius ?? 0),
+  isActive: typeof raw.isActive === 'boolean' ? raw.isActive : true,
 });
-
-const addLeafletAssets = () => {
-  if (typeof document === 'undefined') {
-    return;
-  }
-
-  const cssHref = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-  if (!document.querySelector(`link[href="${cssHref}"]`)) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = cssHref;
-    document.head.appendChild(link);
-  }
-
-  if (!window.L && !document.querySelector('script[data-drone-center-leaflet]')) {
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.async = true;
-    script.setAttribute('data-drone-center-leaflet', 'true');
-    document.body.appendChild(script);
-  }
-};
 
 const mapStatusToBucket = (status = '') => {
   const normalized = status.toLowerCase();
@@ -161,7 +160,9 @@ export const DroneCenterProvider = ({ children }) => {
   const [error, setError] = useState('');
   const [socketStatus, setSocketStatus] = useState('idle');
   const [events, setEvents] = useState([]);
+  const [deliveries, setDeliveries] = useState([]);
   const socketRef = useRef(null);
+  const tokenRef = useRef(getAuthToken(AUTH_ROLES.SUPER_ADMIN) || getAuthToken(AUTH_ROLES.ADMIN) || null);
 
   const annotateDrones = useCallback((list) => {
     const now = Date.now();
@@ -175,7 +176,7 @@ export const DroneCenterProvider = ({ children }) => {
   const refreshDrones = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${DRONE_API_BASE}/api/drones`);
+      const response = await axios.get(`${DRONE_API_BASE_URL}/api/drones`);
       const payload = Array.isArray(response.data) ? response.data : response.data?.data;
       if (Array.isArray(payload) && payload.length) {
         const normalized = payload.map(normalizeDrone);
@@ -194,9 +195,45 @@ export const DroneCenterProvider = ({ children }) => {
     }
   }, [drones.length]);
 
+  const refreshDeliveries = useCallback(async () => {
+    try {
+      const response = await axios.get(`${DRONE_API_BASE_URL}/api/drone-deliveries`);
+      const payload = Array.isArray(response.data) ? response.data : response.data?.data;
+      if (Array.isArray(payload)) {
+        const enriched = await Promise.all(
+          payload.map(async (item) => {
+            const waypoints = item?.route?.waypoints;
+            if (Array.isArray(waypoints) && waypoints.length >= 3) return item;
+            if (!item?.orderId) return item;
+            try {
+              const res = await axios.post(`${DRONE_API_BASE_URL}/api/drone/auto-route`, {
+                orderId: item.orderId,
+                hubId: item.hubId,
+                droneId: item.droneId,
+              });
+              const data = res.data?.data || {};
+              const route = {
+                ...(item.route || {}),
+                waypoints: Array.isArray(data.waypoints) ? data.waypoints : item.route?.waypoints || [],
+                distance: data.distanceMeters || item.route?.distance,
+                duration: data.etaSeconds || item.route?.duration,
+              };
+              return { ...item, route };
+            } catch (_err) {
+              return item;
+            }
+          })
+        );
+        setDeliveries(enriched);
+      }
+    } catch (err) {
+      // silent for now
+    }
+  }, []);
+
   const refreshHubs = useCallback(async () => {
     try {
-      const response = await axios.get(`${DRONE_API_BASE}/api/hubs`);
+      const response = await axios.get(`${DRONE_API_BASE_URL}/api/hubs`);
       const payload = Array.isArray(response.data) ? response.data : response.data?.data;
       if (Array.isArray(payload) && payload.length) {
         setHubs(payload.map(normalizeHub));
@@ -261,7 +298,7 @@ export const DroneCenterProvider = ({ children }) => {
   const createHub = useCallback(async (payload) => {
     const normalized = normalizeHub(payload);
     try {
-      const response = await axios.post(`${DRONE_API_BASE}/api/hubs`, normalized);
+        const response = await axios.post(`${DRONE_API_BASE_URL}/api/hubs`, normalized);
       const data = response.data?.data || response.data || normalized;
       setHubs((prev) => [...prev, normalizeHub(data)]);
       return { ok: true };
@@ -274,7 +311,7 @@ export const DroneCenterProvider = ({ children }) => {
   const updateHub = useCallback(async (id, payload) => {
     const normalized = normalizeHub(payload);
     try {
-      await axios.put(`${DRONE_API_BASE}/api/hubs/${id}`, normalized);
+      await axios.put(`${DRONE_API_BASE_URL}/api/hubs/${id}`, normalized);
       setHubs((prev) => prev.map((hub) => (hub.id === id ? { ...hub, ...normalized } : hub)));
       return { ok: true };
     } catch (err) {
@@ -285,7 +322,7 @@ export const DroneCenterProvider = ({ children }) => {
 
   const deleteHub = useCallback(async (id) => {
     try {
-      await axios.delete(`${DRONE_API_BASE}/api/hubs/${id}`);
+      await axios.delete(`${DRONE_API_BASE_URL}/api/hubs/${id}`);
       setHubs((prev) => prev.filter((hub) => hub.id !== id));
       return { ok: true };
     } catch (err) {
@@ -294,11 +331,64 @@ export const DroneCenterProvider = ({ children }) => {
     }
   }, []);
 
+  const createDelivery = useCallback(
+    async (payload) => {
+      try {
+        const response = await axios.post(`${DRONE_API_BASE_URL}/api/drone-deliveries`, payload);
+        await refreshDeliveries();
+        await refreshDrones();
+        return { ok: true, data: response.data?.data || response.data };
+      } catch (err) {
+        return { ok: false, error: err?.response?.data?.message || err?.message || 'Không thể tạo phân công drone' };
+      }
+    },
+    [refreshDeliveries, refreshDrones]
+  );
+
+  const appendTrackingLog = useCallback(async (assignmentId, payload) => {
+    try {
+      const response = await axios.post(`${DRONE_API_BASE_URL}/api/drone-deliveries/${assignmentId}/logs`, payload);
+      await refreshDrones();
+      return { ok: true, data: response.data?.data || response.data };
+    } catch (err) {
+      return { ok: false, error: err?.response?.data?.message || err?.message || 'Không thể ghi tracking log' };
+    }
+  }, [refreshDrones]);
+
+  const addMaintenanceLog = useCallback(
+    async (droneId, logEntry, nextStatus) => {
+      const target = drones.find((d) => d.droneId === droneId || d.id === droneId);
+      const logs = Array.isArray(target?.maintenanceLogs) ? [...target.maintenanceLogs] : [];
+      logs.push(logEntry);
+      try {
+        await axios.put(`${DRONE_API_BASE_URL}/api/drones/${droneId}`, {
+          maintenanceLogs: logs,
+          maintenanceStatus: nextStatus || target?.maintenanceStatus || 'IN_SERVICE',
+          nextMaintenanceDueAt: logEntry.nextMaintenanceDueAt,
+        });
+        await refreshDrones();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err?.response?.data?.message || err?.message || 'Không thể lưu bảo trì' };
+      }
+    },
+    [drones, refreshDrones]
+  );
+
   useEffect(() => {
     refreshDrones();
     refreshHubs();
-    addLeafletAssets();
-  }, [refreshDrones, refreshHubs]);
+    refreshDeliveries();
+  }, [refreshDeliveries, refreshDrones, refreshHubs]);
+
+  // Polling fallback to keep UI fresh if socket misses events
+  useEffect(() => {
+    const timer = setInterval(() => {
+      refreshDrones();
+      refreshDeliveries();
+    }, 7000);
+    return () => clearInterval(timer);
+  }, [refreshDeliveries, refreshDrones]);
 
   useEffect(() => {
     const candidates = [
@@ -317,7 +407,8 @@ export const DroneCenterProvider = ({ children }) => {
         return;
       }
       const url = candidates[currentIndex];
-      const socket = io(url, { transports: ['websocket'], autoConnect: true });
+      const auth = tokenRef.current ? { token: tokenRef.current } : undefined;
+      const socket = io(url, { transports: ['websocket'], autoConnect: true, auth });
       socketRef.current = socket;
       activeSocket = socket;
 
@@ -331,6 +422,14 @@ export const DroneCenterProvider = ({ children }) => {
       });
 
       socket.on('drone-location-update', (payload) => applyLocationUpdate(payload || {}));
+      socket.on('drone:tracking:update', (payload) =>
+        applyLocationUpdate({
+          ...payload,
+          lat: payload?.lat,
+          lng: payload?.lng,
+          updatedAt: payload?.timestamp,
+        })
+      );
       socket.on('drone-status-update', (payload) => {
         if (payload) {
           upsertDrone(payload);
@@ -375,6 +474,7 @@ export const DroneCenterProvider = ({ children }) => {
       cleaned = true;
       if (activeSocket) {
         activeSocket.off('drone-location-update');
+        activeSocket.off('drone:tracking:update');
         activeSocket.off('drone-status-update');
         activeSocket.off('order-status-update');
         activeSocket.off('restaurant_wait_pickup');
@@ -422,18 +522,23 @@ export const DroneCenterProvider = ({ children }) => {
       value={{
         drones: annotated,
         hubs,
+        deliveries,
         loading,
         error,
         socketStatus,
         events,
         stats,
-        apiBase: DRONE_API_BASE,
+        apiBase: DRONE_API_BASE_URL,
         refreshDrones,
         refreshHubs,
+        refreshDeliveries,
         applyLocationUpdate,
         createHub,
         updateHub,
         deleteHub,
+        createDelivery,
+        appendTrackingLog,
+        addMaintenanceLog,
         offlineThresholdMs: OFFLINE_THRESHOLD_MS,
       }}
     >

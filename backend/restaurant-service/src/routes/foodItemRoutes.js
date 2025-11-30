@@ -175,7 +175,7 @@ router.put('/availability/:id', authMiddleware, async (req, res) => {
 // Get all food items (Public)
 router.get('/all', async (req, res) => {
   try {
-    const foodItems = await FoodItem.find().populate('restaurant', 'name location'); // Populate restaurant details if needed
+    const foodItems = await FoodItem.find().populate('restaurant', 'name address locationCoords'); // Populate restaurant details if needed
     res.status(200).json(foodItems);
   } catch (err) {
     console.error(err);
@@ -189,7 +189,10 @@ router.get('/restaurant/:restaurantId', async (req, res) => {
     const { restaurantId } = req.params;
 
     // Find food items for the given restaurant ID
-    const foodItems = await FoodItem.find({ restaurant: restaurantId }).populate('restaurant', 'name location availability');
+    const foodItems = await FoodItem.find({ restaurant: restaurantId }).populate(
+      'restaurant',
+      'name address locationCoords availability'
+    );
 
     if (!foodItems.length) {
       return res.status(404).json({ message: 'No food items found for this restaurant' });

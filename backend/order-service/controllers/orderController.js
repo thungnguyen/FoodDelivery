@@ -7,6 +7,8 @@ import { applyPromotionToOrder } from "../services/orderPromotionService.js";
 import { createOrdersFromCart } from "../src/lib/cartOrderSplitter.js";
 import { geocode } from "../utils/geocode.js";
 import { assignDroneToOrderInternal } from "./droneFlowController.js";
+import fetch from "node-fetch";
+import { normalizeBaseUrl } from "../utils/url.js";
 
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
 
@@ -14,13 +16,13 @@ const CANONICAL_STATUSES = [
     "Pending",
     "Confirmed",
     "Preparing",
+    "Ready",
     "waiting_for_drone",
     "drone_assigned",
-    "drone_enroute_to_restaurant",
-    "drone_arrived_restaurant",
+    "drone_arriving_restaurant",
     "drone_picked_food",
-    "drone_delivering",
-    "drone_arrived_customer",
+    "drone_arriving_customer",
+    "returning",
     "Delivering",
     "Completed",
     "Cancelled",
@@ -33,6 +35,7 @@ const STATUS_ALIASES = {
     "pending confirmation": "Pending",
     confirmed: "Confirmed",
     preparing: "Preparing",
+    ready: "Ready",
     "awaiting driver": "Delivering",
     "ready for delivery": "Delivering",
     "out for delivery": "Delivering",
@@ -48,16 +51,17 @@ const STATUS_ALIASES = {
     "waiting for drone": "waiting_for_drone",
     drone_assigned: "drone_assigned",
     "drone assigned": "drone_assigned",
-    drone_enroute_to_restaurant: "drone_enroute_to_restaurant",
-    "drone enroute to restaurant": "drone_enroute_to_restaurant",
-    drone_arrived_restaurant: "drone_arrived_restaurant",
-    "drone arrived restaurant": "drone_arrived_restaurant",
+    drone_enroute_to_restaurant: "drone_arriving_restaurant",
+    "drone enroute to restaurant": "drone_arriving_restaurant",
+    drone_arrived_restaurant: "drone_arriving_restaurant",
+    "drone arrived restaurant": "drone_arriving_restaurant",
     drone_picked_food: "drone_picked_food",
     "drone picked food": "drone_picked_food",
-    drone_delivering: "drone_delivering",
-    "drone delivering": "drone_delivering",
-    drone_arrived_customer: "drone_arrived_customer",
-    "drone arrived customer": "drone_arrived_customer"
+    drone_delivering: "drone_arriving_customer",
+    "drone delivering": "drone_arriving_customer",
+    drone_arrived_customer: "drone_arriving_customer",
+    "drone arrived customer": "drone_arriving_customer",
+    returning: "returning"
 };
 
 const CLOSED_STATUSES = new Set(["Completed", "Cancelled", "Failed", "Refunded"]);
@@ -66,8 +70,9 @@ const RATEABLE_STATUSES = new Set(["Completed"]);
 const STATUS_TRANSITIONS = {
     restaurant: {
         Pending: ["Confirmed", "Cancelled"],
-        Confirmed: ["Preparing", "Cancelled"],
-        Preparing: ["waiting_for_drone", "Cancelled"],
+        Confirmed: ["Preparing", "Ready", "Cancelled"],
+        Preparing: ["Ready", "Cancelled"],
+        Ready: ["waiting_for_drone", "Cancelled"],
         waiting_for_drone: [],
         Delivering: []
     }
@@ -608,12 +613,12 @@ export const updateOrderStatus = async (req, res) => {
             const roleTransitions = STATUS_TRANSITIONS[role];
             let nextStatus = requestedStatus;
 
-            if (
-                role === "restaurant" &&
-                currentStatus === "Preparing" &&
-                requestedStatus === "Delivering"
-            ) {
-                nextStatus = "waiting_for_drone";
+            if (role === "restaurant") {
+                if (currentStatus === "Preparing" && requestedStatus === "Delivering") {
+                    nextStatus = "Ready";
+                } else if (currentStatus === "Ready" && requestedStatus === "Delivering") {
+                    nextStatus = "waiting_for_drone";
+                }
             }
 
             if (role === "admin") {
@@ -638,6 +643,9 @@ export const updateOrderStatus = async (req, res) => {
             if ((order.status && order.status.startsWith("drone_")) || order.status === "waiting_for_drone") {
                 order.droneStatus = order.status;
             }
+            if (order.status === "waiting_for_drone" && !order.droneHubId) {
+                order.droneHubId = await pickNearestHubId(order);
+            }
             if (order.status === "waiting_for_drone") {
                 realtimeEvents.push({
                     event: "order_waiting_for_drone",
@@ -645,7 +653,8 @@ export const updateOrderStatus = async (req, res) => {
                         orderId: order._id,
                         restaurantId: order.restaurantId,
                         customerId: order.customerId,
-                        status: order.status
+                        status: order.status,
+                        hubId: order.droneHubId
                     },
                     rooms: buildOrderRooms({
                         orderId: order._id,
@@ -758,6 +767,19 @@ export const updateOrderStatus = async (req, res) => {
     if (completionPayload) {
         await publishRabbitEvent("order.completed", completionPayload);
     }
+    if (orderResponse?.droneId) {
+        await setDroneIdle(orderResponse.droneId);
+        await emitEvent({
+            event: "drone_route_complete",
+            payload: { orderId: orderResponse._id, droneId: orderResponse.droneId },
+            broadcast: true
+        });
+        await emitEvent({
+            event: "drone-status-update",
+            payload: { droneId: orderResponse.droneId, status: "idle", currentOrderId: null },
+            broadcast: true
+        });
+    }
 
     return res.status(200).json(orderResponse);
 };
@@ -804,13 +826,14 @@ export const markOrderAsReceived = async (req, res) => {
                 return;
             }
 
-            if (!["Delivering", "drone_delivering", "drone_arrived_customer"].includes(currentStatus)) {
+            if (!["Delivering", "drone_arriving_customer", "drone_arrived_customer", "returning"].includes(currentStatus)) {
                 const invalidStatusError = new Error("Order must be in delivering state before it can be completed.");
                 invalidStatusError.statusCode = 400;
                 throw invalidStatusError;
             }
 
             order.status = "Completed";
+            order.droneStatus = "drone_route_complete";
 
             const financeSummary = await handleOrderStatusFinancials({
                 order,
@@ -1025,6 +1048,92 @@ const sanitizeComment = (value) => {
         return "";
     }
     return value.trim().slice(0, 1000);
+};
+
+const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://localhost:5010");
+
+const fetchJson = async (url) => {
+    try {
+        const res = await fetch(url);
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+    } catch (err) {
+        return { ok: false, status: 500, data: null };
+    }
+};
+
+const haversineKm = (a, b) => {
+    if (!a || !b || typeof a.lat !== "number" || typeof a.lng !== "number" || typeof b.lat !== "number" || typeof b.lng !== "number") {
+        return Number.POSITIVE_INFINITY;
+    }
+    const R = 6371;
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const aHarv = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(aHarv), Math.sqrt(1 - aHarv));
+    return R * c;
+};
+
+const pickNearestHubId = async (order) => {
+    const resp = await fetchJson(`${DELIVERY_SERVICE_URL}/api/hubs`);
+    const hubs = Array.isArray(resp.data?.data) ? resp.data.data : Array.isArray(resp.data) ? resp.data : [];
+    if (!hubs.length) return null;
+    const restaurantLoc =
+        typeof order.restaurantLat === "number" && typeof order.restaurantLng === "number"
+            ? { lat: order.restaurantLat, lng: order.restaurantLng }
+            : null;
+    const customerLoc =
+        typeof order.deliveryLat === "number" && typeof order.deliveryLng === "number"
+            ? { lat: order.deliveryLat, lng: order.deliveryLng }
+            : null;
+    const target = restaurantLoc || customerLoc;
+    if (!target) return hubs[0]._id?.toString?.() || hubs[0].id || hubs[0]._id || null;
+    const ranked = [...hubs]
+        .filter((hub) => typeof hub.location?.lat === "number" && typeof hub.location?.lng === "number")
+        .sort((a, b) => haversineKm(a.location, target) - haversineKm(b.location, target));
+    const best = ranked[0] || hubs[0];
+    return best?._id?.toString?.() || best.id || best._id || null;
+};
+
+export const getDroneOrdersQueue = async (_req, res) => {
+    try {
+        const statuses = [
+            "waiting_for_drone",
+            "drone_assigned",
+            "drone_arriving_restaurant",
+            "drone_picked_food",
+            "drone_arriving_customer",
+            "returning"
+        ];
+        const orders = await Order.find({
+            $or: [
+                { status: { $in: statuses } },
+                { droneStatus: { $in: statuses } }
+            ]
+        })
+            .sort({ createdAt: -1 })
+            .lean();
+        res.json({ data: orders });
+    } catch (err) {
+        console.error("Failed to fetch drone queue", err);
+        res.status(500).json({ message: "Không thể lấy hàng đợi drone" });
+    }
+};
+
+const setDroneIdle = async (droneId) => {
+    if (!droneId) return;
+    try {
+        await fetch(`${DELIVERY_SERVICE_URL}/api/drones/${encodeURIComponent(droneId)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "idle", currentOrderId: null })
+        });
+    } catch (err) {
+        console.warn("Failed to set drone idle", err?.message);
+    }
 };
 
 // @desc Submit feedback for an order/driver after completion

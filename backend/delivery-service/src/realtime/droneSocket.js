@@ -27,6 +27,7 @@ export const initDroneSocket = (server, allowedOrigins = ['*']) => {
 export const emitDroneLocation = (payload) => {
   if (!io) return;
   io.emit('drone-location-update', payload);
+  io.emit('drone:tracking:update', payload);
 };
 
 export const getDroneSocket = () => io;

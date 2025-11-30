@@ -5,12 +5,19 @@ import { useNavigate } from 'react-router-dom';
 import { FiMail, FiMapPin, FiUser, FiPhone, FiFileText, FiCheckCircle } from 'react-icons/fi';
 import '../styles/restaurantRegister.css';
 import { RESTAURANT_SERVICE_URL } from '../../../utils/serviceUrls';
+import { ORDER_SERVICE_URL } from '../../../utils/serviceUrls';
 
 const initialFormState = {
   name: '',
   taxCode: '',
   ownerName: '',
-  location: '',
+  street: '',
+  ward: '',
+  district: '',
+  city: '',
+  fullAddress: '',
+  locationLat: '',
+  locationLng: '',
   contactNumber: '',
   profilePicture: null,
   email: '',
@@ -25,7 +32,10 @@ function RestaurantRegister() {
     name: '',
     taxCode: '',
     ownerName: '',
-    location: '',
+    street: '',
+    ward: '',
+    district: '',
+    city: '',
     contactNumber: '',
     email: '',
   });
@@ -44,6 +54,30 @@ function RestaurantRegister() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     setForm((prev) => ({ ...prev, profilePicture: file || null }));
+  };
+
+  const handleGeocode = async () => {
+    const query =
+      form.fullAddress ||
+      [form.street, form.ward, form.district, form.city].filter(Boolean).join(', ');
+    if (!query.trim()) {
+      setFeedback({ type: 'error', text: 'Nhập địa chỉ trước khi định vị tọa độ.' });
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${ORDER_SERVICE_URL}/api/geocode?address=${encodeURIComponent(query)}`
+      );
+      const data = res.ok ? await res.json() : null;
+      if (data?.lat && data?.lng) {
+        setForm((prev) => ({ ...prev, locationLat: data.lat, locationLng: data.lng, fullAddress: data.fullAddress || query }));
+        setFeedback({ type: 'success', text: 'Đã tìm thấy tọa độ.' });
+      } else {
+        setFeedback({ type: 'error', text: 'Không tìm thấy tọa độ cho địa chỉ này.' });
+      }
+    } catch (err) {
+      setFeedback({ type: 'error', text: 'Định vị thất bại. Thử lại.' });
+    }
   };
 
   // Restrict contact number to only numbers and limit to 10 digits
@@ -75,8 +109,11 @@ function RestaurantRegister() {
       case 'ownerName':
         errorsCopy.ownerName = trimmedValue ? '' : 'Owner name is required';
         break;
-      case 'location':
-        errorsCopy.location = trimmedValue ? '' : 'Location is required';
+      case 'street':
+      case 'ward':
+      case 'district':
+      case 'city':
+        errorsCopy[name] = trimmedValue ? '' : 'Required';
         break;
       case 'contactNumber':
         const phoneRegex = /^[0-9]{10}$/;
@@ -98,15 +135,12 @@ function RestaurantRegister() {
 
   // Check if the form is valid
   const validateForm = () => {
-    const requiredFields = ['name', 'taxCode', 'ownerName', 'location', 'contactNumber', 'email'];
+    const requiredFields = ['name', 'taxCode', 'ownerName', 'street', 'ward', 'district', 'city', 'contactNumber', 'email'];
     const hasEmpties = requiredFields.some((field) => {
       const value = form[field];
       return typeof value !== 'string' || value.trim() === '';
     });
-    return (
-      !hasEmpties &&
-      Object.values(errors).every((err) => err === '')
-    );
+    return !hasEmpties && Object.values(errors).every((err) => err === '');
   };
 
   // Handle form submission
@@ -131,7 +165,17 @@ function RestaurantRegister() {
       formData.append('name', form.name.trim());
       formData.append('ownerName', form.ownerName.trim());
       formData.append('taxCode', form.taxCode.trim());
-      formData.append('location', form.location.trim());
+      formData.append('street', form.street.trim());
+      formData.append('ward', form.ward.trim());
+      formData.append('district', form.district.trim());
+      formData.append('city', form.city.trim());
+      formData.append(
+        'fullAddress',
+        form.fullAddress.trim() ||
+          [form.street, form.ward, form.district, form.city].filter(Boolean).join(', ')
+      );
+      if (form.locationLat) formData.append('locationLat', form.locationLat);
+      if (form.locationLng) formData.append('locationLng', form.locationLng);
       formData.append('contactNumber', form.contactNumber.trim());
       if (form.profilePicture) {
         formData.append('profilePicture', form.profilePicture);
@@ -245,20 +289,96 @@ function RestaurantRegister() {
                 {errors.ownerName && <span className="error-text">{errors.ownerName}</span>}
               </label>
 
-              <label className="input-wrapper">
-                <span className="input-label">
-                  <FiMapPin /> Địa điểm *
-                </span>
-                <input
-                  type="text"
-                  name="location"
-                  placeholder="Số nhà, phường/xã, quận/huyện, tỉnh/thành"
-                  value={form.location}
-                  onChange={handleChange}
-                  className={errors.location ? 'has-error' : ''}
-                />
-                {errors.location && <span className="error-text">{errors.location}</span>}
-              </label>
+              <div className="address-grid">
+                <label className="input-wrapper">
+                  <span className="input-label">
+                    <FiMapPin /> Đường *
+                  </span>
+                  <input
+                    type="text"
+                    name="street"
+                    placeholder="200 An Dương Vương"
+                    value={form.street}
+                    onChange={handleChange}
+                    className={errors.street ? 'has-error' : ''}
+                  />
+                  {errors.street && <span className="error-text">{errors.street}</span>}
+                </label>
+                <label className="input-wrapper">
+                  <span className="input-label">Phường *</span>
+                  <input
+                    type="text"
+                    name="ward"
+                    placeholder="Phường 7"
+                    value={form.ward}
+                    onChange={handleChange}
+                    className={errors.ward ? 'has-error' : ''}
+                  />
+                  {errors.ward && <span className="error-text">{errors.ward}</span>}
+                </label>
+                <label className="input-wrapper">
+                  <span className="input-label">Quận *</span>
+                  <input
+                    type="text"
+                    name="district"
+                    placeholder="Quận 5"
+                    value={form.district}
+                    onChange={handleChange}
+                    className={errors.district ? 'has-error' : ''}
+                  />
+                  {errors.district && <span className="error-text">{errors.district}</span>}
+                </label>
+                <label className="input-wrapper">
+                  <span className="input-label">Thành phố *</span>
+                  <input
+                    type="text"
+                    name="city"
+                    placeholder="Thành phố Hồ Chí Minh"
+                    value={form.city}
+                    onChange={handleChange}
+                    className={errors.city ? 'has-error' : ''}
+                  />
+                  {errors.city && <span className="error-text">{errors.city}</span>}
+                </label>
+                <label className="input-wrapper">
+                  <span className="input-label">Full address (tùy chọn)</span>
+                  <input
+                    type="text"
+                    name="fullAddress"
+                    placeholder="200 An Dương Vương, P7, Q5, HCM"
+                    value={form.fullAddress}
+                    onChange={handleChange}
+                  />
+                </label>
+                <label className="input-wrapper">
+                  <span className="input-label">Lat</span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    name="locationLat"
+                    placeholder="10.7626"
+                    value={form.locationLat}
+                    onChange={handleChange}
+                  />
+                </label>
+                <label className="input-wrapper">
+                  <span className="input-label">Lng</span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    name="locationLng"
+                    placeholder="106.6602"
+                    value={form.locationLng}
+                    onChange={handleChange}
+                  />
+                </label>
+                <div className="input-wrapper">
+                  <span className="input-label">Định vị tự động</span>
+                  <button type="button" className="btn" onClick={handleGeocode} style={{ width: '100%' }}>
+                    Lấy tọa độ từ địa chỉ
+                  </button>
+                </div>
+              </div>
 
               <label className="input-wrapper">
                 <span className="input-label">

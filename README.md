@@ -342,4 +342,14 @@ Delivery frontend/backend sử dụng lệnh tương tự trong thư mục riên
 - **Repo gốc:** [https://github.com/thungnguyen/FoodDelivery](https://github.com/thungnguyen/FoodDelivery)  
 - **Tài liệu hệ thống (IEEE 830/29148):** `Document/system-documentation.md` – bao gồm PRD, Use Case, UML, ERD, DFD và tham chiếu nguồn.  
 
-Chúc bạn triển khai SkyDish thuận lợi!  
+---
+
+## Drone delivery & bản đồ (mới)
+
+- **Biến môi trường:** `DRONE_MONGO_URI`/`DELIVERY_DB_URI` (DB `delivery_db`), `MAPTILER_API_KEY` (map tile), `ORS_API_KEY` (định tuyến).  
+- **Collections mới:** `drone_hubs`, `drones`, `drone_deliveries`, `drone_tracking_logs` (có index 2dsphere + timestamp).  
+- **API nội bộ (delivery-service):** `GET/POST /api/drones`, `PUT /api/drones/:id`, `POST /api/drone/update-location`, `GET/POST /api/drone-deliveries`, `POST /api/drone-deliveries/:id/logs`, `GET/POST /api/hubs`.  
+- **Địa chỉ chuẩn hóa:** khách hàng & nhà hàng lưu `address.{street, ward, district, city, fullAddress, location}` để phục vụ geocode và lộ trình drone.  
+- **Gợi ý migrate legacy:** map các trường text cũ (`location`, `locationCoords`) sang `address.fullAddress` và backfill tọa độ qua geocoder trước khi bật tìm kiếm/route.  
+
+ Chúc bạn triển khai SkyDish thuận lợi!  

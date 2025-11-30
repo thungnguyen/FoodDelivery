@@ -78,7 +78,7 @@ const normalizeRoutePoints = (waypoints = []) =>
     .filter(Boolean);
 
 const DronesPage = () => {
-  const { drones, hubs, apiBase, refreshDrones, events, stats } = useDroneCenter();
+  const { drones, hubs, apiBase, refreshDrones, events, stats, addMaintenanceLog } = useDroneCenter();
   const [query, setQuery] = useState('');
   const [activatingId, setActivatingId] = useState('');
   const [actionError, setActionError] = useState('');
@@ -87,6 +87,8 @@ const DronesPage = () => {
   const [routePreview, setRoutePreview] = useState([]);
   const [routeMeta, setRouteMeta] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [maintenanceNote, setMaintenanceNote] = useState('');
+  const [maintenanceStatus, setMaintenanceStatus] = useState('IN_SERVICE');
 
   const hubLookup = useMemo(
     () => Object.fromEntries(hubs.map((hub) => [hub.id || hub.name, hub.name])),
@@ -222,6 +224,25 @@ const DronesPage = () => {
       setActionError(message);
     } finally {
       setRouteLoading(false);
+    }
+  };
+
+  const handleAddMaintenance = async () => {
+    if (!selected?.droneId) return;
+    const res = await addMaintenanceLog(
+      selected.droneId,
+      {
+        date: new Date(),
+        type: 'CHECK',
+        note: maintenanceNote || 'Manual update',
+      },
+      maintenanceStatus
+    );
+    if (!res.ok) {
+      setActionError(res.error);
+    } else {
+      setMaintenanceNote('');
+      refreshDrones();
     }
   };
 
@@ -433,6 +454,51 @@ const DronesPage = () => {
                       <li className="text-muted">Chưa có waypoint, hãy tính tuyến tự động.</li>
                     )}
                   </ul>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="card glass" style={{ padding: 12 }}>
+                  <div className="text-muted" style={{ marginBottom: 6 }}>
+                    Bảo trì nhanh
+                  </div>
+                  <div className="form-field">
+                    <label>Trạng thái bảo trì</label>
+                    <select value={maintenanceStatus} onChange={(e) => setMaintenanceStatus(e.target.value)}>
+                      <option value="OK">OK</option>
+                      <option value="NEEDS_CHECK">NEEDS_CHECK</option>
+                      <option value="IN_SERVICE">IN_SERVICE</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Ghi chú</label>
+                    <input value={maintenanceNote} onChange={(e) => setMaintenanceNote(e.target.value)} placeholder="Thay pin / kiểm tra cánh quạt..." />
+                  </div>
+                  <button className="btn primary" type="button" onClick={handleAddMaintenance}>
+                    Lưu bảo trì
+                  </button>
+                </div>
+                <div className="card glass" style={{ padding: 12 }}>
+                  <div className="text-muted" style={{ marginBottom: 6 }}>
+                    Log bảo trì
+                  </div>
+                  {selected?.maintenanceLogs?.length ? (
+                    <ul className="timeline">
+                      {selected.maintenanceLogs.slice(-4).reverse().map((log, idx) => (
+                        <li key={idx} className="timeline-item">
+                          <div className="flex between">
+                            <strong>{log.type}</strong>
+                            <span className="text-muted">
+                              {log.date ? new Date(log.date).toLocaleDateString() : ''}
+                            </span>
+                          </div>
+                          <div className="text-muted">{log.note}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-muted">Chưa có log.</div>
+                  )}
                 </div>
               </div>
 

@@ -12,12 +12,13 @@ import {
 
 const router = express.Router();
 
-router.post("/admin/drone/assign", protect, authorizeRoles("admin", "superAdmin"), assignDroneToOrder);
-router.post("/drone/arrived-restaurant", protect, authorizeRoles("admin", "superAdmin", "restaurant"), droneArrivedRestaurant);
-router.post("/order/drone-pickup", protect, authorizeRoles("admin", "superAdmin", "restaurant"), dronePickupOrder);
-router.post("/drone/arrived-customer", protect, authorizeRoles("admin", "superAdmin"), droneArrivedCustomer);
-router.post("/drone/return", protect, authorizeRoles("admin", "superAdmin"), droneReturnToHub);
-router.post("/admin/drone-force-return", protect, authorizeRoles("admin", "superAdmin"), forceReturnDrone);
-router.post("/admin/drone-cancel", protect, authorizeRoles("admin", "superAdmin"), cancelDroneDelivery);
+// NOTE: Auth removed for demo use; re-enable protect/authorizeRoles for production.
+router.post("/admin/drone/assign", assignDroneToOrder);
+router.post("/drone/arrived-restaurant", droneArrivedRestaurant);
+router.post("/order/drone-pickup", dronePickupOrder);
+router.post("/drone/arrived-customer", droneArrivedCustomer);
+router.post("/drone/return", droneReturnToHub);
+router.post("/admin/drone-force-return", forceReturnDrone);
+router.post("/admin/drone-cancel", cancelDroneDelivery);
 
 export default router;

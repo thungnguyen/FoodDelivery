@@ -1,4 +1,5 @@
-FROM node:20-alpine
+ARG NODE_IMAGE=node:20-bullseye-slim
+FROM ${NODE_IMAGE}
 
 WORKDIR /usr/src/app
 

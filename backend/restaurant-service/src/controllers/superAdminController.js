@@ -10,6 +10,31 @@ const PASSWORD_NUMBERS = '23456789';
 const PASSWORD_SPECIALS = '@$!%*?&';
 const PASSWORD_ALL = PASSWORD_LETTERS + PASSWORD_NUMBERS + PASSWORD_SPECIALS;
 const DEFAULT_ADMIN_NOTIFICATION_EMAILS = ['thanhhungnguyen8204@gmail.com', 'thanhhunggpt@gmail.com'];
+const computeFullAddress = (address = {}) => {
+  const parts = [address.street, address.ward, address.district, address.city]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean);
+  return parts.join(', ');
+};
+const parseCoordinates = (raw) => {
+  if (!raw) return null;
+  if (Array.isArray(raw) && raw.length === 2) {
+    const lng = Number(raw[0]);
+    const lat = Number(raw[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+    return null;
+  }
+  if (typeof raw === 'object') {
+    const lat = Number(raw.lat ?? raw.latitude);
+    const lng = Number(raw.lng ?? raw.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+  }
+  return null;
+};
 
 const randomFrom = (alphabet) => {
   const buffer = crypto.randomBytes(1);
@@ -118,21 +143,38 @@ export const updateRestaurant = async (req, res) => {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
 
-    const allowedFields = [
-      'name',
-      'ownerName',
-      'location',
-      'contactNumber',
-      'approvalNotes',
-      'bankAccountNumber',
-      'bankAccountName',
-      'bankName',
-    ];
+    const allowedFields = ['name', 'ownerName', 'contactNumber', 'approvalNotes', 'bankAccountNumber', 'bankAccountName', 'bankName'];
     allowedFields.forEach((field) => {
       if (typeof updates[field] !== 'undefined') {
         restaurant[field] = updates[field];
       }
     });
+
+    const addressUpdates =
+      (updates.address && typeof updates.address === 'object' && updates.address) ||
+      null;
+
+    if (addressUpdates) {
+      restaurant.address = { ...(restaurant.address?.toObject?.() || {}), ...addressUpdates };
+      const fullAddress =
+        restaurant.address.fullAddress ||
+        computeFullAddress(restaurant.address) ||
+        restaurant.legacyLocation;
+      if (fullAddress) {
+        restaurant.address.fullAddress = fullAddress;
+        restaurant.legacyLocation = restaurant.legacyLocation || fullAddress;
+      }
+      const coords =
+        parseCoordinates(addressUpdates.location?.coordinates) || parseCoordinates(addressUpdates.coordinates);
+      if (coords) {
+        restaurant.address.location = {
+          type: 'Point',
+          coordinates: [coords[0], coords[1]],
+        };
+        restaurant.locationCoords = { lat: coords[1], lng: coords[0] };
+      }
+      restaurant.markModified('address');
+    }
 
     if (typeof updates.availability === 'boolean') {
       restaurant.availability = updates.availability;

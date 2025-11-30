@@ -3,13 +3,25 @@ import DroneMapCanvas from './components/DroneMapCanvas';
 import { useDroneCenter } from './DroneCenterContext';
 
 const MapPage = () => {
-  const { drones, hubs, stats } = useDroneCenter();
+  const { drones, hubs, stats, deliveries } = useDroneCenter();
   const [focus, setFocus] = useState('');
 
   const active = useMemo(
     () => drones.filter((drone) => !drone.offline).sort((a, b) => (a.droneId > b.droneId ? 1 : -1)),
     [drones]
   );
+
+  const routePoints = useMemo(() => {
+    // Lấy waypoint từ đơn đang hoạt động có đủ tuyến
+    const activeDelivery = deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3);
+    const waypoints = activeDelivery?.route?.waypoints || [];
+    return waypoints.map((wp) => ({
+      lat: wp.lat,
+      lng: wp.lng,
+      type: wp.type?.toLowerCase(),
+      label: wp.type,
+    }));
+  }, [deliveries]);
 
   return (
     <>
@@ -41,7 +53,7 @@ const MapPage = () => {
           </select>
         </div>
 
-        <DroneMapCanvas drones={drones} hubs={hubs} focusDroneId={focus || undefined} />
+        <DroneMapCanvas drones={drones} hubs={hubs} focusDroneId={focus || undefined} routePoints={routePoints} />
         <div className="map-legend">
           <div className="legend-item">
             <span className="marker-dot drone" />
@@ -50,6 +62,14 @@ const MapPage = () => {
           <div className="legend-item">
             <span className="marker-dot hub" />
             Hub
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#fb7185' }} />
+            Nhà hàng
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#22c55e' }} />
+            Khách hàng
           </div>
           <div className="legend-item">
             Tổng: {stats?.totals?.total ?? 0} • Online: {stats?.totals?.total - (stats?.totals?.offline || 0)}

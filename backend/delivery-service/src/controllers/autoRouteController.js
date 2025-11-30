@@ -1,6 +1,7 @@
 import Hub from '../models/Hub.js';
 import emitEvent from '../utils/eventBus.js';
 import { normalizeBaseUrl } from '../utils/url.js';
+import fetch from 'node-fetch';
 
 const ORDER_SERVICE_URL = normalizeBaseUrl(process.env.ORDER_SERVICE_URL, 'http://localhost:5005', [
   '/api/orders',
@@ -12,6 +13,7 @@ const RESTAURANT_SERVICE_URL = normalizeBaseUrl(
   ['/api/restaurants', '/api']
 );
 const SERVICE_KEY = process.env.SERVICE_INTERNAL_KEY || 'super-admin-internal-key';
+const DELIVERY_BASE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, 'http://localhost:5010', ['/api']);
 
 const fetchJson = async (url) => {
   const res = await fetch(url, {
@@ -47,6 +49,52 @@ const accumulateDistanceKm = (waypoints) => {
   return Math.round(dist * 100) / 100;
 };
 
+const toPoint = (lat, lng, type) => {
+  const nLat = Number(lat);
+  const nLng = Number(lng);
+  if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return null;
+  return { lat: nLat, lng: nLng, type };
+};
+
+const simulateFlight = async ({ droneId, orderId, hubId, waypoints }) => {
+  if (!droneId || !Array.isArray(waypoints) || waypoints.length === 0) return;
+  const delayMs = 1800;
+  const postLocation = async (wp, status) => {
+    try {
+      await fetch(`${DELIVERY_BASE_URL}/api/drone/update-location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          droneId,
+          lat: wp.lat,
+          lng: wp.lng,
+          status,
+          currentOrderId: orderId,
+          hubId,
+        }),
+      });
+    } catch (err) {
+      console.warn('[auto-route] simulateFlight failed', err?.message);
+    }
+  };
+
+  waypoints.forEach((wp, index) => {
+    setTimeout(() => {
+      let status = 'drone_enroute_to_restaurant';
+      if (wp.type?.toLowerCase() === 'restaurant') status = index === 1 ? 'drone_arrived_restaurant' : 'drone_delivering';
+      if (wp.type?.toLowerCase() === 'customer') status = 'drone_arrived_customer';
+      if (index === waypoints.length - 1) status = 'returning';
+      postLocation(wp, status);
+      if (index === waypoints.length - 1) {
+        setTimeout(() => {
+          // clear current order when đã về hub
+          postLocation({ ...wp, orderId: null }, 'idle');
+        }, delayMs);
+      }
+    }, index * delayMs);
+  });
+};
+
 export const generateAutoRoute = async (req, res) => {
   try {
     const { orderId, droneId, hubId } = req.body || {};
@@ -66,6 +114,7 @@ export const generateAutoRoute = async (req, res) => {
       : { ok: false };
     let restaurant = restaurantResp.data;
 
+    // Try geocode order/restaurant if missing coordinates
     if ((!order?.deliveryLat || !order?.deliveryLng) && orderId) {
       await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}/geocode`);
       orderResp = await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}`);
@@ -80,17 +129,16 @@ export const generateAutoRoute = async (req, res) => {
     const hub = hubId ? await Hub.findById(hubId) : await Hub.findOne();
 
     let restaurantPoint =
-      restaurant?.locationCoords && typeof restaurant.locationCoords.lat === 'number'
-        ? { lat: restaurant.locationCoords.lat, lng: restaurant.locationCoords.lng, type: 'restaurant' }
-        : null;
+      toPoint(restaurant?.locationCoords?.lat, restaurant?.locationCoords?.lng, 'restaurant') ||
+      toPoint(restaurant?.address?.location?.coordinates?.[1], restaurant?.address?.location?.coordinates?.[0], 'restaurant');
     let customerPoint =
-      typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number'
-        ? { lat: order.deliveryLat, lng: order.deliveryLng, type: 'customer' }
-        : null;
-    let hubPoint =
-      hub && typeof hub.location?.lat === 'number'
-        ? { lat: hub.location.lat, lng: hub.location.lng, type: 'hub', id: hub._id.toString() }
-        : null;
+      toPoint(order?.deliveryLat, order?.deliveryLng, 'customer') ||
+      toPoint(order?.deliveryLocation?.lat, order?.deliveryLocation?.lng, 'customer') ||
+      toPoint(order?.deliveryLocation?.coordinates?.[1], order?.deliveryLocation?.coordinates?.[0], 'customer');
+    let hubPoint = toPoint(hub?.location?.lat, hub?.location?.lng, 'hub');
+    if (hubPoint && hub?._id) {
+      hubPoint.id = hub._id.toString();
+    }
 
     // Fallbacks to avoid missing coordinates
     if (!hubPoint && restaurantPoint) {
@@ -108,20 +156,20 @@ export const generateAutoRoute = async (req, res) => {
     }
 
     if (!hubPoint || !restaurantPoint || !customerPoint) {
-      return res.status(400).json({
-        message: 'Missing hub/restaurant/customer coordinates for auto-route',
-        data: { hub: hubPoint, restaurant: restaurantPoint, customer: customerPoint },
-      });
+      // Fallback: duplicate whatever coords we have so route vẫn tạo được
+      const anyPoint = hubPoint || restaurantPoint || customerPoint;
+      const safe = anyPoint || { lat: 0, lng: 0 };
+      hubPoint = hubPoint || { ...safe, type: 'hub', id: hub?._id?.toString() || 'fallback-hub' };
+      restaurantPoint = restaurantPoint || { ...safe, type: 'restaurant' };
+      customerPoint = customerPoint || { ...safe, type: 'customer' };
     }
 
-    const MAX_DRONE_RADIUS_M = 4000;
+    // Cho phép phạm vi rộng hơn (50km từ hub)
+    const MAX_DRONE_RADIUS_M = 50_000;
     const distHubCustomer = haversineKm(hubPoint, customerPoint) * 1000;
     const distHubRestaurant = haversineKm(hubPoint, restaurantPoint) * 1000;
-    if (distHubCustomer > MAX_DRONE_RADIUS_M) {
-      return res.status(400).json({ message: 'Customer location is outside drone delivery radius' });
-    }
-    if (distHubRestaurant > MAX_DRONE_RADIUS_M) {
-      return res.status(400).json({ message: 'Restaurant location is outside drone delivery radius' });
+    if (distHubCustomer > MAX_DRONE_RADIUS_M || distHubRestaurant > MAX_DRONE_RADIUS_M) {
+      console.warn('[auto-route] outside 50km radius, vẫn tiếp tục dựng tuyến');
     }
 
     const waypoints = [hubPoint, restaurantPoint, customerPoint, hubPoint];
@@ -134,6 +182,11 @@ export const generateAutoRoute = async (req, res) => {
       payload: { orderId, droneId, waypoints, distanceMeters, etaSeconds },
       broadcast: true,
     });
+
+    // Kick off a simple simulation so map có chuyển động realtime
+    if (droneId) {
+      simulateFlight({ droneId, orderId, hubId: hubPoint.id, waypoints });
+    }
 
     return res.json({ data: { waypoints, distanceMeters, etaSeconds, hubId: hubPoint.id } });
   } catch (error) {

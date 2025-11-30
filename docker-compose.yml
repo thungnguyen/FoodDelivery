@@ -86,12 +86,18 @@ services:
     environment:
       PORT: ${DELIVERY_PORT:-5003}
       MONGO_URI: ${DELIVERY_MONGO_URI}
+      DRONE_MONGO_URI: ${DELIVERY_MONGO_URI}
+      DELIVERY_DB_URI: ${DELIVERY_MONGO_URI}
       DELIVERY_DB_NAME: ${DELIVERY_DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
       REALTIME_SERVICE_URL: ${REALTIME_URL:-http://realtime-gateway:5050}
       SERVICE_INTERNAL_KEY: ${SERVICE_INTERNAL_KEY:-super-admin-internal-key}
       RABBITMQ_URL: amqp://rabbitmq:5672
+      ORDER_SERVICE_URL: ${ORDER_SERVICE_URL:-http://order-service:${ORDER_PORT:-5005}}
+      RESTAURANT_SERVICE_URL: ${RESTAURANT_SERVICE_URL:-http://restaurant-service:${REST_PORT:-5002}}
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY}
+      ORS_API_KEY: ${ORS_API_KEY}
     ports:
       - "${DELIVERY_PORT:-5003}:${DELIVERY_PORT:-5003}"
     depends_on:
