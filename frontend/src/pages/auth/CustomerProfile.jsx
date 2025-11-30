@@ -157,18 +157,39 @@ export default function CustomerProfile() {
       if (res.ok) {
         data = await res.json();
       }
-      if (data?.lat && data?.lng) {
-        setFormData((prev) => ({
-          ...prev,
-          address: {
-            ...prev.address,
-            lat: data.lat,
-            lng: data.lng,
-            fullAddress: prev.address.fullAddress || data.fullAddress || query,
-          },
-        }));
+      const lat = Number(data?.lat ?? data?.data?.lat);
+      const lng = Number(data?.lng ?? data?.data?.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const nextAddress = {
+          ...formData.address,
+          lat,
+          lng,
+          fullAddress: formData.address.fullAddress || data.fullAddress || query,
+        };
+        setFormData((prev) => ({ ...prev, address: nextAddress }));
+        // Lưu ngay địa chỉ mới để backend (auth-service) có tọa độ cập nhật
+        const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+        if (token) {
+          await axios.patch(
+            `${AUTH_SERVICE_URL}/api/auth/customer/profile`,
+            {
+              firstName: formData.firstName,
+              lastName: formData.lastName,
+              phone: formData.phone,
+              address: {
+                street: nextAddress.street,
+                ward: nextAddress.ward,
+                district: nextAddress.district,
+                city: nextAddress.city,
+                fullAddress: nextAddress.fullAddress,
+                location: { type: "Point", coordinates: [Number(nextAddress.lng), Number(nextAddress.lat)] },
+              },
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
         setError("");
-        setSuccess("Đã định vị tọa độ tự động.");
+        setSuccess("Đã định vị và lưu tọa độ.");
       } else {
         setError("Không tìm thấy tọa độ cho địa chỉ này.");
       }

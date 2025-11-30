@@ -192,9 +192,9 @@ const DroneMapCanvas = ({ drones = [], hubs = [], focusDroneId, height = 420, ro
       const restaurant = routePoints[1];
       const customer = routePoints[2];
       const hubBack = routePoints[3] || hub;
-      if (hub && restaurant) routeSegments.push({ id: 'route-seg-hr', from: hub, to: restaurant, dashed: true, color: '#10b981' });
-      if (restaurant && customer) routeSegments.push({ id: 'route-seg-rc', from: restaurant, to: customer, dashed: false, color: '#3b82f6' });
-      if (customer && hubBack) routeSegments.push({ id: 'route-seg-ch', from: customer, to: hubBack, dashed: true, color: '#f97316' });
+      if (hub && restaurant) routeSegments.push({ id: 'route-seg-hr', from: hub, to: restaurant, dashed: false, color: '#0ea5e9' });
+      if (restaurant && customer) routeSegments.push({ id: 'route-seg-rc', from: restaurant, to: customer, dashed: true, color: '#f59e0b' });
+      if (customer && hubBack) routeSegments.push({ id: 'route-seg-ch', from: customer, to: hubBack, dashed: false, color: '#22c55e' });
     }
 
     routeSegments.forEach((seg) => {
@@ -212,6 +212,9 @@ const DroneMapCanvas = ({ drones = [], hubs = [], focusDroneId, height = 420, ro
         map.getSource(sourceId).setData(geojson);
       } else {
         map.addSource(sourceId, { type: 'geojson', data: geojson });
+      }
+
+      if (!map.getLayer(layerId)) {
         map.addLayer({
           id: layerId,
           type: 'line',
@@ -220,9 +223,14 @@ const DroneMapCanvas = ({ drones = [], hubs = [], focusDroneId, height = 420, ro
             'line-color': seg.color,
             'line-width': 3,
             'line-opacity': 0.8,
-            ...(seg.dashed ? { 'line-dasharray': [2, 2] } : {}),
+            'line-dasharray': seg.dashed ? [3, 3] : [1, 0],
           },
         });
+      } else {
+        map.setPaintProperty(layerId, 'line-color', seg.color);
+        map.setPaintProperty(layerId, 'line-width', 3);
+        map.setPaintProperty(layerId, 'line-opacity', 0.8);
+        map.setPaintProperty(layerId, 'line-dasharray', seg.dashed ? [3, 3] : [1, 0]);
       }
       usedKeys.add(sourceId);
       usedKeys.add(layerId);

@@ -12,16 +12,34 @@ const MapPage = () => {
   );
 
   const routePoints = useMemo(() => {
-    // Lấy waypoint từ đơn đang hoạt động có đủ tuyến
-    const activeDelivery = deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3);
-    const waypoints = activeDelivery?.route?.waypoints || [];
-    return waypoints.map((wp) => ({
+    const normalizeId = (val) => (val ? val.toString().toUpperCase() : '');
+    const pickDelivery = () => {
+      if (focus) {
+        const match = deliveries.find((d) => {
+          const did =
+            d.droneId?.droneId ||
+            d.droneId?.code ||
+            d.droneId?._id ||
+            d.droneId?.id ||
+            d.droneId ||
+            '';
+          return normalizeId(did) === normalizeId(focus);
+        });
+        if (match && Array.isArray(match.route?.waypoints) && match.route.waypoints.length >= 3) return match;
+      }
+      return deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3);
+    };
+
+    const waypoints = pickDelivery()?.route?.waypoints || [];
+    return waypoints.map((wp, idx) => ({
       lat: wp.lat,
       lng: wp.lng,
-      type: wp.type?.toLowerCase(),
-      label: wp.type,
+      type:
+        wp.type?.toLowerCase() ||
+        (idx === 0 || idx === waypoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer'),
+      label: wp.label || wp.type,
     }));
-  }, [deliveries]);
+  }, [deliveries, focus]);
 
   return (
     <>

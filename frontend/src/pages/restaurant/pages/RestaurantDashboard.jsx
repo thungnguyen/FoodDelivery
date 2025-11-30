@@ -2185,21 +2185,61 @@ function RestaurantDashboard() {
                               return;
                             }
                             try {
-                              const res = await fetch(
-                                `${ORDER_SERVICE_URL}/api/geocode?address=${encodeURIComponent(query)}`
+                              const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+                              const addressPayload = {
+                                street: editableProfile.address?.street || '',
+                                ward: editableProfile.address?.ward || '',
+                                district: editableProfile.address?.district || '',
+                                city: editableProfile.address?.city || '',
+                                fullAddress:
+                                  editableProfile.address?.fullAddress ||
+                                  [editableProfile.address?.street, editableProfile.address?.ward, editableProfile.address?.district, editableProfile.address?.city]
+                                    .filter(Boolean)
+                                    .join(', '),
+                              };
+                              const res = await axios.put(
+                                `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurant._id}/geocode`,
+                                { address: addressPayload, fullAddress: addressPayload.fullAddress },
+                                { headers: { Authorization: `Bearer ${token}` } }
                               );
-                              const data = res.ok ? await res.json() : null;
-                              if (data?.lat && data?.lng) {
+                              const data = res.data;
+                              const coords = data?.locationCoords || data?.data?.locationCoords || data;
+                              if (coords?.lat && coords?.lng) {
                                 setEditableProfile((prev) => ({
                                   ...prev,
                                   address: {
                                     ...(prev.address || {}),
-                                    lat: data.lat,
-                                    lng: data.lng,
-                                    fullAddress: prev.address?.fullAddress || data.fullAddress || query,
+                                    lat: coords.lat,
+                                    lng: coords.lng,
+                                    fullAddress:
+                                      prev.address?.fullAddress ||
+                                      addressPayload.fullAddress ||
+                                      restaurant.address?.fullAddress ||
+                                      restaurant.legacyLocation ||
+                                      restaurant.location ||
+                                      query,
                                   },
                                 }));
-                                setProfileFeedback({ type: 'success', message: 'Đã định vị tọa độ.' });
+                                setRestaurant((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        locationCoords: { lat: coords.lat, lng: coords.lng },
+                                        address: {
+                                          ...(prev.address || {}),
+                                          fullAddress:
+                                            prev.address?.fullAddress ||
+                                            addressPayload.fullAddress ||
+                                            restaurant.address?.fullAddress ||
+                                            restaurant.legacyLocation ||
+                                            restaurant.location ||
+                                            query,
+                                          location: { coordinates: [coords.lng, coords.lat] },
+                                        },
+                                      }
+                                    : prev
+                                );
+                                setProfileFeedback({ type: 'success', message: 'Đã định vị và lưu tọa độ cho nhà hàng.' });
                               } else {
                                 setProfileFeedback({ type: 'error', message: 'Không tìm thấy tọa độ cho địa chỉ này.' });
                               }

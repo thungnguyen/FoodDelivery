@@ -1,4 +1,7 @@
+import mongoose from 'mongoose';
 import Hub from '../models/Hub.js';
+import Drone from '../models/Drone.js';
+import DroneDelivery from '../models/DroneDelivery.js';
 import emitEvent from '../utils/eventBus.js';
 import { normalizeBaseUrl } from '../utils/url.js';
 import fetch from 'node-fetch';
@@ -56,6 +59,21 @@ const toPoint = (lat, lng, type) => {
   return { lat: nLat, lng: nLng, type };
 };
 
+const isLatLngInVietnam = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && lat >= 8 && lat <= 24 && lng >= 102 && lng <= 110;
+
+const normalisePoint = (point, fallbackType) => {
+  if (!point) return null;
+  let { lat, lng } = point;
+  // Detect swapped coords (lat in 102-110 and lng in 8-24) and flip
+  if (!isLatLngInVietnam(lat, lng) && isLatLngInVietnam(lng, lat)) {
+    const tmp = lat;
+    lat = lng;
+    lng = tmp;
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng, type: point.type || fallbackType };
+};
+
 const simulateFlight = async ({ droneId, orderId, hubId, waypoints }) => {
   if (!droneId || !Array.isArray(waypoints) || waypoints.length === 0) return;
   const delayMs = 1800;
@@ -97,7 +115,7 @@ const simulateFlight = async ({ droneId, orderId, hubId, waypoints }) => {
 
 export const generateAutoRoute = async (req, res) => {
   try {
-    const { orderId, droneId, hubId } = req.body || {};
+    const { orderId, droneId: rawDroneId, hubId } = req.body || {};
     if (!orderId) {
       return res.status(400).json({ message: 'orderId is required' });
     }
@@ -128,14 +146,34 @@ export const generateAutoRoute = async (req, res) => {
 
     const hub = hubId ? await Hub.findById(hubId) : await Hub.findOne();
 
-    let restaurantPoint =
+    let restaurantPoint = normalisePoint(
       toPoint(restaurant?.locationCoords?.lat, restaurant?.locationCoords?.lng, 'restaurant') ||
-      toPoint(restaurant?.address?.location?.coordinates?.[1], restaurant?.address?.location?.coordinates?.[0], 'restaurant');
-    let customerPoint =
+        toPoint(restaurant?.address?.location?.coordinates?.[1], restaurant?.address?.location?.coordinates?.[0], 'restaurant'),
+      'restaurant'
+    );
+    let customerPoint = normalisePoint(
       toPoint(order?.deliveryLat, order?.deliveryLng, 'customer') ||
-      toPoint(order?.deliveryLocation?.lat, order?.deliveryLocation?.lng, 'customer') ||
-      toPoint(order?.deliveryLocation?.coordinates?.[1], order?.deliveryLocation?.coordinates?.[0], 'customer');
-    let hubPoint = toPoint(hub?.location?.lat, hub?.location?.lng, 'hub');
+        toPoint(order?.deliveryLocation?.lat, order?.deliveryLocation?.lng, 'customer') ||
+        toPoint(order?.deliveryLocation?.coordinates?.[1], order?.deliveryLocation?.coordinates?.[0], 'customer'),
+      'customer'
+    );
+    let hubPoint = normalisePoint(toPoint(hub?.location?.lat, hub?.location?.lng, 'hub'), 'hub');
+
+    // Nếu vẫn chưa có toạ độ hợp lệ, thử geocode lại bằng địa chỉ (đảm bảo không bị đảo lat/lng)
+    if ((!customerPoint || !isLatLngInVietnam(customerPoint.lat, customerPoint.lng)) && order?.deliveryAddress) {
+      const geo = await fetchJson(`${ORDER_SERVICE_URL}/api/geocode?q=${encodeURIComponent(order.deliveryAddress)}`);
+      const coords = geo?.data;
+      if (coords?.lat && coords?.lng) {
+        customerPoint = normalisePoint(toPoint(coords.lat, coords.lng, 'customer'), 'customer');
+      }
+    }
+    if ((!restaurantPoint || !isLatLngInVietnam(restaurantPoint.lat, restaurantPoint.lng)) && restaurant?.address?.fullAddress) {
+      const geo = await fetchJson(`${RESTAURANT_SERVICE_URL}/api/geocode?q=${encodeURIComponent(restaurant.address.fullAddress)}`);
+      const coords = geo?.data;
+      if (coords?.lat && coords?.lng) {
+        restaurantPoint = normalisePoint(toPoint(coords.lat, coords.lng, 'restaurant'), 'restaurant');
+      }
+    }
     if (hubPoint && hub?._id) {
       hubPoint.id = hub._id.toString();
     }
@@ -177,18 +215,110 @@ export const generateAutoRoute = async (req, res) => {
     const distanceMeters = Math.round(distanceKm * 1000);
     const etaSeconds = Math.round((distanceKm / 30) * 3600); // assume 30km/h
 
+    const hubIdValue = hub?._id?.toString?.() || hubPoint.id || hubId;
+
+    // Resolve droneId to ObjectId if possible (keeps link khi simulator gửi mã drone)
+    let resolvedDroneId = undefined;
+    if (rawDroneId) {
+      if (mongoose.isValidObjectId(rawDroneId)) {
+        resolvedDroneId = rawDroneId;
+      } else {
+        const droneDoc = await Drone.findOne({
+          $or: [{ code: rawDroneId.toString().toUpperCase() }, { droneId: rawDroneId.toString() }],
+        }).select('_id');
+        resolvedDroneId = droneDoc?._id;
+      }
+    }
+
+    // Persist a lightweight assignment so FE luôn có waypoint để vẽ tuyến
+    let assignmentId = null;
+    try {
+      const normalizedWaypoints = waypoints
+        .map((wp, idx) =>
+          normalisePoint(
+            {
+              lat: wp.lat,
+              lng: wp.lng,
+              type:
+                wp.type ||
+                (idx === 0 || idx === waypoints.length - 1 ? 'HUB' : idx === 1 ? 'RESTAURANT' : 'CUSTOMER'),
+            },
+            idx === 0 || idx === waypoints.length - 1 ? 'HUB' : idx === 1 ? 'RESTAURANT' : 'CUSTOMER'
+          )
+        )
+        .filter(Boolean)
+        .map((pt) => ({
+          lat: pt.lat,
+          lng: pt.lng,
+          type: pt.type?.toString().toUpperCase(),
+        }));
+
+      const update = {
+        route: {
+          provider: 'custom',
+          waypoints: normalizedWaypoints,
+          distance: distanceMeters,
+          duration: etaSeconds,
+        },
+        hubId: mongoose.isValidObjectId(hubIdValue) ? hubIdValue : undefined,
+        restaurantId,
+        customerId: order?.customerId,
+        status: 'TAKEOFF',
+      };
+      if (resolvedDroneId) {
+        update.droneId = resolvedDroneId;
+      }
+
+      const delivery = await DroneDelivery.findOneAndUpdate(
+        { orderId },
+        { $set: update, $setOnInsert: { orderId, ...update } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+      assignmentId = delivery?._id;
+    } catch (persistErr) {
+      console.warn('[auto-route] failed to persist delivery route', persistErr?.message);
+    }
+
     emitEvent({
       event: 'order_auto_route_loaded',
-      payload: { orderId, droneId, waypoints, distanceMeters, etaSeconds },
+      payload: {
+        orderId,
+        assignmentId,
+        droneId: rawDroneId,
+        droneDbId: resolvedDroneId,
+        hubId: hubIdValue,
+        restaurantId,
+        customerId: order?.customerId,
+        waypoints,
+        distanceMeters,
+        etaSeconds,
+        restaurantLocation: restaurantPoint,
+        customerLocation: customerPoint,
+        hubLocation: hubPoint,
+      },
       broadcast: true,
     });
 
     // Kick off a simple simulation so map có chuyển động realtime
-    if (droneId) {
-      simulateFlight({ droneId, orderId, hubId: hubPoint.id, waypoints });
+    if (rawDroneId) {
+      simulateFlight({ droneId: rawDroneId, orderId, hubId: hubIdValue, waypoints });
     }
 
-    return res.json({ data: { waypoints, distanceMeters, etaSeconds, hubId: hubPoint.id } });
+    return res.json({
+      data: {
+        assignmentId,
+        waypoints,
+        distanceMeters,
+        etaSeconds,
+        hubId: hubIdValue,
+        droneId: rawDroneId,
+        droneDbId: resolvedDroneId,
+        restaurantId,
+        customerId: order?.customerId,
+        restaurantLocation: restaurantPoint,
+        customerLocation: customerPoint,
+      },
+    });
   } catch (error) {
     console.error('[auto-route] failed', error);
     return res.status(500).json({ message: 'Failed to build auto-route' });

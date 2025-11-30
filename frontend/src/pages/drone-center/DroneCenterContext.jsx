@@ -129,6 +129,35 @@ const normalizeHub = (raw = {}) => ({
   isActive: typeof raw.isActive === 'boolean' ? raw.isActive : true,
 });
 
+const normalizeWaypoint = (wp = {}, index = 0, total = 0) => {
+  let lat = Number(
+    wp.lat ?? wp.latitude ?? wp.currentLocation?.lat ?? wp.location?.lat ?? wp.coordinates?.[1]
+  );
+  let lng = Number(
+    wp.lng ?? wp.longitude ?? wp.currentLocation?.lng ?? wp.location?.lng ?? wp.coordinates?.[0]
+  );
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const inVN = (a, b) => a >= 8 && a <= 24 && b >= 102 && b <= 110;
+  if (!inVN(lat, lng) && inVN(lng, lat)) {
+    const tmp = lat;
+    lat = lng;
+    lng = tmp;
+  }
+  const fallbackType =
+    wp.type ||
+    (index === 0 || (total && index === total - 1)
+      ? 'hub'
+      : index === 1
+      ? 'restaurant'
+      : 'customer');
+  return {
+    lat,
+    lng,
+    type: fallbackType.toString().toLowerCase(),
+    label: wp.label || wp.type || fallbackType,
+  };
+};
+
 const mapStatusToBucket = (status = '') => {
   const normalized = status.toLowerCase();
   if (normalized === 'idle') return 'idle';
@@ -224,11 +253,71 @@ export const DroneCenterProvider = ({ children }) => {
             }
           })
         );
-        setDeliveries(enriched);
+        const normalized = enriched.map((item) => {
+          const waypoints = Array.isArray(item?.route?.waypoints) ? item.route.waypoints : [];
+          const normalizedWaypoints = waypoints
+            .map((wp, idx) => normalizeWaypoint(wp, idx, waypoints.length))
+            .filter(Boolean);
+          if (!normalizedWaypoints.length) return item;
+          return {
+            ...item,
+            route: {
+              ...(item.route || {}),
+              waypoints: normalizedWaypoints,
+            },
+          };
+        });
+        setDeliveries((prev) =>
+          normalized.map((item) => {
+            const key = item.orderId || item._id || item.id;
+            const existing = prev.find((p) => (p.orderId || p._id || p.id) === key) || {};
+            const merged = { ...item };
+            if (!merged.droneId && existing.droneId) {
+              merged.droneId = existing.droneId;
+            }
+            return merged;
+          })
+        );
       }
     } catch (err) {
       // silent for now
     }
+  }, []);
+
+  const mergeDeliveryRoute = useCallback((payload = {}) => {
+    const rawWaypoints = Array.isArray(payload.waypoints) ? payload.waypoints : [];
+    const normalizedWaypoints = rawWaypoints
+      .map((wp, idx) => normalizeWaypoint(wp, idx, rawWaypoints.length))
+      .filter(Boolean);
+    if (!normalizedWaypoints.length) return;
+
+    const orderId = payload.orderId || payload.order?.id || payload.order?._id;
+    if (!orderId) return;
+    setDeliveries((prev) => {
+      const next = [...prev];
+      const idx = next.findIndex((item) => (item.orderId || item._id || item.id) === orderId);
+      const base = idx >= 0 ? next[idx] : {};
+      const merged = {
+        ...base,
+        orderId: orderId || base.orderId,
+        droneId: payload.droneId || base.droneId,
+        hubId: payload.hubId || base.hubId,
+        restaurantId: payload.restaurantId || base.restaurantId,
+        customerId: payload.customerId || base.customerId,
+        route: {
+          ...(base.route || {}),
+          waypoints: normalizedWaypoints,
+          distance: payload.distanceMeters || base.route?.distance,
+          duration: payload.etaSeconds || base.route?.duration,
+        },
+      };
+      if (idx >= 0) {
+        next[idx] = merged;
+      } else {
+        next.unshift(merged);
+      }
+      return next;
+    });
   }, []);
 
   const refreshHubs = useCallback(async () => {
@@ -464,6 +553,7 @@ export const DroneCenterProvider = ({ children }) => {
     socket.on('order_auto_route_loaded', (payload = {}) => {
       if (payload) {
         recordEvent({ type: 'order_auto_route_loaded', timestamp: new Date().toISOString(), ...payload });
+        mergeDeliveryRoute(payload);
       }
     });
     };
@@ -485,7 +575,7 @@ export const DroneCenterProvider = ({ children }) => {
         activeSocket.disconnect();
       }
     };
-  }, [applyLocationUpdate, recordEvent, upsertDrone]);
+  }, [applyLocationUpdate, mergeDeliveryRoute, recordEvent, upsertDrone]);
 
   const annotated = useMemo(() => annotateDrones(drones), [annotateDrones, drones]);
 

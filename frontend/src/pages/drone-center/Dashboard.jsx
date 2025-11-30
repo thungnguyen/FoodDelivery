@@ -82,6 +82,43 @@ const Dashboard = () => {
     [drones]
   );
 
+  const mapRoutePoints = useMemo(() => {
+    const normalizeId = (val) => (val ? val.toString().toUpperCase() : '');
+    const activeDroneIds = new Set(
+      activeOrders
+        .map((o) => o.droneId || o.assignedDroneId)
+        .filter(Boolean)
+        .map((id) => normalizeId(id))
+    );
+
+    const pickDelivery = () => {
+      if (activeDroneIds.size) {
+        const matched = deliveries.find((d) => {
+          const did =
+            d.droneId?.droneId ||
+            d.droneId?.code ||
+            d.droneId?._id ||
+            d.droneId?.id ||
+            d.droneId ||
+            '';
+          return activeDroneIds.has(normalizeId(did)) && Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3;
+        });
+        if (matched) return matched;
+      }
+      return deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3);
+    };
+
+    const waypoints = pickDelivery()?.route?.waypoints || [];
+    return waypoints.map((wp, idx) => ({
+      lat: wp.lat,
+      lng: wp.lng,
+      type:
+        wp.type?.toLowerCase() ||
+        (idx === 0 || idx === waypoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer'),
+      label: wp.label || wp.type,
+    }));
+  }, [activeOrders, deliveries]);
+
   const handleAssignOrder = async (order) => {
     if (!order) return;
     const orderId = order._id || order.id || order.orderId;
@@ -181,14 +218,7 @@ const Dashboard = () => {
         <DroneMapCanvas
           drones={drones}
           hubs={hubs}
-          routePoints={
-            deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3)?.route?.waypoints?.map((wp) => ({
-              lat: wp.lat,
-              lng: wp.lng,
-              type: wp.type?.toLowerCase(),
-              label: wp.type,
-            })) || []
-          }
+          routePoints={mapRoutePoints}
         />
         <div className="map-legend">
           <div className="legend-item">
@@ -198,6 +228,14 @@ const Dashboard = () => {
           <div className="legend-item">
             <span className="marker-dot hub" />
             Hub
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#fb7185' }} />
+            Nhà hàng
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#22c55e' }} />
+            Khách hàng
           </div>
         </div>
       </div>

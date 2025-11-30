@@ -783,11 +783,23 @@ router.put('/:id/geocode', async (req, res) => {
     if (!restaurant) {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
-    const fullAddress = restaurant.address?.fullAddress || restaurant.legacyLocation;
+    const bodyAddress = req.body?.address || req.body || {};
+    const fullAddress =
+      bodyAddress.fullAddress ||
+      [bodyAddress.street, bodyAddress.ward, bodyAddress.district, bodyAddress.city].filter(Boolean).join(', ') ||
+      restaurant.address?.fullAddress ||
+      restaurant.legacyLocation;
+    if (!fullAddress || !fullAddress.trim()) {
+      return res.status(400).json({ message: 'Địa chỉ trống, không thể geocode' });
+    }
     const coords = await geocode(fullAddress);
     if (coords) {
       restaurant.address = {
         ...(restaurant.address?.toObject?.() || {}),
+        street: bodyAddress.street || restaurant.address?.street,
+        ward: bodyAddress.ward || restaurant.address?.ward,
+        district: bodyAddress.district || restaurant.address?.district,
+        city: bodyAddress.city || restaurant.address?.city,
         fullAddress: fullAddress || computeFullAddress(restaurant.address),
         location: { type: 'Point', coordinates: [coords.lng, coords.lat] },
       };
