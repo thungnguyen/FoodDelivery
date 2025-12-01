@@ -7,7 +7,9 @@ const navItems = [
   { path: '/drone-center/dashboard', label: 'Dashboard' },
   { path: '/drone-center/drones', label: 'Drones' },
   { path: '/drone-center/hubs', label: 'Hubs' },
+  { path: '/drone-center/assign', label: 'Assign Orders' },
   { path: '/drone-center/map', label: 'Realtime Map' },
+  { path: '/drone-center/maintenance', label: 'Maintenance' },
   { path: '/drone-center/simulator', label: 'Simulator' },
 ];
 

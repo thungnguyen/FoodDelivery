@@ -1,7 +1,36 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-// Restaurant Schema
+const pointSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+    },
+    coordinates: {
+      type: [Number],
+      validate: {
+        validator: (val) => Array.isArray(val) && val.length === 2,
+        message: 'Coordinates must be [lng, lat]',
+      },
+    },
+  },
+  { _id: false }
+);
+
+const addressSchema = new mongoose.Schema(
+  {
+    street: { type: String, trim: true },
+    ward: { type: String, trim: true },
+    district: { type: String, trim: true },
+    city: { type: String, trim: true },
+    fullAddress: { type: String, trim: true },
+    location: { type: pointSchema, _id: false },
+  },
+  { _id: false }
+);
+
 const restaurantSchema = new mongoose.Schema(
   {
     name: {
@@ -18,10 +47,16 @@ const restaurantSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    location: {
-      type: String,
-      required: true, 
+    address: {
+      type: addressSchema,
+      required: false,
     },
+    // keep legacyLocation for backward compatibility with existing documents
+    legacyLocation: {
+      type: String,
+      trim: true,
+    },
+    // Expose lat/lng for clients that still consume this shape (derived from address.location)
     locationCoords: {
       lat: { type: Number },
       lng: { type: Number },
@@ -101,8 +136,19 @@ const restaurantSchema = new mongoose.Schema(
       default: '',
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+const computeFullAddress = (address = {}) => {
+  const parts = [address.street, address.ward, address.district, address.city]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean);
+  return parts.join(', ');
+};
 
 // Hash the password before saving the restaurant document
 restaurantSchema.pre('save', async function (next) {
@@ -117,6 +163,38 @@ restaurantSchema.pre('save', async function (next) {
   }
   next();
 });
+
+restaurantSchema.pre('save', function (next) {
+  if (this.address) {
+    const computedFull = computeFullAddress(this.address);
+    if (computedFull && !this.address.fullAddress) {
+      this.address.fullAddress = computedFull;
+    }
+
+    const coords = this.address.location?.coordinates;
+    if (Array.isArray(coords) && coords.length === 2) {
+      this.locationCoords = {
+        lat: Number(coords[1]),
+        lng: Number(coords[0]),
+      };
+    }
+  } else if (!this.address && this.locationCoords?.lat && this.locationCoords?.lng) {
+    this.address = {
+      location: {
+        type: 'Point',
+        coordinates: [Number(this.locationCoords.lng), Number(this.locationCoords.lat)],
+      },
+      fullAddress: this.legacyLocation || '',
+    };
+  }
+  next();
+});
+
+restaurantSchema.virtual('location').get(function () {
+  return this.address?.fullAddress || this.legacyLocation || '';
+});
+
+restaurantSchema.index({ 'address.location': '2dsphere' });
 
 // Method to compare password for login
 restaurantSchema.methods.compareAdminPassword = async function (password) {

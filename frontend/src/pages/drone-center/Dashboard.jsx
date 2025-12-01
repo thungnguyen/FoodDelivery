@@ -1,6 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import axios from 'axios';
 import { useDroneCenter } from './DroneCenterContext';
 import DroneMapCanvas from './components/DroneMapCanvas';
+import { ORDER_SERVICE_URL } from '../../utils/serviceUrls';
+import { AUTH_ROLES, getAuthToken } from '../../utils/authTokens';
 
 const formatTimeAgo = (timestamp) => {
   if (!timestamp) return '—';
@@ -15,7 +18,61 @@ const formatTimeAgo = (timestamp) => {
 };
 
 const Dashboard = () => {
-  const { drones, stats, events, hubs } = useDroneCenter();
+  const { drones, stats, events, hubs, deliveries } = useDroneCenter();
+  const [orderQueue, setOrderQueue] = useState([]);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderError, setOrderError] = useState('');
+  const [actionOrderId, setActionOrderId] = useState('');
+
+  const orderHeaders = useMemo(() => {
+    const token = getAuthToken(AUTH_ROLES.SUPER_ADMIN) || getAuthToken(AUTH_ROLES.ADMIN);
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  const fetchOrderQueue = useCallback(async () => {
+    setOrderLoading(true);
+    try {
+      const res = await axios.get(`${ORDER_SERVICE_URL}/api/drone/orders-queue`, { headers: orderHeaders });
+      const list = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [];
+      setOrderQueue(list);
+      setOrderError('');
+    } catch (err) {
+      setOrderError(err?.response?.data?.message || 'Không tải được hàng đợi drone');
+      setOrderQueue([]);
+    } finally {
+      setOrderLoading(false);
+    }
+  }, [orderHeaders]);
+
+  useEffect(() => {
+    fetchOrderQueue();
+    const timer = setInterval(fetchOrderQueue, 12000);
+    return () => clearInterval(timer);
+  }, [fetchOrderQueue]);
+
+  const waitingOrders = useMemo(
+    () => orderQueue.filter((order) => (order.droneStatus || order.status || '').toLowerCase() === 'waiting_for_drone'),
+    [orderQueue]
+  );
+  const activeOrders = useMemo(
+    () =>
+      orderQueue.filter((order) =>
+        [
+          'drone_assigned',
+          'drone_arriving_restaurant',
+          'drone_enroute_to_restaurant',
+          'drone_arrived_restaurant',
+          'drone_picked_food',
+          'drone_arriving_customer',
+          'drone_delivering',
+          'drone_arrived_customer',
+          'returning',
+        ].includes(
+          (order.droneStatus || order.status || '').toLowerCase()
+        )
+      ),
+    [orderQueue]
+  );
 
   const lowBattery = stats?.lowBatteryList || [];
   const offline = stats?.offlineList || [];
@@ -24,6 +81,102 @@ const Dashboard = () => {
     () => drones.filter((drone) => drone.offline || (drone.battery ?? 100) < 30),
     [drones]
   );
+
+  const mapRoutePoints = useMemo(() => {
+    const normalizeId = (val) => (val ? val.toString().toUpperCase() : '');
+    const activeDroneIds = new Set(
+      activeOrders
+        .map((o) => o.droneId || o.assignedDroneId)
+        .filter(Boolean)
+        .map((id) => normalizeId(id))
+    );
+
+    const pickDelivery = () => {
+      if (activeDroneIds.size) {
+        const matched = deliveries.find((d) => {
+          const did =
+            d.droneId?.droneId ||
+            d.droneId?.code ||
+            d.droneId?._id ||
+            d.droneId?.id ||
+            d.droneId ||
+            '';
+          return activeDroneIds.has(normalizeId(did)) && Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3;
+        });
+        if (matched) return matched;
+      }
+      return deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3);
+    };
+
+    const waypoints = pickDelivery()?.route?.waypoints || [];
+    return waypoints.map((wp, idx) => ({
+      lat: wp.lat,
+      lng: wp.lng,
+      type:
+        wp.type?.toLowerCase() ||
+        (idx === 0 || idx === waypoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer'),
+      label: wp.label || wp.type,
+    }));
+  }, [activeOrders, deliveries]);
+
+  const handleAssignOrder = async (order) => {
+    if (!order) return;
+    const orderId = order._id || order.id || order.orderId;
+    setActionOrderId(orderId);
+    try {
+      await axios.post(
+        `${ORDER_SERVICE_URL}/api/admin/drone/assign`,
+        { orderId, hubId: order.droneHubId || order.hubId },
+        { headers: orderHeaders }
+      );
+      fetchOrderQueue();
+    } catch (err) {
+      setOrderError(err?.response?.data?.message || 'Không gán được drone');
+    } finally {
+      setActionOrderId('');
+    }
+  };
+
+  const handleStageUpdate = async (order, endpoint) => {
+    if (!order) return;
+    const orderId = order._id || order.id || order.orderId;
+    const droneId = order.droneId;
+    if (!droneId) {
+      setOrderError('Thiếu droneId cho đơn này.');
+      return;
+    }
+    setActionOrderId(orderId);
+    try {
+      await axios.post(`${ORDER_SERVICE_URL}${endpoint}`, { orderId, droneId }, { headers: orderHeaders });
+      fetchOrderQueue();
+    } catch (err) {
+      setOrderError(err?.response?.data?.message || 'Không cập nhật được trạng thái');
+    } finally {
+      setActionOrderId('');
+    }
+  };
+
+  const formatStage = (order) => {
+    const status = (order.droneStatus || order.status || '').toLowerCase();
+    switch (status) {
+      case 'waiting_for_drone':
+        return 'Chờ gán drone';
+      case 'drone_assigned':
+        return 'Drone đang rời hub';
+      case 'drone_enroute_to_restaurant':
+        return 'Đến nhà hàng';
+      case 'drone_arrived_restaurant':
+        return 'Đã tới nhà hàng';
+      case 'drone_picked_food':
+        return 'Đã lấy hàng';
+      case 'drone_delivering':
+        return 'Đang giao';
+      case 'drone_arrived_customer':
+        return 'Chờ khách xác nhận';
+      default:
+        return order.status || '—';
+    }
+  };
 
   return (
     <>
@@ -62,7 +215,11 @@ const Dashboard = () => {
 
       <div className="panel">
         <h2>Realtime Overview</h2>
-        <DroneMapCanvas drones={drones} hubs={hubs} />
+        <DroneMapCanvas
+          drones={drones}
+          hubs={hubs}
+          routePoints={mapRoutePoints}
+        />
         <div className="map-legend">
           <div className="legend-item">
             <span className="marker-dot drone" />
@@ -72,7 +229,99 @@ const Dashboard = () => {
             <span className="marker-dot hub" />
             Hub
           </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#fb7185' }} />
+            Nhà hàng
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#22c55e' }} />
+            Khách hàng
+          </div>
         </div>
+      </div>
+
+      <div className="panel">
+        <div className="flex between">
+          <h3>Hàng đợi đơn drone</h3>
+          <span className="badge">{waitingOrders.length} chờ nhận</span>
+        </div>
+        {orderError && <div className="error-text">{orderError}</div>}
+        {orderLoading ? (
+          <div className="loading-line">Đang tải đơn...</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="drone-table">
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Khách</th>
+                  <th>Trạng thái</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {[...waitingOrders, ...activeOrders].slice(0, 10).map((order) => {
+                  const key = order._id || order.id || order.orderId;
+                  const isWaiting = (order.droneStatus || order.status || '').toLowerCase() === 'waiting_for_drone';
+                  return (
+                    <tr key={key}>
+                      <td>
+                        <div className="mono">{order.orderId || key}</div>
+                        <div className="text-muted">{order.restaurantId || '—'}</div>
+                      </td>
+                      <td>{order.customerId || '—'}</td>
+                      <td>
+                        <span className={`pill ${isWaiting ? 'waiting' : 'flying'}`}>{formatStage(order)}</span>
+                      </td>
+                      <td>
+                        {isWaiting ? (
+                          <button
+                            className="btn primary small"
+                            disabled={actionOrderId === key}
+                            onClick={() => handleAssignOrder(order)}
+                          >
+                            {actionOrderId === key ? 'Đang gán...' : 'Nhận đơn'}
+                          </button>
+                        ) : (
+                          <div className="flex" style={{ gap: 6 }}>
+                            <button
+                              className="btn ghost small"
+                              disabled={actionOrderId === key}
+                              onClick={() => handleStageUpdate(order, '/api/drone/arrived-restaurant')}
+                            >
+                              Tới NH
+                            </button>
+                            <button
+                              className="btn ghost small"
+                              disabled={actionOrderId === key}
+                              onClick={() => handleStageUpdate(order, '/api/order/drone-pickup')}
+                            >
+                              Đã lấy
+                            </button>
+                            <button
+                              className="btn ghost small"
+                              disabled={actionOrderId === key}
+                              onClick={() => handleStageUpdate(order, '/api/drone/arrived-customer')}
+                            >
+                              Đến KH
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {[...waitingOrders, ...activeOrders].length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="text-muted">
+                      Chưa có đơn drone nào.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="flex" style={{ gap: 16, flexWrap: 'wrap' }}>

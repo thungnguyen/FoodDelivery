@@ -1,6 +1,10 @@
+import mongoose from 'mongoose';
 import Hub from '../models/Hub.js';
+import Drone from '../models/Drone.js';
+import DroneDelivery from '../models/DroneDelivery.js';
 import emitEvent from '../utils/eventBus.js';
 import { normalizeBaseUrl } from '../utils/url.js';
+import fetch from 'node-fetch';
 
 const ORDER_SERVICE_URL = normalizeBaseUrl(process.env.ORDER_SERVICE_URL, 'http://localhost:5005', [
   '/api/orders',
@@ -12,6 +16,7 @@ const RESTAURANT_SERVICE_URL = normalizeBaseUrl(
   ['/api/restaurants', '/api']
 );
 const SERVICE_KEY = process.env.SERVICE_INTERNAL_KEY || 'super-admin-internal-key';
+const DELIVERY_BASE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, 'http://localhost:5010', ['/api']);
 
 const fetchJson = async (url) => {
   const res = await fetch(url, {
@@ -47,9 +52,70 @@ const accumulateDistanceKm = (waypoints) => {
   return Math.round(dist * 100) / 100;
 };
 
+const toPoint = (lat, lng, type) => {
+  const nLat = Number(lat);
+  const nLng = Number(lng);
+  if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return null;
+  return { lat: nLat, lng: nLng, type };
+};
+
+const isLatLngInVietnam = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && lat >= 8 && lat <= 24 && lng >= 102 && lng <= 110;
+
+const normalisePoint = (point, fallbackType) => {
+  if (!point) return null;
+  let { lat, lng } = point;
+  // Detect swapped coords (lat in 102-110 and lng in 8-24) and flip
+  if (!isLatLngInVietnam(lat, lng) && isLatLngInVietnam(lng, lat)) {
+    const tmp = lat;
+    lat = lng;
+    lng = tmp;
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng, type: point.type || fallbackType, label: point.label || point.name };
+};
+
+const simulateFlight = async ({ droneId, orderId, hubId, waypoints }) => {
+  if (!droneId || !Array.isArray(waypoints) || waypoints.length === 0) return;
+  const delayMs = 1800;
+  const postLocation = async (wp, status) => {
+    try {
+      await fetch(`${DELIVERY_BASE_URL}/api/drone/update-location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          droneId,
+          lat: wp.lat,
+          lng: wp.lng,
+          status,
+          currentOrderId: orderId,
+          hubId,
+        }),
+      });
+    } catch (err) {
+      console.warn('[auto-route] simulateFlight failed', err?.message);
+    }
+  };
+
+  waypoints.forEach((wp, index) => {
+    setTimeout(() => {
+      let status = 'drone_enroute_to_restaurant';
+      if (wp.type?.toLowerCase() === 'restaurant') status = index === 1 ? 'drone_arrived_restaurant' : 'drone_delivering';
+      if (wp.type?.toLowerCase() === 'customer') status = 'drone_arrived_customer';
+      if (index === waypoints.length - 1) status = 'returning';
+      postLocation(wp, status);
+      if (index === waypoints.length - 1) {
+        setTimeout(() => {
+          // clear current order when đã về hub
+          postLocation({ ...wp, orderId: null }, 'idle');
+        }, delayMs);
+      }
+    }, index * delayMs);
+  });
+};
+
 export const generateAutoRoute = async (req, res) => {
   try {
-    const { orderId, droneId, hubId } = req.body || {};
+    const { orderId, droneId: rawDroneId, hubId } = req.body || {};
     if (!orderId) {
       return res.status(400).json({ message: 'orderId is required' });
     }
@@ -66,6 +132,7 @@ export const generateAutoRoute = async (req, res) => {
       : { ok: false };
     let restaurant = restaurantResp.data;
 
+    // Try geocode order/restaurant if missing coordinates
     if ((!order?.deliveryLat || !order?.deliveryLng) && orderId) {
       await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}/geocode`);
       orderResp = await fetchJson(`${ORDER_SERVICE_URL}/api/orders/${orderId}`);
@@ -79,18 +146,41 @@ export const generateAutoRoute = async (req, res) => {
 
     const hub = hubId ? await Hub.findById(hubId) : await Hub.findOne();
 
-    let restaurantPoint =
-      restaurant?.locationCoords && typeof restaurant.locationCoords.lat === 'number'
-        ? { lat: restaurant.locationCoords.lat, lng: restaurant.locationCoords.lng, type: 'restaurant' }
-        : null;
-    let customerPoint =
-      typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number'
-        ? { lat: order.deliveryLat, lng: order.deliveryLng, type: 'customer' }
-        : null;
-    let hubPoint =
-      hub && typeof hub.location?.lat === 'number'
-        ? { lat: hub.location.lat, lng: hub.location.lng, type: 'hub', id: hub._id.toString() }
-        : null;
+    let restaurantPoint = normalisePoint(
+      toPoint(restaurant?.locationCoords?.lat, restaurant?.locationCoords?.lng, 'restaurant') ||
+        toPoint(restaurant?.address?.location?.coordinates?.[1], restaurant?.address?.location?.coordinates?.[0], 'restaurant'),
+      'restaurant'
+    );
+    let customerPoint = normalisePoint(
+      toPoint(order?.deliveryLat, order?.deliveryLng, 'customer') ||
+        toPoint(order?.deliveryLocation?.lat, order?.deliveryLocation?.lng, 'customer') ||
+        toPoint(order?.deliveryLocation?.coordinates?.[1], order?.deliveryLocation?.coordinates?.[0], 'customer'),
+      'customer'
+    );
+    let hubPoint = normalisePoint(toPoint(hub?.location?.lat, hub?.location?.lng, 'hub'), 'hub');
+
+    if (hubPoint) hubPoint.label = hub?.name || hub?.code || 'Hub';
+    if (restaurantPoint) restaurantPoint.label = restaurant?.name || restaurant?.restaurantName || 'Nhà hàng';
+    if (customerPoint) customerPoint.label = order?.customerName || order?.deliveryAddress || 'Khách hàng';
+
+    // Nếu vẫn chưa có toạ độ hợp lệ, thử geocode lại bằng địa chỉ (đảm bảo không bị đảo lat/lng)
+    if ((!customerPoint || !isLatLngInVietnam(customerPoint.lat, customerPoint.lng)) && order?.deliveryAddress) {
+      const geo = await fetchJson(`${ORDER_SERVICE_URL}/api/geocode?q=${encodeURIComponent(order.deliveryAddress)}`);
+      const coords = geo?.data;
+      if (coords?.lat && coords?.lng) {
+        customerPoint = normalisePoint(toPoint(coords.lat, coords.lng, 'customer'), 'customer');
+      }
+    }
+    if ((!restaurantPoint || !isLatLngInVietnam(restaurantPoint.lat, restaurantPoint.lng)) && restaurant?.address?.fullAddress) {
+      const geo = await fetchJson(`${RESTAURANT_SERVICE_URL}/api/geocode?q=${encodeURIComponent(restaurant.address.fullAddress)}`);
+      const coords = geo?.data;
+      if (coords?.lat && coords?.lng) {
+        restaurantPoint = normalisePoint(toPoint(coords.lat, coords.lng, 'restaurant'), 'restaurant');
+      }
+    }
+    if (hubPoint && hub?._id) {
+      hubPoint.id = hub._id.toString();
+    }
 
     // Fallbacks to avoid missing coordinates
     if (!hubPoint && restaurantPoint) {
@@ -108,20 +198,20 @@ export const generateAutoRoute = async (req, res) => {
     }
 
     if (!hubPoint || !restaurantPoint || !customerPoint) {
-      return res.status(400).json({
-        message: 'Missing hub/restaurant/customer coordinates for auto-route',
-        data: { hub: hubPoint, restaurant: restaurantPoint, customer: customerPoint },
-      });
+      // Fallback: duplicate whatever coords we have so route vẫn tạo được
+      const anyPoint = hubPoint || restaurantPoint || customerPoint;
+      const safe = anyPoint || { lat: 0, lng: 0 };
+      hubPoint = hubPoint || { ...safe, type: 'hub', id: hub?._id?.toString() || 'fallback-hub' };
+      restaurantPoint = restaurantPoint || { ...safe, type: 'restaurant' };
+      customerPoint = customerPoint || { ...safe, type: 'customer' };
     }
 
-    const MAX_DRONE_RADIUS_M = 4000;
+    // Cho phép phạm vi rộng hơn (50km từ hub)
+    const MAX_DRONE_RADIUS_M = 50_000;
     const distHubCustomer = haversineKm(hubPoint, customerPoint) * 1000;
     const distHubRestaurant = haversineKm(hubPoint, restaurantPoint) * 1000;
-    if (distHubCustomer > MAX_DRONE_RADIUS_M) {
-      return res.status(400).json({ message: 'Customer location is outside drone delivery radius' });
-    }
-    if (distHubRestaurant > MAX_DRONE_RADIUS_M) {
-      return res.status(400).json({ message: 'Restaurant location is outside drone delivery radius' });
+    if (distHubCustomer > MAX_DRONE_RADIUS_M || distHubRestaurant > MAX_DRONE_RADIUS_M) {
+      console.warn('[auto-route] outside 50km radius, vẫn tiếp tục dựng tuyến');
     }
 
     const waypoints = [hubPoint, restaurantPoint, customerPoint, hubPoint];
@@ -129,13 +219,114 @@ export const generateAutoRoute = async (req, res) => {
     const distanceMeters = Math.round(distanceKm * 1000);
     const etaSeconds = Math.round((distanceKm / 30) * 3600); // assume 30km/h
 
+    const hubIdValue = hub?._id?.toString?.() || hubPoint.id || hubId;
+
+    // Resolve droneId to ObjectId if possible (keeps link khi simulator gửi mã drone)
+    let resolvedDroneId = undefined;
+    if (rawDroneId) {
+      if (mongoose.isValidObjectId(rawDroneId)) {
+        resolvedDroneId = rawDroneId;
+      } else {
+        const droneDoc = await Drone.findOne({
+          $or: [{ code: rawDroneId.toString().toUpperCase() }, { droneId: rawDroneId.toString() }],
+        }).select('_id');
+        resolvedDroneId = droneDoc?._id;
+      }
+    }
+
+    // Persist a lightweight assignment so FE luôn có waypoint để vẽ tuyến
+    let assignmentId = null;
+    try {
+      const normalizedWaypoints = waypoints
+        .map((wp, idx) =>
+          normalisePoint(
+            {
+              lat: wp.lat,
+              lng: wp.lng,
+              type:
+                wp.type ||
+                (idx === 0 || idx === waypoints.length - 1 ? 'HUB' : idx === 1 ? 'RESTAURANT' : 'CUSTOMER'),
+              label: wp.label,
+              name: wp.name,
+            },
+            idx === 0 || idx === waypoints.length - 1 ? 'HUB' : idx === 1 ? 'RESTAURANT' : 'CUSTOMER'
+          )
+        )
+        .filter(Boolean)
+        .map((pt) => ({
+          lat: pt.lat,
+          lng: pt.lng,
+          type: pt.type?.toString().toUpperCase(),
+          label: pt.label || pt.name,
+        }));
+
+      const update = {
+        route: {
+          provider: 'custom',
+          waypoints: normalizedWaypoints,
+          distance: distanceMeters,
+          duration: etaSeconds,
+        },
+        hubId: mongoose.isValidObjectId(hubIdValue) ? hubIdValue : undefined,
+        restaurantId,
+        customerId: order?.customerId,
+        status: 'TAKEOFF',
+      };
+      if (resolvedDroneId) {
+        update.droneId = resolvedDroneId;
+      }
+
+      const delivery = await DroneDelivery.findOneAndUpdate(
+        { orderId },
+        { $set: update, $setOnInsert: { orderId, ...update } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+      assignmentId = delivery?._id;
+    } catch (persistErr) {
+      console.warn('[auto-route] failed to persist delivery route', persistErr?.message);
+    }
+
     emitEvent({
       event: 'order_auto_route_loaded',
-      payload: { orderId, droneId, waypoints, distanceMeters, etaSeconds },
+      payload: {
+        orderId,
+        assignmentId,
+        droneId: rawDroneId,
+        droneDbId: resolvedDroneId,
+        hubId: hubIdValue,
+        restaurantId,
+        customerId: order?.customerId,
+        waypoints,
+        distanceMeters,
+        etaSeconds,
+        restaurantLocation: restaurantPoint,
+        customerLocation: customerPoint,
+        hubLocation: hubPoint,
+      },
       broadcast: true,
     });
 
-    return res.json({ data: { waypoints, distanceMeters, etaSeconds, hubId: hubPoint.id } });
+    // Chỉ simulate khi được yêu cầu rõ ràng (tránh tự động bay khi nhà hàng bấm chờ)
+    const shouldSimulate = req.body?.simulate === true || req.query?.simulate === 'true';
+    if (shouldSimulate && rawDroneId) {
+      simulateFlight({ droneId: rawDroneId, orderId, hubId: hubIdValue, waypoints });
+    }
+
+    return res.json({
+      data: {
+        assignmentId,
+        waypoints,
+        distanceMeters,
+        etaSeconds,
+        hubId: hubIdValue,
+        droneId: rawDroneId,
+        droneDbId: resolvedDroneId,
+        restaurantId,
+        customerId: order?.customerId,
+        restaurantLocation: restaurantPoint,
+        customerLocation: customerPoint,
+      },
+    });
   } catch (error) {
     console.error('[auto-route] failed', error);
     return res.status(500).json({ message: 'Failed to build auto-route' });

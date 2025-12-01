@@ -24,6 +24,7 @@ function OrderForm({ addOrder }) {
 
   const [customerInfo, setCustomerInfo] = useState(null);
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryCoords, setDeliveryCoords] = useState({ lat: "", lng: "" });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [promoCode, setPromoCode] = useState("");
@@ -44,8 +45,18 @@ function OrderForm({ addOrder }) {
         const res = await axios.get(`${AUTH_SERVICE_URL}/api/auth/customer/profile`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        setCustomerInfo(res.data.data.customer);
-        setDeliveryAddress(res.data.data.customer.location || "");
+        const c = res.data.data.customer;
+        setCustomerInfo(c);
+        const addressLabel =
+          c?.address?.fullAddress ||
+          [c?.address?.street, c?.address?.ward, c?.address?.district, c?.address?.city]
+            .filter(Boolean)
+            .join(", ");
+        setDeliveryAddress(addressLabel || "");
+        setDeliveryCoords({
+          lat: c?.address?.location?.coordinates?.[1] ?? "",
+          lng: c?.address?.location?.coordinates?.[0] ?? "",
+        });
       } catch (error) {
         console.error("Error fetching customer profile:", error);
         alert("Failed to load customer profile");
@@ -186,9 +197,6 @@ function OrderForm({ addOrder }) {
     if (!value.trim()) {
       return "Delivery Address is required.";
     }
-    if (value.trim().length < 10) {
-      return "Address must be at least 10 characters long.";
-    }
     return "";
   };
 
@@ -292,6 +300,8 @@ function OrderForm({ addOrder }) {
       shippingFee,
       totalPrice: finalTotal,
       deliveryAddress: deliveryAddress,
+      deliveryLat: deliveryCoords.lat || undefined,
+      deliveryLng: deliveryCoords.lng || undefined,
       promotionCode: appliedPromotion?.code || "",
       promotionDiscount: discountAmount,
       promotionDetails: appliedPromotion,

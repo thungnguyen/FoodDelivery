@@ -9,6 +9,7 @@ import userRoutes from "./routes/userRoutes.js";
 import financeRoutes from "./routes/financeRoutes.js";
 import droneFlowRoutes from "./routes/droneFlowRoutes.js";
 import geocodeRoutes from "./routes/geocodeRoutes.js";
+import { getDroneOrdersQueue } from "./controllers/orderController.js";
 import { startOrderEventConsumers } from "./events/index.js";
 import { connectRabbitMQ } from "./src/rabbitmq.js";
 
@@ -33,6 +34,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/orders/finance", financeRoutes);
 app.use("/api", droneFlowRoutes);
 app.use("/api", geocodeRoutes);
+app.get("/api/drone/orders-queue", getDroneOrdersQueue);
 
 
 // WebSocket Connection

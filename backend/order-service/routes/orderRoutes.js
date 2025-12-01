@@ -3,6 +3,7 @@ import {
     createOrder,
     getOrders,
     getOrderById,
+    getDroneOrdersQueue,
     updateOrderStatus,
     cancelOrder,
     updateOrderDetails,
@@ -17,6 +18,9 @@ const router = express.Router();
 
 // Only customers can place orders
 router.post("/", protect, authorizeRoles("customer"), createOrder);
+
+// Public endpoint for drone center queue (no auth)
+router.get("/drone/orders-queue", getDroneOrdersQueue);
 
 // Customers, restaurants and admins can view orders (scoped in controller)
 router.get("/", protect, authorizeRoles("customer", "restaurant", "admin", "superAdmin"), getOrders);

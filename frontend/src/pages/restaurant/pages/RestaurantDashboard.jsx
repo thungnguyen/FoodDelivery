@@ -2,12 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import axios from 'axios';
 import '../styles/rdashboard.css';
 import { io } from 'socket.io-client';
+import DroneMapCanvas from '../../drone-center/components/DroneMapCanvas';
 import {
   RESTAURANT_SERVICE_URL,
   ORDER_SERVICE_URL,
   REALTIME_SERVICE_URL,
   PROMOTION_SERVICE_URL,
   SETTLEMENT_SERVICE_URL,
+  DELIVERY_SERVICE_URL,
 } from '../../../utils/serviceUrls';
 import { getAuthToken, clearAuthToken, AUTH_ROLES } from '../../../utils/authTokens';
 
@@ -52,6 +54,7 @@ const ORDER_STATUS_LABELS = {
   'Pending Confirmation': 'Chờ xác nhận',
   Confirmed: 'Đã xác nhận',
   Preparing: 'Đang chuẩn bị',
+  Ready: 'Món sẵn sàng',
   'Awaiting Driver': 'Chờ tài xế',
   'Out for Delivery': 'Đang giao hàng',
   Delivered: 'Đã giao hàng',
@@ -75,7 +78,8 @@ const ORDER_STATUS_LABELS = {
 const ORDER_STATUS_ACTIONS = {
   'Pending Confirmation': { nextStatus: 'Confirmed', label: 'Xác nhận đơn' },
   Confirmed: { nextStatus: 'Preparing', label: 'Bắt đầu chuẩn bị' },
-  Preparing: { nextStatus: 'Awaiting Driver', label: 'Hoàn tất chế biến' },
+  Preparing: { nextStatus: 'Ready', label: 'Đánh dấu Ready' },
+  Ready: { nextStatus: 'waiting_for_drone', label: 'Chờ gán drone' },
   Pending: { nextStatus: 'Confirmed', label: 'Xác nhận đơn' },
 };
 
@@ -109,10 +113,18 @@ const mapDroneStage = (status = '') => {
   return '';
 };
 
+const extractPoint = (raw = {}) => {
+  const lat = Number(raw.lat ?? raw.latitude ?? raw.deliveryLat);
+  const lng = Number(raw.lng ?? raw.longitude ?? raw.deliveryLng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  return null;
+};
+
 const ORDER_STATUS_CLASSES = {
   'Pending Confirmation': 'status-pending',
   Confirmed: 'status-confirmed',
   Preparing: 'status-preparing',
+  Ready: 'status-ready',
   'Awaiting Driver': 'status-ready',
   'Out for Delivery': 'status-out',
   Delivered: 'status-delivered',
@@ -174,6 +186,8 @@ function RestaurantDashboard() {
     totalOrders: 0,
   });
   const [droneTracking, setDroneTracking] = useState({});
+  const [routeCache, setRouteCache] = useState({});
+  const [trackingVisible, setTrackingVisible] = useState({});
   const [walletSnapshot, setWalletSnapshot] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState('');
@@ -794,6 +808,7 @@ function RestaurantDashboard() {
           break;
         }
         case 'drone-location-update':
+        case 'drone:tracking:update':
         case 'drone-status-update': {
           const orderId = payload?.orderId || payload?.currentOrderId;
           if (!orderId) break;
@@ -801,9 +816,9 @@ function RestaurantDashboard() {
           upsertDroneTracking(normalizedId, {
             droneId: payload?.droneId,
             status: payload?.status,
-            lat: payload?.lat,
-            lng: payload?.lng,
-            battery: payload?.battery,
+            lat: payload?.lat ?? payload?.location?.lat,
+            lng: payload?.lng ?? payload?.location?.lng,
+            battery: payload?.battery ?? payload?.batteryLevel,
           });
           if (payload?.status) {
             setOrders((prev) =>
@@ -859,6 +874,22 @@ function RestaurantDashboard() {
       }
     },
     [fetchOrders, fetchReviews, upsertDroneTracking]
+  );
+
+  const loadRoute = useCallback(
+    async (orderId) => {
+      if (!orderId || routeCache[orderId]) return;
+      try {
+        const res = await axios.post(`${DELIVERY_SERVICE_URL}/api/drone/auto-route`, { orderId });
+        const waypoints = res.data?.data?.waypoints || [];
+        if (waypoints.length) {
+          setRouteCache((prev) => ({ ...prev, [orderId]: waypoints }));
+        }
+      } catch (_err) {
+        // silent
+      }
+    },
+    [routeCache]
   );
 
   useEffect(() => {
@@ -1586,9 +1617,19 @@ function RestaurantDashboard() {
   const handleEditProfileClick = () => {
     setEditableProfile({
       ...restaurant,
+      taxCode: restaurant.taxCode || '',
       profilePictureUrl: restaurant.profilePicture || '',
       profilePictureFile: null,
       profileImageMode: restaurant.profilePicture ? 'url' : 'file',
+      address: {
+        street: restaurant.address?.street || '',
+        ward: restaurant.address?.ward || '',
+        district: restaurant.address?.district || '',
+        city: restaurant.address?.city || '',
+        fullAddress: restaurant.address?.fullAddress || restaurant.legacyLocation || restaurant.location || '',
+        lat: restaurant.address?.location?.coordinates?.[1] ?? restaurant.locationCoords?.lat ?? '',
+        lng: restaurant.address?.location?.coordinates?.[0] ?? restaurant.locationCoords?.lng ?? '',
+      },
     }); // Copy current profile data
     setProfileFeedback({ type: '', message: '' });
     setEditProfile(true); // Show the edit form
@@ -1606,15 +1647,20 @@ function RestaurantDashboard() {
     }
     setProfileFeedback({ type: '', message: '' });
     const trimmedName = updatedProfile.name?.trim();
+    const trimmedTax = updatedProfile.taxCode?.trim();
     const trimmedOwner = updatedProfile.ownerName?.trim();
-    const trimmedLocation = updatedProfile.location?.trim();
+    const addr = updatedProfile.address || {};
+    const fullAddress =
+      addr.fullAddress ||
+      [addr.street, addr.ward, addr.district, addr.city].filter(Boolean).join(', ');
+    const trimmedLocation = fullAddress.trim();
     const trimmedContact = updatedProfile.contactNumber?.trim();
     const trimmedBankNumber = updatedProfile.bankAccountNumber?.trim() || '';
     const trimmedBankName = updatedProfile.bankName?.trim() || '';
     const trimmedBankHolder = updatedProfile.bankAccountName?.trim() || '';
     const trimmedUrl = updatedProfile.profilePictureUrl?.trim() || '';
 
-    if (!trimmedName || !trimmedOwner || !trimmedLocation || !trimmedContact) {
+    if (!trimmedName || !trimmedTax || !trimmedOwner || !trimmedLocation || !trimmedContact) {
       setProfileFeedback({
         type: 'error',
         message: 'Vui lòng điền đầy đủ thông tin bắt buộc của nhà hàng trước khi lưu.',
@@ -1641,7 +1687,15 @@ function RestaurantDashboard() {
 
       // Append fields to FormData
       formData.append('name', trimmedName);
+      formData.append('taxCode', trimmedTax);
       formData.append('ownerName', trimmedOwner);
+      formData.append('street', addr.street || '');
+      formData.append('ward', addr.ward || '');
+      formData.append('district', addr.district || '');
+      formData.append('city', addr.city || '');
+      formData.append('fullAddress', trimmedLocation);
+      if (addr.lat) formData.append('locationLat', addr.lat);
+      if (addr.lng) formData.append('locationLng', addr.lng);
       formData.append('location', trimmedLocation);
       formData.append('contactNumber', trimmedContact);
       formData.append('bankAccountNumber', trimmedBankNumber);
@@ -1691,7 +1745,7 @@ function RestaurantDashboard() {
     } catch (err) {
       setProfileFeedback({
         type: 'error',
-        message: 'Có lỗi xảy ra khi cập nhật thông tin nhà hàng.',
+        message: err?.response?.data?.message || 'Có lỗi xảy ra khi cập nhật thông tin nhà hàng.',
       });
     } finally {
       setProfileSaving(false);
@@ -2001,6 +2055,20 @@ function RestaurantDashboard() {
                       />
                     </label>
                     <label>
+                      <span className="field-label">Mã số thuế</span>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={editableProfile.taxCode || ''}
+                        onChange={(event) =>
+                          setEditableProfile((prev) => ({
+                            ...prev,
+                            taxCode: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
                       <span className="field-label">Chủ sở hữu</span>
                       <input
                         type="text"
@@ -2016,17 +2084,173 @@ function RestaurantDashboard() {
                     </label>
                     <label>
                       <span className="field-label">Địa chỉ</span>
-                      <input
-                        type="text"
-                        className="text-input"
-                        value={editableProfile.location || ''}
-                        onChange={(event) =>
-                          setEditableProfile((prev) => ({
-                            ...prev,
-                            location: event.target.value,
-                          }))
-                        }
-                      />
+                      <div className="address-grid">
+                        <input
+                          type="text"
+                          className="text-input"
+                          placeholder="Đường"
+                          value={editableProfile.address?.street || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), street: event.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="text-input"
+                          placeholder="Phường"
+                          value={editableProfile.address?.ward || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), ward: event.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="text-input"
+                          placeholder="Quận"
+                          value={editableProfile.address?.district || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), district: event.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="text-input"
+                          placeholder="Thành phố"
+                          value={editableProfile.address?.city || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), city: event.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="text-input"
+                          placeholder="Full address (tùy chọn)"
+                          value={editableProfile.address?.fullAddress || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), fullAddress: event.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          className="text-input"
+                          placeholder="Lat"
+                          step="0.0001"
+                          value={editableProfile.address?.lat || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), lat: event.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          className="text-input"
+                          placeholder="Lng"
+                          step="0.0001"
+                          value={editableProfile.address?.lng || ''}
+                          onChange={(event) =>
+                            setEditableProfile((prev) => ({
+                              ...prev,
+                              address: { ...(prev.address || {}), lng: event.target.value },
+                            }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={async () => {
+                            const query =
+                              editableProfile.address?.fullAddress ||
+                              [editableProfile.address?.street, editableProfile.address?.ward, editableProfile.address?.district, editableProfile.address?.city]
+                                .filter(Boolean)
+                                .join(', ');
+                            if (!query.trim()) {
+                              setProfileFeedback({ type: 'error', message: 'Nhập địa chỉ trước khi định vị.' });
+                              return;
+                            }
+                            try {
+                              const token = getAuthToken(AUTH_ROLES.RESTAURANT);
+                              const addressPayload = {
+                                street: editableProfile.address?.street || '',
+                                ward: editableProfile.address?.ward || '',
+                                district: editableProfile.address?.district || '',
+                                city: editableProfile.address?.city || '',
+                                fullAddress:
+                                  editableProfile.address?.fullAddress ||
+                                  [editableProfile.address?.street, editableProfile.address?.ward, editableProfile.address?.district, editableProfile.address?.city]
+                                    .filter(Boolean)
+                                    .join(', '),
+                              };
+                              const res = await axios.put(
+                                `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurant._id}/geocode`,
+                                { address: addressPayload, fullAddress: addressPayload.fullAddress },
+                                { headers: { Authorization: `Bearer ${token}` } }
+                              );
+                              const data = res.data;
+                              const coords = data?.locationCoords || data?.data?.locationCoords || data;
+                              if (coords?.lat && coords?.lng) {
+                                setEditableProfile((prev) => ({
+                                  ...prev,
+                                  address: {
+                                    ...(prev.address || {}),
+                                    lat: coords.lat,
+                                    lng: coords.lng,
+                                    fullAddress:
+                                      prev.address?.fullAddress ||
+                                      addressPayload.fullAddress ||
+                                      restaurant.address?.fullAddress ||
+                                      restaurant.legacyLocation ||
+                                      restaurant.location ||
+                                      query,
+                                  },
+                                }));
+                                setRestaurant((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        locationCoords: { lat: coords.lat, lng: coords.lng },
+                                        address: {
+                                          ...(prev.address || {}),
+                                          fullAddress:
+                                            prev.address?.fullAddress ||
+                                            addressPayload.fullAddress ||
+                                            restaurant.address?.fullAddress ||
+                                            restaurant.legacyLocation ||
+                                            restaurant.location ||
+                                            query,
+                                          location: { coordinates: [coords.lng, coords.lat] },
+                                        },
+                                      }
+                                    : prev
+                                );
+                                setProfileFeedback({ type: 'success', message: 'Đã định vị và lưu tọa độ cho nhà hàng.' });
+                              } else {
+                                setProfileFeedback({ type: 'error', message: 'Không tìm thấy tọa độ cho địa chỉ này.' });
+                              }
+                            } catch (err) {
+                              setProfileFeedback({ type: 'error', message: 'Định vị thất bại. Thử lại.' });
+                            }
+                          }}
+                        >
+                          Lấy tọa độ tự động
+                        </button>
+                      </div>
                     </label>
                     <label>
                       <span className="field-label">Số liên hệ</span>
@@ -2866,14 +3090,38 @@ function RestaurantDashboard() {
                   const droneStage = mapDroneStage(order.droneStatus || order.status);
                   const showArrivedBtn =
                     order.droneStatus &&
-                    ['waiting_for_drone', 'drone_assigned', 'drone_enroute_to_restaurant'].includes(
+                    ['waiting_for_drone', 'drone_assigned', 'drone_arriving_restaurant'].includes(
                       (order.droneStatus || '').toLowerCase()
                     ) &&
                     order.droneId;
-                  const showPickupBtn = order.droneStatus === 'drone_arrived_restaurant' && order.droneId;
+                  const showPickupBtn =
+                    (order.droneStatus === 'drone_arriving_restaurant' || order.droneStatus === 'drone_picked_food') &&
+                    order.droneId;
                   const lat = Number(tracking?.lat);
                   const lng = Number(tracking?.lng);
                   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+                  const fallbackRoute = (() => {
+                    const points = [];
+                    const hubPt = extractPoint(order.hubLocation || order.droneHubLocation);
+                    const restaurantPt = extractPoint(order.restaurantLocation || order.restaurantAddress || order.restaurant);
+                    const customerPt =
+                      extractPoint({ lat: order.deliveryLat, lng: order.deliveryLng }) ||
+                      extractPoint(order.deliveryLocation) ||
+                      extractPoint(order.customerLocation);
+                    if (hubPt) points.push({ ...hubPt, type: 'hub', label: 'Hub' });
+                    if (restaurantPt) points.push({ ...restaurantPt, type: 'restaurant', label: 'Restaurant' });
+                    if (customerPt) points.push({ ...customerPt, type: 'customer', label: 'Customer' });
+                    return points;
+                  })();
+                  const cachedRoute = routeCache[order._id] || routeCache[order.id] || routeCache[order.orderId];
+                  const routePoints = hasCoords
+                    ? [{ lat, lng, type: 'drone', label: tracking?.droneId || order.droneId || 'Drone' }]
+                    : cachedRoute && cachedRoute.length
+                    ? cachedRoute.map((wp) => ({ lat: wp.lat, lng: wp.lng, type: wp.type?.toLowerCase(), label: wp.type }))
+                    : fallbackRoute;
+                  const trackingOpen = Boolean(
+                    trackingVisible[order._id] || trackingVisible[order.id] || trackingVisible[order.orderId]
+                  );
 
                   return (
                     <div className="order-card" key={order._id}>
@@ -2911,12 +3159,34 @@ function RestaurantDashboard() {
                           Drone {tracking?.droneId || order.droneId || 'chưa gán'}{' '}
                           {Number.isFinite(Number(tracking?.battery)) ? `• 🔋 ${tracking.battery}%` : ''}
                         </div>
-                        <div className="order-meta">
-                          {droneStage || 'Đang theo dõi trạng thái giao hàng'}
-                          {tracking?.status ? ` • ${tracking.status}` : ''}
+                        <div className="order-meta" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <span>
+                            {droneStage || 'Đang theo dõi trạng thái giao hàng'}
+                            {tracking?.status ? ` • ${tracking.status}` : ''}
+                          </span>
+                            <button
+                              type="button"
+                              className="order-secondary-btn"
+                              onClick={() => {
+                                setTrackingVisible((prev) => {
+                                  const key = order._id || order.id || order.orderId;
+                                  const next = !prev[key];
+                                  if (next) loadRoute(key);
+                                  return { ...prev, [key]: next };
+                                });
+                              }}
+                            >
+                              {trackingOpen ? 'Ẩn realtime drone' : 'Xem realtime drone'}
+                            </button>
                         </div>
-                        {hasCoords && (
-                          <div className="order-meta" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                        {trackingOpen && hasCoords && (
+                          <div
+                            className="order-meta"
+                            style={{
+                              fontFamily:
+                                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                            }}
+                          >
                             GPS: {lat.toFixed(4)}, {lng.toFixed(4)}{' '}
                             <a
                               href={`https://www.google.com/maps?q=${lat},${lng}`}
@@ -2926,6 +3196,9 @@ function RestaurantDashboard() {
                             >
                               Xem bản đồ
                             </a>
+                            <div style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden' }}>
+                              <DroneMapCanvas drones={[]} hubs={[]} routePoints={routePoints} height={220} />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -2950,6 +3223,7 @@ function RestaurantDashboard() {
                         {droneStage && (
                           <div className="d-flex align-items-center gap-2 flex-wrap">
                             <span className="badge bg-info text-dark">{droneStage}</span>
+                            {order.droneHubId && <span className="badge bg-secondary">Hub: {order.droneHubId}</span>}
                             {showArrivedBtn && (
                               <button
                                 className="order-secondary-btn"

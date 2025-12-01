@@ -82,6 +82,13 @@ export const geocode = async (query) => {
         return nomi;
     }
 
+    const fallbackLat = Number(process.env.GEOCODING_DEFAULT_LAT);
+    const fallbackLng = Number(process.env.GEOCODING_DEFAULT_LNG);
+    if (withinVietnamBounds(fallbackLat, fallbackLng)) {
+        console.warn("[GEO] Using fallback coordinates from env for:", q);
+        return { lat: fallbackLat, lng: fallbackLng, raw: { source: "fallback" } };
+    }
+
     console.warn("[GEO] Failed:", q);
     return null;
 };

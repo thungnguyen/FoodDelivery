@@ -22,6 +22,7 @@ import Checkout from "./pages/payment/CheckoutNew";
 // order management
 import OrderHome from "./pages/orderManagement/OrderHome";
 import Orders from "./pages/orderManagement/Orders";
+import DroneOrderMap from "./pages/orderManagement/DroneOrderMap";
 import OrderForm from "./components/OrderForm";
 import UpdateOrder from "./components/UpdateOrder";  // Import UpdateOrder page
 import DeleteOrder from "./components/DeleteOrder";  // Import DeleteOrder page
@@ -59,6 +60,8 @@ import DronesPage from './pages/drone-center/DronesPage';
 import HubsPage from './pages/drone-center/HubsPage';
 import MapPage from './pages/drone-center/MapPage';
 import SimulatorPage from './pages/drone-center/SimulatorPage';
+import AssignPage from './pages/drone-center/AssignPage';
+import MaintenancePage from './pages/drone-center/MaintenancePage';
 
 function App() {
   const [orders, setOrders] = useState([]);
@@ -105,6 +108,7 @@ function App() {
           <Route path="/customer/restaurant/:restaurantId/foods/:foodId" element={<FoodDetailPage />} />
           <Route path="/customer/cart" element={<AddToCartPage />} />
           <Route path="/customer/orders" element={<Orders />} />
+          <Route path="/customer/drone-map/:id" element={<DroneOrderMap />} />
 
           {/* restaurant management */}
           <Route path="/superadmin/register" element={<SuperAdminRegister />} />
@@ -128,7 +132,9 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="drones" element={<DronesPage />} />
             <Route path="hubs" element={<HubsPage />} />
+            <Route path="assign" element={<AssignPage />} />
             <Route path="map" element={<MapPage />} />
+            <Route path="maintenance" element={<MaintenancePage />} />
             <Route path="simulator" element={<SimulatorPage />} />
           </Route>
 

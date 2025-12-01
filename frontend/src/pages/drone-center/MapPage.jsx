@@ -3,13 +3,43 @@ import DroneMapCanvas from './components/DroneMapCanvas';
 import { useDroneCenter } from './DroneCenterContext';
 
 const MapPage = () => {
-  const { drones, hubs, stats } = useDroneCenter();
+  const { drones, hubs, stats, deliveries } = useDroneCenter();
   const [focus, setFocus] = useState('');
 
   const active = useMemo(
     () => drones.filter((drone) => !drone.offline).sort((a, b) => (a.droneId > b.droneId ? 1 : -1)),
     [drones]
   );
+
+  const routePoints = useMemo(() => {
+    const normalizeId = (val) => (val ? val.toString().toUpperCase() : '');
+    const pickDelivery = () => {
+      if (focus) {
+        const match = deliveries.find((d) => {
+          const did =
+            d.droneId?.droneId ||
+            d.droneId?.code ||
+            d.droneId?._id ||
+            d.droneId?.id ||
+            d.droneId ||
+            '';
+          return normalizeId(did) === normalizeId(focus);
+        });
+        if (match && Array.isArray(match.route?.waypoints) && match.route.waypoints.length >= 3) return match;
+      }
+      return deliveries.find((d) => Array.isArray(d.route?.waypoints) && d.route.waypoints.length >= 3);
+    };
+
+    const waypoints = pickDelivery()?.route?.waypoints || [];
+    return waypoints.map((wp, idx) => ({
+      lat: wp.lat,
+      lng: wp.lng,
+      type:
+        wp.type?.toLowerCase() ||
+        (idx === 0 || idx === waypoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer'),
+      label: wp.label || wp.type,
+    }));
+  }, [deliveries, focus]);
 
   return (
     <>
@@ -41,7 +71,7 @@ const MapPage = () => {
           </select>
         </div>
 
-        <DroneMapCanvas drones={drones} hubs={hubs} focusDroneId={focus || undefined} />
+        <DroneMapCanvas drones={drones} hubs={hubs} focusDroneId={focus || undefined} routePoints={routePoints} />
         <div className="map-legend">
           <div className="legend-item">
             <span className="marker-dot drone" />
@@ -50,6 +80,14 @@ const MapPage = () => {
           <div className="legend-item">
             <span className="marker-dot hub" />
             Hub
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#fb7185' }} />
+            Nhà hàng
+          </div>
+          <div className="legend-item">
+            <span className="marker-dot" style={{ background: '#22c55e' }} />
+            Khách hàng
           </div>
           <div className="legend-item">
             Tổng: {stats?.totals?.total ?? 0} • Online: {stats?.totals?.total - (stats?.totals?.offline || 0)}

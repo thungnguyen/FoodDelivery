@@ -1,4 +1,6 @@
-FROM node:20-alpine AS build
+ARG NODE_IMAGE=node:20-bullseye-slim
+ARG NGINX_IMAGE=nginx:alpine
+FROM ${NODE_IMAGE} AS build
 
 WORKDIR /app
 
@@ -10,7 +12,7 @@ COPY . .
 
 RUN npm run build
 
-FROM nginx:alpine
+FROM ${NGINX_IMAGE}
 
 COPY --from=build /app/build /usr/share/nginx/html
 

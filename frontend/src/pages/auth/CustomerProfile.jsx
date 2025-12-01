@@ -4,6 +4,7 @@ import axios from "axios";
 import { AUTH_SERVICE_URL } from "../../utils/serviceUrls";
 import { getAuthToken, AUTH_ROLES } from "../../utils/authTokens";
 import CustomerLayout from "../../components/customer/CustomerLayout";
+import { ORDER_SERVICE_URL } from "../../utils/serviceUrls";
 const pageWrapperStyle = {
   minHeight: "100vh",
   background: "linear-gradient(140deg, #f6f8ff 0%, #fef9f2 100%)",
@@ -36,7 +37,15 @@ export default function CustomerProfile() {
     lastName: "",
     email: "",
     phone: "",
-    location: "",
+    address: {
+      street: "",
+      ward: "",
+      district: "",
+      city: "",
+      fullAddress: "",
+      lat: "",
+      lng: "",
+    },
   });
   const [initialSnapshot, setInitialSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -50,6 +59,7 @@ export default function CustomerProfile() {
   });
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordFeedback, setPasswordFeedback] = useState({ type: "", message: "" });
+  const [geocoding, setGeocoding] = useState(false);
   const navigate = useNavigate();
   const customerDisplayName = useMemo(() => {
     const fullName = `${formData.firstName || ""} ${formData.lastName || ""}`.trim();
@@ -74,12 +84,21 @@ export default function CustomerProfile() {
         });
         const customer = res.data?.data?.customer;
         if (customer) {
+          const addr = customer.address || {};
           const snapshot = {
             firstName: customer.firstName || "",
             lastName: customer.lastName || "",
             email: customer.email || "",
             phone: customer.phone || "",
-            location: customer.location || "",
+            address: {
+              street: addr.street || "",
+              ward: addr.ward || "",
+              district: addr.district || "",
+              city: addr.city || "",
+              fullAddress: addr.fullAddress || "",
+              lat: addr.location?.coordinates?.[1] ?? "",
+              lng: addr.location?.coordinates?.[0] ?? "",
+            },
           };
           setFormData(snapshot);
           setInitialSnapshot({ ...snapshot });
@@ -100,6 +119,85 @@ export default function CustomerProfile() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleAddressChange = (field) => (event) => {
+    const value = event.target.value;
+    setFormData((prev) => ({
+      ...prev,
+      address: {
+        ...(prev.address || {}),
+        [field]: value,
+        fullAddress:
+          field !== "fullAddress"
+            ? [field === "street" ? value : prev.address?.street || "", field === "ward" ? value : prev.address?.ward || "", field === "district" ? value : prev.address?.district || "", field === "city" ? value : prev.address?.city || ""]
+                .filter(Boolean)
+                .join(", ")
+            : value,
+      },
+    }));
+  };
+
+  const handleGeocode = async () => {
+    const query =
+      formData.address.fullAddress ||
+      [formData.address.street, formData.address.ward, formData.address.district, formData.address.city]
+        .filter(Boolean)
+        .join(", ");
+    if (!query.trim()) {
+      setError("Vui lòng nhập địa chỉ trước khi định vị.");
+      return;
+    }
+    setGeocoding(true);
+    try {
+      const res = await fetch(
+        `${ORDER_SERVICE_URL}/api/geocode?address=${encodeURIComponent(query)}`
+      );
+      let data = null;
+      if (res.ok) {
+        data = await res.json();
+      }
+      const lat = Number(data?.lat ?? data?.data?.lat);
+      const lng = Number(data?.lng ?? data?.data?.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const nextAddress = {
+          ...formData.address,
+          lat,
+          lng,
+          fullAddress: formData.address.fullAddress || data.fullAddress || query,
+        };
+        setFormData((prev) => ({ ...prev, address: nextAddress }));
+        // Lưu ngay địa chỉ mới để backend (auth-service) có tọa độ cập nhật
+        const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+        if (token) {
+          await axios.patch(
+            `${AUTH_SERVICE_URL}/api/auth/customer/profile`,
+            {
+              firstName: formData.firstName,
+              lastName: formData.lastName,
+              phone: formData.phone,
+              address: {
+                street: nextAddress.street,
+                ward: nextAddress.ward,
+                district: nextAddress.district,
+                city: nextAddress.city,
+                fullAddress: nextAddress.fullAddress,
+                location: { type: "Point", coordinates: [Number(nextAddress.lng), Number(nextAddress.lat)] },
+              },
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+        setError("");
+        setSuccess("Đã định vị và lưu tọa độ.");
+      } else {
+        setError("Không tìm thấy tọa độ cho địa chỉ này.");
+      }
+    } catch (err) {
+      setError("Định vị thất bại. Vui lòng thử lại.");
+    } finally {
+      setGeocoding(false);
+    }
   };
 
   const handlePasswordFieldChange = (field) => (event) => {
@@ -201,8 +299,12 @@ export default function CustomerProfile() {
 
   const hasChanges = useMemo(() => {
     if (!initialSnapshot) return false;
-    return Object.keys(initialSnapshot).some(
-      (key) => (initialSnapshot[key] || "") !== (formData[key] || "")
+    const flatCompare = (obj) => JSON.stringify(obj || {});
+    return (
+      initialSnapshot.firstName !== formData.firstName ||
+      initialSnapshot.lastName !== formData.lastName ||
+      initialSnapshot.phone !== formData.phone ||
+      flatCompare(initialSnapshot.address) !== flatCompare(formData.address)
     );
   }, [formData, initialSnapshot]);
 
@@ -215,13 +317,29 @@ export default function CustomerProfile() {
 
     try {
       const token = getAuthToken(AUTH_ROLES.CUSTOMER);
+      const fullAddress =
+        formData.address.fullAddress ||
+        [formData.address.street, formData.address.ward, formData.address.district, formData.address.city]
+          .filter(Boolean)
+          .join(", ");
+      const addressPayload = {
+        street: formData.address.street,
+        ward: formData.address.ward,
+        district: formData.address.district,
+        city: formData.address.city,
+        fullAddress,
+        location:
+          formData.address.lng && formData.address.lat
+            ? { type: "Point", coordinates: [Number(formData.address.lng), Number(formData.address.lat)] }
+            : undefined,
+      };
       await axios.patch(
         `${AUTH_SERVICE_URL}/api/auth/customer/profile`,
         {
           firstName: formData.firstName,
           lastName: formData.lastName,
           phone: formData.phone,
-          location: formData.location,
+          address: addressPayload,
         },
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -411,15 +529,92 @@ export default function CustomerProfile() {
                     placeholder="Nhập số điện thoại"
                   />
                 </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px" }}>
                 <label>
-                  <span style={labelStyle}>Địa chỉ giao hàng</span>
+                  <span style={labelStyle}>Đường</span>
                   <input
                     style={inputStyle}
-                    value={formData.location}
-                    onChange={handleChange("location")}
-                    placeholder="Nhập địa chỉ giao hàng"
+                    value={formData.address.street}
+                    onChange={handleAddressChange("street")}
+                    placeholder="200 An Dương Vương"
                   />
                 </label>
+                <label>
+                  <span style={labelStyle}>Phường</span>
+                  <input
+                    style={inputStyle}
+                    value={formData.address.ward}
+                    onChange={handleAddressChange("ward")}
+                    placeholder="Phường 7"
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Quận</span>
+                  <input
+                    style={inputStyle}
+                    value={formData.address.district}
+                    onChange={handleAddressChange("district")}
+                    placeholder="Quận 5"
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Thành phố</span>
+                  <input
+                    style={inputStyle}
+                    value={formData.address.city}
+                    onChange={handleAddressChange("city")}
+                    placeholder="Thành phố Hồ Chí Minh"
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Full address (tùy chọn)</span>
+                  <input
+                    style={inputStyle}
+                    value={formData.address.fullAddress}
+                    onChange={handleAddressChange("fullAddress")}
+                    placeholder="200 An Dương Vương, P7, Q5, HCM"
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Latitude</span>
+                  <input
+                    style={inputStyle}
+                    value={formData.address.lat}
+                    onChange={handleAddressChange("lat")}
+                    placeholder="10.7626"
+                    type="number"
+                    step="0.0001"
+                  />
+                </label>
+                <label>
+                  <span style={labelStyle}>Longitude</span>
+                  <input
+                    style={inputStyle}
+                    value={formData.address.lng}
+                    onChange={handleAddressChange("lng")}
+                    placeholder="106.6602"
+                    type="number"
+                    step="0.0001"
+                  />
+                </label>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={handleGeocode}
+                    disabled={geocoding}
+                    style={{
+                      padding: "12px 16px",
+                      borderRadius: "12px",
+                      border: "1px solid rgba(15,23,42,0.12)",
+                      background: "white",
+                      cursor: geocoding ? "wait" : "pointer",
+                    }}
+                  >
+                    {geocoding ? "Đang định vị..." : "Tự xác định tọa độ"}
+                  </button>
+                </div>
               </div>
 
               <div

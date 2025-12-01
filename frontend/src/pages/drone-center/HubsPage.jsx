@@ -1,11 +1,19 @@
 import React, { useMemo, useState } from 'react';
+import DroneMapCanvas from './components/DroneMapCanvas';
 import { useDroneCenter } from './DroneCenterContext';
 
 const emptyForm = {
   name: '',
+  code: '',
+  street: '',
+  ward: '',
+  district: '',
+  city: '',
+  fullAddress: '',
   lat: '',
   lng: '',
   radiusKm: 5,
+  isActive: true,
 };
 
 const HubsPage = () => {
@@ -27,37 +35,56 @@ const HubsPage = () => {
     event.preventDefault();
     const payload = {
       name: form.name.trim(),
-      location: {
-        lat: Number(form.lat),
-        lng: Number(form.lng),
+      code: form.code.trim().toUpperCase(),
+      address: {
+        street: form.street.trim(),
+        ward: form.ward.trim(),
+        district: form.district.trim(),
+        city: form.city.trim(),
+        fullAddress:
+          form.fullAddress.trim() ||
+          [form.street, form.ward, form.district, form.city].filter(Boolean).join(', '),
+        location:
+          form.lat && form.lng
+            ? { coordinates: [Number(form.lng), Number(form.lat)] }
+            : undefined,
       },
       radiusKm: Number(form.radiusKm),
-      id: editing?.id,
+      isActive: form.isActive,
     };
-    if (!payload.name || Number.isNaN(payload.location.lat) || Number.isNaN(payload.location.lng)) {
-      setFeedback('Vui lòng nhập đầy đủ tên và tọa độ.');
+
+    if (!payload.name || !payload.code || !payload.address.fullAddress) {
+      setFeedback('Vui lòng nhập đầy đủ tên, mã và địa chỉ.');
       return;
     }
 
+    let res;
     if (editing) {
-      const res = await updateHub(editing.id, payload);
-      setFeedback(res.ok ? 'Đã cập nhật hub.' : res.error);
+      res = await updateHub(editing.id, payload);
     } else {
-      const res = await createHub(payload);
-      setFeedback(res.ok ? 'Đã tạo hub mới.' : res.error);
+      res = await createHub(payload);
     }
-
-    setEditing(null);
-    setForm(emptyForm);
+    setFeedback(res.ok ? 'Đã lưu hub.' : res.error);
+    if (res.ok) {
+      setEditing(null);
+      setForm(emptyForm);
+    }
   };
 
   const handleEdit = (hub) => {
     setEditing(hub);
     setForm({
       name: hub.name || '',
-      lat: hub.location?.lat ?? '',
-      lng: hub.location?.lng ?? '',
+      code: hub.code || '',
+      street: hub.address?.street || '',
+      ward: hub.address?.ward || '',
+      district: hub.address?.district || '',
+      city: hub.address?.city || '',
+      fullAddress: hub.address?.fullAddress || '',
+      lat: hub.address?.location?.coordinates?.[1] ?? hub.location?.lat ?? '',
+      lng: hub.address?.location?.coordinates?.[0] ?? hub.location?.lng ?? '',
       radiusKm: hub.radiusKm ?? '',
+      isActive: typeof hub.isActive === 'boolean' ? hub.isActive : true,
     });
     setFeedback('');
   };
@@ -66,6 +93,14 @@ const HubsPage = () => {
     const res = await deleteHub(hub.id);
     setFeedback(res.ok ? 'Đã xóa hub khỏi danh sách.' : res.error);
   };
+
+  const previewPoints = useMemo(() => {
+    const result = [];
+    if (form.lat && form.lng) {
+      result.push({ lat: Number(form.lat), lng: Number(form.lng), type: 'hub', label: form.name || 'Hub mới' });
+    }
+    return result;
+  }, [form.lat, form.lng, form.name]);
 
   return (
     <>
@@ -79,19 +114,23 @@ const HubsPage = () => {
             <thead>
               <tr>
                 <th>Hub</th>
-                <th>Vị trí</th>
-                <th>Bán kính phục vụ</th>
-                <th>Số Drone</th>
-                <th>Edit</th>
+                <th>Code</th>
+                <th>Địa chỉ</th>
+                <th>Phạm vi</th>
+                <th>Drones</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {hubs.map((hub) => (
-                <tr key={hub.id || hub.name}>
+                <tr key={hub.id || hub.code || hub.name}>
                   <td>{hub.name}</td>
+                  <td className="mono">{hub.code}</td>
                   <td>
-                    {hub.location?.lat?.toFixed ? hub.location.lat.toFixed(4) : hub.location?.lat || '--'},
-                    {hub.location?.lng?.toFixed ? ` ${hub.location.lng.toFixed(4)}` : ` ${hub.location?.lng || ''}`}
+                    <div>{hub.address?.fullAddress || '—'}</div>
+                    <div className="text-muted mono" style={{ fontSize: 12 }}>
+                      {hub.location?.lat?.toFixed?.(4)}, {hub.location?.lng?.toFixed?.(4)}
+                    </div>
                   </td>
                   <td>{hub.radiusKm} km</td>
                   <td>{dronesByHub[hub.id] || 0}</td>
@@ -107,7 +146,7 @@ const HubsPage = () => {
               ))}
               {hubs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-muted">
+                  <td colSpan={6} className="text-muted">
                     Chưa có hub nào.
                   </td>
                 </tr>
@@ -133,13 +172,45 @@ const HubsPage = () => {
           )}
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="form-grid">
+          <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
             <div className="form-field">
               <label>Tên Hub</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                 placeholder="VD: HCM Central Hub"
+              />
+            </div>
+            <div className="form-field">
+              <label>Mã Hub</label>
+              <input
+                value={form.code}
+                onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))}
+                placeholder="HCM1"
+              />
+            </div>
+            <div className="form-field">
+              <label>Street</label>
+              <input value={form.street} onChange={(e) => setForm((p) => ({ ...p, street: e.target.value }))} />
+            </div>
+            <div className="form-field">
+              <label>Ward</label>
+              <input value={form.ward} onChange={(e) => setForm((p) => ({ ...p, ward: e.target.value }))} />
+            </div>
+            <div className="form-field">
+              <label>District</label>
+              <input value={form.district} onChange={(e) => setForm((p) => ({ ...p, district: e.target.value }))} />
+            </div>
+            <div className="form-field">
+              <label>City</label>
+              <input value={form.city} onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))} />
+            </div>
+            <div className="form-field">
+              <label>Full address (tùy chọn)</label>
+              <input
+                value={form.fullAddress}
+                onChange={(e) => setForm((p) => ({ ...p, fullAddress: e.target.value }))}
+                placeholder="200 An Dương Vương, Phường 7, Quận 5, HCM"
               />
             </div>
             <div className="form-field">
@@ -171,15 +242,36 @@ const HubsPage = () => {
                 step="0.1"
               />
             </div>
+            <div className="form-field">
+              <label>Active</label>
+              <input
+                type="checkbox"
+                checked={form.isActive}
+                onChange={(e) => setForm((p) => ({ ...p, isActive: e.target.checked }))}
+              />
+            </div>
           </div>
-          <button className="btn primary" type="submit">
-            {editing ? 'Cập nhật Hub' : 'Thêm Hub'}
-          </button>
+          <div className="flex" style={{ gap: 8, marginTop: 12 }}>
+            <button className="btn primary" type="submit">
+              {editing ? 'Cập nhật Hub' : 'Thêm Hub'}
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setForm((prev) => ({ ...prev, fullAddress: [prev.street, prev.ward, prev.district, prev.city].filter(Boolean).join(', ') }))}
+            >
+              Ghép fullAddress
+            </button>
+          </div>
         </form>
+      </div>
+
+      <div className="panel">
+        <h4>Preview vị trí hub</h4>
+        <DroneMapCanvas hubs={[]} drones={[]} routePoints={previewPoints} height={320} />
       </div>
     </>
   );
 };
 
 export default HubsPage;
-

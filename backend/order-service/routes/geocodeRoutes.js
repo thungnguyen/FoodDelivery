@@ -21,4 +21,21 @@ router.post("/orders/:id/geocode", async (req, res) => {
     }
 });
 
+// Generic geocode endpoint for frontend (proxy to avoid CORS issues)
+router.get("/geocode", async (req, res) => {
+    try {
+        const q = typeof req.query.address === "string" ? req.query.address.trim() : "";
+        if (!q) {
+            return res.status(400).json({ message: "address query is required" });
+        }
+        const coords = await geocode(q);
+        if (!coords) {
+            return res.status(404).json({ message: "Không tìm thấy tọa độ cho địa chỉ này." });
+        }
+        return res.json({ lat: coords.lat, lng: coords.lng, fullAddress: q });
+    } catch (error) {
+        return res.status(500).json({ message: error.message || "Failed to geocode" });
+    }
+});
+
 export default router;

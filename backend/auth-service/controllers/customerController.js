@@ -6,13 +6,91 @@ const { sendEmail } = require("../utils/emailService");
 
 const ALLOWED_ACCOUNT_STATUSES = ["active", "locked"];
 
+const computeFullAddress = (address = {}) => {
+  const parts = [address.street, address.ward, address.district, address.city]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean);
+  return parts.join(", ");
+};
+
+const parseCoordinates = (raw) => {
+  if (!raw) return null;
+  if (Array.isArray(raw) && raw.length === 2) {
+    const lng = Number(raw[0]);
+    const lat = Number(raw[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+    return null;
+  }
+  if (typeof raw === "object") {
+    const lat = Number(raw.lat ?? raw.latitude);
+    const lng = Number(raw.lng ?? raw.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return [lng, lat];
+    }
+  }
+  return null;
+};
+
+const buildAddressFromRequest = (payload = {}) => {
+  const addressInput = payload.address && typeof payload.address === "object" ? payload.address : {};
+  const normalise = (value) => (typeof value === "string" ? value.trim() : undefined);
+
+  const street = normalise(addressInput.street ?? payload.street);
+  const ward = normalise(addressInput.ward ?? payload.ward);
+  const district = normalise(addressInput.district ?? payload.district);
+  const city = normalise(addressInput.city ?? payload.city);
+  const rawFull = normalise(addressInput.fullAddress ?? payload.fullAddress);
+  const legacyText = normalise(payload.location || payload.addressText);
+
+  const coordinates =
+    parseCoordinates(addressInput.location?.coordinates) ||
+    parseCoordinates(addressInput.location) ||
+    parseCoordinates(addressInput.coordinates) ||
+    parseCoordinates(payload.coordinates);
+
+  const address = {};
+  if (street) address.street = street;
+  if (ward) address.ward = ward;
+  if (district) address.district = district;
+  if (city) address.city = city;
+
+  const computedFull = rawFull || computeFullAddress(address) || legacyText;
+  if (computedFull) address.fullAddress = computedFull;
+  if (coordinates) {
+    address.location = { type: "Point", coordinates };
+  }
+
+  return { address, legacyText };
+};
+
+const normalizeCustomerAddress = (customer) => {
+  const rawAddress = customer.address ? customer.address.toObject?.() || customer.address : null;
+  const legacy = customer.legacyAddress || customer.location;
+
+  if (rawAddress && Object.keys(rawAddress).length) {
+    const full = rawAddress.fullAddress || computeFullAddress(rawAddress) || legacy;
+    return {
+      ...rawAddress,
+      ...(full ? { fullAddress: full } : {}),
+    };
+  }
+
+  if (legacy) {
+    return { fullAddress: legacy };
+  }
+
+  return undefined;
+};
+
 const formatCustomer = (customer) => ({
   id: customer._id,
   firstName: customer.firstName,
   lastName: customer.lastName,
   email: customer.email,
   phone: customer.phone,
-  location: customer.location,
+  address: normalizeCustomerAddress(customer),
   accountStatus: customer.accountStatus,
   createdAt: customer.createdAt,
   updatedAt: customer.updatedAt,
@@ -32,7 +110,8 @@ const signToken = (userId) => {
 // @access  Public
 exports.register = async (req, res, next) => {
   try {
-    const { firstName, lastName, email, phone, password, location } = req.body;
+    const { firstName, lastName, email, phone, password } = req.body;
+    const { address, legacyText } = buildAddressFromRequest(req.body);
 
     // 1) Check all required fields
     if (!firstName || !lastName || !email || !phone || !password) {
@@ -52,7 +131,8 @@ exports.register = async (req, res, next) => {
       email,
       phone,
       password,
-      location,
+      address: Object.keys(address || {}).length ? address : undefined,
+      legacyAddress: legacyText,
     });
 
     // 4) Sign JWT
@@ -84,13 +164,7 @@ exports.register = async (req, res, next) => {
       token,
       data: {
         customer: {
-          id: newCustomer._id,
-          firstName: newCustomer.firstName,
-          lastName: newCustomer.lastName,
-          email: newCustomer.email,
-          phone: newCustomer.phone,
-          location: newCustomer.location,
-          accountStatus: newCustomer.accountStatus,
+          ...formatCustomer(newCustomer),
         },
       },
     });
@@ -137,15 +211,7 @@ exports.login = async (req, res, next) => {
       status: "success",
       token,
       data: {
-        customer: {
-          id: customer._id,
-          firstName: customer.firstName,
-          lastName: customer.lastName,
-          email: customer.email,
-          phone: customer.phone,
-          location: customer.location,
-          accountStatus: customer.accountStatus,
-        },
+        customer: formatCustomer(customer),
       },
     });
   } catch (err) {
@@ -167,14 +233,7 @@ exports.getProfile = async (req, res, next) => {
     res.json({
       status: "success",
       data: {
-        customer: {
-          id: customer._id,
-          firstName: customer.firstName,
-          lastName: customer.lastName,
-          email: customer.email,
-          phone: customer.phone,
-          location: customer.location,
-        },
+        customer: formatCustomer(customer),
       },
     });
   } catch (err) {
@@ -182,13 +241,21 @@ exports.getProfile = async (req, res, next) => {
   }
 };
 
-// @desc    Update customer profile (e.g. phone or location)
+// @desc    Update customer profile (e.g. phone or address)
 // @route   PATCH /api/auth/customer/me
 // @access  Private (customer)
 exports.updateProfile = async (req, res, next) => {
   try {
-    const updates = (({ firstName, lastName, phone, location }) =>
-      ({ firstName, lastName, phone, location }))(req.body);
+    const { address, legacyText } = buildAddressFromRequest(req.body);
+    const updates = (({ firstName, lastName, phone }) =>
+      ({ firstName, lastName, phone }))(req.body);
+
+    if (address && Object.keys(address).length) {
+      updates.address = address;
+    }
+    if (legacyText) {
+      updates.legacyAddress = legacyText;
+    }
 
     // Prevent email/password update here (use separate endpoints)
     delete updates.email;
@@ -207,14 +274,7 @@ exports.updateProfile = async (req, res, next) => {
     res.json({
       status: "success",
       data: {
-        customer: {
-          id: customer._id,
-          firstName: customer.firstName,
-          lastName: customer.lastName,
-          email: customer.email,
-          phone: customer.phone,
-          location: customer.location,
-        },
+        customer: formatCustomer(customer),
       },
     });
   } catch (err) {
