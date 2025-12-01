@@ -121,7 +121,7 @@ const normalizeDrone = (raw = {}) => {
 
 const normalizeHub = (raw = {}) => ({
   id: raw.id || raw._id || raw.hubId || raw.code || raw.name,
-  name: raw.name || raw.label || 'Hub',
+  name: raw.name || raw.label || 'Nhà hàng',
   code: raw.code,
   location: normalizeLocation(raw.address?.location || raw.location || raw),
   address: raw.address,

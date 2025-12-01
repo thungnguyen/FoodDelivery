@@ -32,10 +32,16 @@ const looksLikeDroneLabel = (value) => {
 const resolvePointType = (rawType, idx, total) => {
   const normalized = (rawType || '').toString().toLowerCase();
   if (['hub', 'restaurant', 'customer'].includes(normalized)) return normalized;
-  if (idx === 0 || (total && idx === total - 1)) return 'hub';
+
+  // Fallback pattern: hub -> restaurant -> customer -> hub (return)
+  if (idx === 0) return 'hub';
   if (idx === 1) return 'restaurant';
+  if (total && total <= 3 && idx === total - 1) return 'customer'; // 3-point route: assume last is customer
+  if (total && total > 3 && idx === total - 1) return 'hub'; // 4-point route: return to hub
   return 'customer';
 };
+
+
 
 const resolvePointLabel = (type, point = {}, idx = 0, droneIdSet = new Set()) => {
   const fallback =
