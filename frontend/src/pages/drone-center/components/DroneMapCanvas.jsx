@@ -19,18 +19,77 @@ const buildBounds = (points) => {
   return { minLat, maxLat, minLng, maxLng };
 };
 
+const looksLikeDroneLabel = (value) => {
+  if (!value) return false;
+  const normalized = value.toString().trim().toLowerCase();
+  return (
+    normalized.includes('drone') ||
+    /^dr[-_ ]?\d+/.test(normalized) || // DR-01
+    /^[a-z]{2,}-?\d{2,}$/i.test(normalized) // HCM-10
+  );
+};
+
+const resolvePointType = (rawType, idx, total) => {
+  const normalized = (rawType || '').toString().toLowerCase();
+  if (['hub', 'restaurant', 'customer'].includes(normalized)) return normalized;
+  if (idx === 0 || (total && idx === total - 1)) return 'hub';
+  if (idx === 1) return 'restaurant';
+  return 'customer';
+};
+
+const resolvePointLabel = (type, point = {}, idx = 0, droneIdSet = new Set()) => {
+  const fallback =
+    type === 'restaurant'
+      ? 'Nhà hàng'
+      : type === 'customer'
+      ? 'Khách hàng'
+      : type === 'hub'
+      ? 'Hub'
+      : `Điểm ${idx + 1}`;
+
+  const isDroneLike =
+    looksLikeDroneLabel(point.label) ||
+    looksLikeDroneLabel(point.name) ||
+    droneIdSet.has((point.label || '').toString().trim().toLowerCase()) ||
+    droneIdSet.has((point.name || '').toString().trim().toLowerCase());
+
+  if (type === 'restaurant') {
+    if (!isDroneLike && point.label) return point.label;
+    return point.name || point.restaurantName || fallback;
+  }
+  if (type === 'customer') {
+    if (!isDroneLike && point.label) return point.label;
+    return point.name || point.customerName || fallback;
+  }
+  if (type === 'hub') {
+    if (!isDroneLike && point.label) return point.label;
+    return point.name || point.code || fallback;
+  }
+  return !isDroneLike && point.label ? point.label : fallback;
+};
+
 const FallbackMap = ({ drones, hubs, height, routePoints }) => {
+  const droneIdSet = useMemo(
+    () =>
+      new Set(
+        (drones || [])
+          .map((d) => d.droneId)
+          .filter(Boolean)
+          .map((id) => id.toString().trim().toLowerCase())
+      ),
+    [drones]
+  );
   const points = useMemo(() => {
     const d = (drones || []).map((item) => ({ ...item.location, type: 'drone', label: item.droneId }));
     const h = (hubs || []).map((hub) => ({ ...hub.location, type: 'hub', label: hub.name }));
     const r =
       routePoints?.map((p, idx) => ({
         ...p,
-        type: p.type || (idx === 0 ? 'hub' : idx === routePoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer'),
-        label: p.label || p.type || `pt-${idx}`,
+        type: resolvePointType(p.type, idx, routePoints.length),
+        label: resolvePointLabel(resolvePointType(p.type, idx, routePoints.length), p, idx, droneIdSet),
       })) || [];
     return [...d, ...h, ...r].filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  }, [drones, hubs, routePoints]);
+  }, [drones, droneIdSet, hubs, routePoints]);
 
   const bounds = useMemo(() => buildBounds(points), [points]);
   const project = (point) => {
@@ -154,6 +213,12 @@ const DroneMapCanvas = ({ drones = [], hubs = [], focusDroneId, height = 420, ro
     const map = mapRef.current;
     const markers = markersRef.current;
     const usedKeys = new Set();
+    const droneIdSet = new Set(
+      (drones || [])
+        .map((d) => d.droneId)
+        .filter(Boolean)
+        .map((id) => id.toString().trim().toLowerCase())
+    );
 
     const ensureBounds = () => {
       if (!points.length) return;
@@ -237,15 +302,16 @@ const DroneMapCanvas = ({ drones = [], hubs = [], focusDroneId, height = 420, ro
     });
 
     routePoints.forEach((pt, idx) => {
-      const rawType = pt.type || (idx === 0 ? 'hub' : idx === routePoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer');
-      const type = typeof rawType === 'string' ? rawType.toLowerCase() : rawType;
+      const type = resolvePointType(pt.type, idx, routePoints.length);
+      const label = resolvePointLabel(type, pt, idx, droneIdSet);
+      const title = pt.title || pt.note || label;
       upsertMarker(
         `route-${idx}`,
         [pt.lng, pt.lat],
         type === 'customer' ? '#22c55e' : type === 'restaurant' ? '#fb7185' : '#fbbf24',
-        pt.label,
+        title,
         type,
-        pt.label || type
+        label
       );
     });
 
