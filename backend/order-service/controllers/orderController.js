@@ -736,25 +736,6 @@ export const updateOrderStatus = async (req, res) => {
         realtimeEvents.forEach((evt) => emitEvent(evt));
     }
 
-    if (orderResponse?.status === "waiting_for_drone" && !orderResponse?.droneId) {
-        const customerLocation =
-            typeof orderResponse.deliveryLat === "number" && typeof orderResponse.deliveryLng === "number"
-                ? { lat: orderResponse.deliveryLat, lng: orderResponse.deliveryLng }
-                : null;
-        const hubId = orderResponse.droneHubId;
-        assignDroneToOrderInternal({
-            orderId: orderResponse._id,
-            hubId,
-            customerLocation
-        })
-            .then((result) => {
-                if (!result?.ok) {
-                    console.warn("[drone-auto-assign] failed", result?.message || result?.statusCode);
-                }
-            })
-            .catch((err) => console.error("[drone-auto-assign] unexpected error", err));
-    }
-
     if (cancellationNotice) {
         await emitCancellationNotifications({
             order: cancellationNotice.order,
@@ -833,7 +814,8 @@ export const markOrderAsReceived = async (req, res) => {
             }
 
             order.status = "Completed";
-            order.droneStatus = "drone_route_complete";
+            // Drone đã/đang quay về, không gán trạng thái ngoài enum để tránh lỗi validate
+            order.droneStatus = "returning";
 
             const financeSummary = await handleOrderStatusFinancials({
                 order,

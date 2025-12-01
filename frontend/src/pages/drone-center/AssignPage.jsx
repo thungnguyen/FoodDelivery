@@ -119,41 +119,47 @@ const AssignPage = () => {
     }
     setLoading(true);
     try {
-      const payload = {
-        orderId: form.orderId.trim(),
-        hubId: form.hubId || recommendedHub?.id || recommendedHub?._id,
-        droneId: form.droneId,
-        restaurantLocation: [restaurantPoint.lng, restaurantPoint.lat],
-        customerLocation: [customerPoint.lng, customerPoint.lat],
-      };
-      const res = await createDelivery(payload);
-      if (res.ok) {
-        setFeedback('Đã tạo phân công drone.');
-        const delivery = res.data;
-        const route = delivery?.route;
-        if (route?.waypoints?.length) {
-          setRoutePoints(
-            route.waypoints.map((wp) => ({
-              lat: wp.lat,
-              lng: wp.lng,
-              type: wp.type?.toLowerCase(),
-              label: wp.type,
-            }))
-          );
-          setRouteMeta({
-            distance: route.distance,
-            duration: route.duration,
-          });
-        } else {
-          setRoutePoints([
+      const orderId = form.orderId.trim();
+      const hubId = form.hubId || recommendedHub?.id || recommendedHub?._id;
+      const droneId = form.droneId;
+
+      // 1) Gán drone cho đơn (order-service qua proxy)
+      await axios.post(`${apiBase}/api/admin/drone/assign`, { orderId, hubId, droneId });
+
+      // 2) Lưu/hiển thị route cho map (không simulate)
+      const routeRes = await axios.post(`${apiBase}/api/drone/auto-route`, {
+        orderId,
+        hubId,
+        droneId,
+        simulate: false,
+      });
+      const route = routeRes.data?.data?.waypoints || [];
+      if (route.length) {
+        setRoutePoints(route.map((wp) => ({ lat: wp.lat, lng: wp.lng, type: wp.type?.toLowerCase(), label: wp.type })));
+        setRouteMeta({
+          distance: routeRes.data?.data?.distanceMeters,
+          duration: routeRes.data?.data?.etaSeconds,
+        });
+      } else {
+        setRoutePoints(
+          [
             recommendedHub?.location && { ...recommendedHub.location, type: 'hub', label: recommendedHub.name },
             { ...restaurantPoint, type: 'restaurant', label: 'Nhà hàng' },
             { ...customerPoint, type: 'customer', label: 'Khách hàng' },
-          ].filter(Boolean));
-        }
-      } else {
-        setFeedback(res.error || 'Không thể tạo phân công');
+          ].filter(Boolean)
+        );
       }
+
+      // 3) Lưu assignment vào delivery-service (để tracking/log)
+      const res = await createDelivery({
+        orderId,
+        hubId,
+        droneId,
+        restaurantLocation: [restaurantPoint.lng, restaurantPoint.lat],
+        customerLocation: [customerPoint.lng, customerPoint.lat],
+        status: 'EN_ROUTE_TO_RESTAURANT',
+      });
+      setFeedback(res.ok ? 'Đã gán drone và dựng tuyến bay.' : res.error || 'Không thể tạo phân công');
     } finally {
       setLoading(false);
     }
@@ -168,17 +174,16 @@ const AssignPage = () => {
     setLoading(true);
     setAssignError('');
     try {
-      const res = await axios.post(`${apiBase}/api/drone-deliveries`, {
-        orderId: order.orderId || order._id || order.id,
+      const orderId = order.orderId || order._id || order.id;
+      await axios.post(`${apiBase}/api/admin/drone/assign`, { orderId, hubId, droneId: form.droneId });
+      await axios.post(`${apiBase}/api/drone/auto-route`, { orderId, hubId, droneId: form.droneId, simulate: false });
+      await axios.post(`${apiBase}/api/drone-deliveries`, {
+        orderId,
         hubId,
         droneId: form.droneId,
-        status: order.status || 'PENDING',
+        status: 'EN_ROUTE_TO_RESTAURANT',
       });
-      if (res.status >= 200 && res.status < 300) {
-        setFeedback('Đã gán drone cho đơn.');
-      } else {
-        setAssignError(res.data?.message || 'Không thể gán drone.');
-      }
+      setFeedback('Đã gán drone cho đơn.');
     } catch (err) {
       setAssignError(err?.response?.data?.message || 'Không thể gán drone.');
     } finally {

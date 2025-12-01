@@ -306,8 +306,9 @@ export const generateAutoRoute = async (req, res) => {
       broadcast: true,
     });
 
-    // Kick off a simple simulation so map có chuyển động realtime
-    if (rawDroneId) {
+    // Chỉ simulate khi được yêu cầu rõ ràng (tránh tự động bay khi nhà hàng bấm chờ)
+    const shouldSimulate = req.body?.simulate === true || req.query?.simulate === 'true';
+    if (shouldSimulate && rawDroneId) {
       simulateFlight({ droneId: rawDroneId, orderId, hubId: hubIdValue, waypoints });
     }
 

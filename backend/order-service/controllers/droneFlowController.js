@@ -135,7 +135,8 @@ export const assignDroneToOrderInternal = async ({
     orderId,
     hubId,
     restaurantLocation,
-    customerLocation
+    customerLocation,
+    droneId: preferredDroneId
 } = {}) => {
     if (!orderId) {
         return { ok: false, statusCode: 400, message: "orderId is required" };
@@ -178,7 +179,14 @@ export const assignDroneToOrderInternal = async ({
         };
     }
 
-    const picked = pickNearestIdleDrone(droneList, hubId, targetLocation);
+    const normalizeId = (val) => (val ? val.toString().trim().toUpperCase() : "");
+    let picked =
+        droneList.find(
+            (d) =>
+                preferredDroneId &&
+                normalizeId(d.droneId || d.code || d.id || d._id) === normalizeId(preferredDroneId) &&
+                (!d.status || d.status.toLowerCase() === "idle")
+        ) || pickNearestIdleDrone(droneList, hubId, targetLocation);
     if (!picked) {
         return {
             ok: false,

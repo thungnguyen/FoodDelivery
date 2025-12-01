@@ -28,7 +28,9 @@ const DRONE_STAGE_LABELS = {
   drone_arrived_restaurant: "Drone đã tới, chờ nhà hàng",
   drone_picked_food: "Đang giao cho khách",
   drone_delivering: "Đang giao cho khách",
+  drone_arriving_customer: "Drone đang tới điểm giao",
   drone_arrived_customer: "Đã tới điểm giao, chờ xác nhận",
+  customer_wait_confirm: "Drone đã tới, chờ bạn xác nhận",
 };
 
 const mapDroneStage = (status = "") => {
@@ -39,7 +41,9 @@ const mapDroneStage = (status = "") => {
   if (normalized === "drone_arrived_restaurant") return DRONE_STAGE_LABELS.drone_arrived_restaurant;
   if (normalized === "drone_picked_food") return DRONE_STAGE_LABELS.drone_picked_food;
   if (normalized === "drone_delivering") return DRONE_STAGE_LABELS.drone_delivering;
+  if (normalized === "drone_arriving_customer") return DRONE_STAGE_LABELS.drone_arriving_customer;
   if (normalized === "drone_arrived_customer") return DRONE_STAGE_LABELS.drone_arrived_customer;
+  if (normalized === "customer_wait_confirm") return DRONE_STAGE_LABELS.customer_wait_confirm;
   return "";
 };
 
@@ -398,7 +402,12 @@ function Orders() {
             prev.map((order) => {
               const oid = order?._id || order?.id;
               if (!oid || String(oid) !== normalizedId) return order;
-              return { ...order, droneStatus: "drone_arrived_customer", droneId: order.droneId || payload?.droneId };
+              return {
+                ...order,
+                status: order.status || "drone_arrived_customer",
+                droneStatus: "drone_arrived_customer",
+                droneId: order.droneId || payload?.droneId,
+              };
             })
           );
           break;
@@ -882,7 +891,7 @@ function Orders() {
       const canCancelOrder = normalizedStatus === "pending";
       const canConfirmReceipt =
         Boolean(orderKey) &&
-        ["delivering", "drone_delivering", "drone_arrived_customer"].includes(normalizedStatus);
+        ["delivering", "drone_delivering", "drone_arriving_customer", "drone_arrived_customer", "customer_wait_confirm"].includes(normalizedStatus);
       const isReceiving = Boolean(orderKey && receivingOrderId === orderKey);
       const orderFeedback = order.orderFeedback || {};
       const driverFeedback = order.deliveryFeedback || {};
