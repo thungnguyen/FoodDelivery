@@ -11,9 +11,9 @@ import {
 } from "../utils/driverSession";
 
 const DELIVERY_API_BASE =
-  process.env.REACT_APP_DELIVERY_API_URL || "http://localhost:5003/api";
+  process.env.REACT_APP_DELIVERY_API_URL || "http://26.32.188.49:5003/api";
 
-const SOCKET_URL = process.env.REACT_APP_DELIVERY_SOCKET_URL || "http://localhost:5003";
+const SOCKET_URL = process.env.REACT_APP_DELIVERY_SOCKET_URL || "http://26.32.188.49:5003";
 
 const socket = io(SOCKET_URL, {
   autoConnect: false,

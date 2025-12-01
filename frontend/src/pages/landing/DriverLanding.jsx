@@ -9,14 +9,14 @@ function DriverLanding() {
   useEffect(() => {
     // Auto redirect after 3 seconds
     const timer = setTimeout(() => {
-      window.location.href = "http://localhost:3001";
+      window.location.href = "http://26.32.188.49:3001";
     }, 3000);
 
     return () => clearTimeout(timer);
   }, []);
 
   const handleRedirect = () => {
-    window.location.href = "http://localhost:3001";
+    window.location.href = "http://26.32.188.49:3001";
   };
 
   return (
@@ -73,7 +73,7 @@ function DriverLanding() {
         </div>
 
         <div className="driver-info">
-          <p>Driver Portal URL: <strong>http://localhost:3001</strong></p>
+          <p>Driver Portal URL: <strong>http://26.32.188.49:3001</strong></p>
         </div>
 
         <Link to="/" className="back-link">

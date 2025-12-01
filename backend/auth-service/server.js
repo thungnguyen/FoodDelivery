@@ -6,7 +6,7 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 
 const app = express();
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000,http://192.168.31.10:3000')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://26.32.188.49:3000,http://127.0.0.1:3000')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
@@ -37,7 +37,7 @@ connectDB().then(() => {
   app.use('/api/auth', authRoutes);
 
   const PORT = process.env.PORT || 4000;  
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Auth Service running on port ${PORT}`);
   });
 });

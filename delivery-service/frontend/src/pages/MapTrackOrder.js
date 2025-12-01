@@ -27,7 +27,7 @@ export default function MapTrackOrder() {
     const fetchDelivery = async () => {
       try {
         const token = getDriverToken();
-        const res = await axios.get(`http://localhost:5003/api/delivery/order/${orderId}`, {
+        const res = await axios.get(`http://26.32.188.49:5003/api/delivery/order/${orderId}`, {
           headers: { Authorization: token }
         });
 

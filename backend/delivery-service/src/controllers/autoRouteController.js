@@ -6,17 +6,17 @@ import emitEvent from '../utils/eventBus.js';
 import { normalizeBaseUrl } from '../utils/url.js';
 import fetch from 'node-fetch';
 
-const ORDER_SERVICE_URL = normalizeBaseUrl(process.env.ORDER_SERVICE_URL, 'http://localhost:5005', [
+const ORDER_SERVICE_URL = normalizeBaseUrl(process.env.ORDER_SERVICE_URL, 'http://26.32.188.49:5005', [
   '/api/orders',
   '/api',
 ]);
 const RESTAURANT_SERVICE_URL = normalizeBaseUrl(
   process.env.RESTAURANT_SERVICE_URL,
-  'http://localhost:5002',
+  'http://26.32.188.49:5002',
   ['/api/restaurants', '/api']
 );
 const SERVICE_KEY = process.env.SERVICE_INTERNAL_KEY || 'super-admin-internal-key';
-const DELIVERY_BASE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, 'http://localhost:5010', ['/api']);
+const DELIVERY_BASE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, 'http://26.32.188.49:5010', ['/api']);
 
 const fetchJson = async (url) => {
   const res = await fetch(url, {

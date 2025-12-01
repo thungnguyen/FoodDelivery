@@ -2,7 +2,7 @@ import axios from "axios";
 import jwt from "jsonwebtoken";
 
 const ORDER_SERVICE_URL =
-  process.env.ORDER_SERVICE_URL || "http://localhost:5005/api/orders";
+  process.env.ORDER_SERVICE_URL || "http://26.32.188.49:5005/api/orders";
 
 const ORDER_SERVICE_JWT_SECRET =
   process.env.ORDER_SERVICE_JWT_SECRET ||

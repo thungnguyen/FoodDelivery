@@ -16,7 +16,7 @@ connectDB();
 const app = express();
 
 // Enable CORS for your frontend
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://192.168.31.10:3000')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://26.32.188.49:3000')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -52,10 +52,10 @@ app.get("/", (req, res) => res.send("Payment Service Running"));
 
 const PORT = process.env.PORT || 5004;
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Payment Service running on port ${PORT}`);
-    console.log(`🌍 API Base URL: http://localhost:${PORT}`);
-    console.log(`📖 Swagger API Docs: http://localhost:${PORT}/api-docs`);
+    console.log(`🌍 API Base URL: http://26.32.188.49:${PORT}`);
+    console.log(`📖 Swagger API Docs: http://26.32.188.49:${PORT}/api-docs`);
   });
 }
 

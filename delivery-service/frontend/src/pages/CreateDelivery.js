@@ -39,7 +39,7 @@ export default function CreateDelivery() {
 
     try {
       const token = getDriverToken();
-      const res = await axios.post("http://localhost:5003/api/delivery/create", form, {
+      const res = await axios.post("http://26.32.188.49:5003/api/delivery/create", form, {
         headers: { Authorization: token }
       });
 

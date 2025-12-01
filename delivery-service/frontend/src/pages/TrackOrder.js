@@ -6,7 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 // WebSocket connection
-const socket = io("http://localhost:5003");
+const socket = io("http://26.32.188.49:5003");
 
 // Custom Driver Icon
 const driverIcon = new L.Icon({

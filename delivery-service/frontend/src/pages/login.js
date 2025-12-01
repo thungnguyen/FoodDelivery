@@ -24,7 +24,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await axios.post("http://localhost:5003/api/auth/login", form);
+      const res = await axios.post("http://26.32.188.49:5003/api/auth/login", form);
 
       if (res.data?.success) {
         const { token, data } = res.data;

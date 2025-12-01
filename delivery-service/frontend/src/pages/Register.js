@@ -55,7 +55,7 @@ export default function Register() {
     }
 
     try {
-      const res = await axios.post("http://localhost:5003/api/auth/register", form);
+      const res = await axios.post("http://26.32.188.49:5003/api/auth/register", form);
       if (res.data?.success) {
         alert("✅ Registration successful! Redirecting to Login...");
         navigate("/login");

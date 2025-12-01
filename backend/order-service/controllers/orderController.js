@@ -1032,7 +1032,7 @@ const sanitizeComment = (value) => {
     return value.trim().slice(0, 1000);
 };
 
-const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://localhost:5010");
+const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://26.32.188.49:5010");
 
 const fetchJson = async (url) => {
     try {

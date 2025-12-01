@@ -29,21 +29,21 @@ const joinUrl = (base, path) => {
 
 const AUTH_SERVICE_BASE = normalizeBaseUrl(
   process.env.AUTH_SERVICE_URL || process.env.AUTH_SERVICE_BASE_URL,
-  'http://localhost:4000',
+  'http://26.32.188.49:4000',
   ['/api/auth', '/api']
 );
 const AUTH_CUSTOMERS_URL = joinUrl(AUTH_SERVICE_BASE, '/api/auth/admin/customers');
 
 const DELIVERY_SERVICE_BASE = normalizeBaseUrl(
   process.env.DELIVERY_SERVICE_URL || process.env.DELIVERY_SERVICE_BASE_URL,
-  'http://localhost:5003',
+  'http://26.32.188.49:5003',
   ['/api/admin/drivers', '/api/admin', '/api']
 );
 const DELIVERY_DRIVERS_URL = joinUrl(DELIVERY_SERVICE_BASE, '/api/admin/drivers');
 
 const ORDER_SERVICE_BASE = normalizeBaseUrl(
   process.env.ORDER_SERVICE_URL || process.env.ORDER_SERVICE_BASE_URL,
-  'http://localhost:5005',
+  'http://26.32.188.49:5005',
   ['/api/orders', '/api']
 );
 const ORDER_ORDERS_URL = joinUrl(ORDER_SERVICE_BASE, '/api/orders');

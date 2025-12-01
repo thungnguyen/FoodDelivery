@@ -131,7 +131,7 @@ const ALERT_ICONS = {
   danger: '🚨',
 };
 
-const REALTIME_URL = process.env.REACT_APP_REALTIME_URL || 'http://localhost:5050';
+const REALTIME_URL = process.env.REACT_APP_REALTIME_URL || 'http://26.32.188.49:5050';
 
 const FALLBACK_CUSTOMERS = [
   {

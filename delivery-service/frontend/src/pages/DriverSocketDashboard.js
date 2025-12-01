@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:5003"); // Connect to backend WebSocket
+const socket = io("http://26.32.188.49:5003"); // Connect to backend WebSocket
 
 export default function DriverSocketDashboard() {
   const [orderId, setOrderId] = useState("123"); // Default Order ID

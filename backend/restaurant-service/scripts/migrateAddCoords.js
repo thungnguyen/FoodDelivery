@@ -3,7 +3,7 @@ import 'dotenv/config.js';
 import Restaurant from '../src/models/Restaurant.js';
 import { geocode } from '../src/utils/geocode.js';
 
-const MONGO_URI = process.env.MONGO_URI || process.env.RESTAURANT_MONGO_URI || 'mongodb://localhost:27017/restaurant-service';
+const MONGO_URI = process.env.MONGO_URI || process.env.RESTAURANT_MONGO_URI || 'mongodb://26.32.188.49:27017/restaurant-service';
 
 const run = async () => {
   await mongoose.connect(MONGO_URI, {});

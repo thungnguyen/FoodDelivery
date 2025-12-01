@@ -1,4 +1,4 @@
-const PROMOTION_BASE_URL = process.env.PROMOTION_SERVICE_URL || "http://localhost:5006";
+const PROMOTION_BASE_URL = process.env.PROMOTION_SERVICE_URL || "http://26.32.188.49:5006";
 
 const buildUrl = (path) => `${PROMOTION_BASE_URL.replace(/\/$/, "")}${path}`;
 
