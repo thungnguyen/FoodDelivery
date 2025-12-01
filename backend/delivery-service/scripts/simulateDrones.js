@@ -1,7 +1,7 @@
 // Simple drone flight simulator for local testing.
 // Usage:
 //   npm run simulator:drones -- --orderId=abc123 --droneId=SIM-DRONE --hubId=HUB01 --interval=1800 --assignmentId=<optional>
-// Default base URL: http://localhost:5010 (override via DRONE_API_BASE or DELIVERY_SERVICE_URL)
+// Default base URL: http://26.32.188.49:5010 (override via DRONE_API_BASE or DELIVERY_SERVICE_URL)
 import fetch from 'node-fetch';
 
 const args = process.argv.slice(2);
@@ -26,12 +26,12 @@ const BASE =
   process.env.SIM_BASE ||
   process.env.DRONE_API_BASE ||
   process.env.DELIVERY_SERVICE_URL ||
-  'http://192.168.31.10:5003';
+  'http://26.32.188.49:5003';
 const ORDER_BASE =
   orderBaseArg ||
   process.env.SIM_ORDER_BASE ||
   process.env.ORDER_SERVICE_URL ||
-  'http://192.168.31.10:5005';
+  'http://26.32.188.49:5005';
 
 const SPEED_MPS = 50; // 25 m/s
 const TICK_MIN_MS = 3000;

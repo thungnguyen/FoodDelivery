@@ -206,7 +206,7 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
 
     if (recipients.length) {
       const subject = `Yêu cầu duyệt nhà hàng mới: ${newRestaurant.name}`;
-      const reviewUrl = `${process.env.SUPER_ADMIN_PORTAL_URL || 'http://localhost:3000/super-admin/dashboard'}`;
+      const reviewUrl = `${process.env.SUPER_ADMIN_PORTAL_URL || 'http://26.32.188.49:3000/super-admin/dashboard'}`;
       const html = `
         <h2>Nhà hàng mới vừa đăng ký</h2>
         <p><strong>Tên nhà hàng:</strong> ${newRestaurant.name}</p>
@@ -448,7 +448,7 @@ router.post('/onboarding/resend', async (req, res) => {
 
     await restaurant.save({ validateBeforeSave: false });
 
-    const activationUrl = process.env.RESTAURANT_ONBOARDING_URL || 'http://localhost:3000/restaurant/activate';
+    const activationUrl = process.env.RESTAURANT_ONBOARDING_URL || 'http://26.32.188.49:3000/restaurant/activate';
     const expiryMinutes = Math.max(1, Math.round(OTP_TTL_MS / 60000));
 
     if (restaurant.admin?.email) {

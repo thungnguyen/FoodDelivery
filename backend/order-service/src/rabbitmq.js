@@ -1,6 +1,6 @@
 import amqp from "amqplib";
 
-const DEFAULT_URL = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+const DEFAULT_URL = process.env.RABBITMQ_URL || "amqp://26.32.188.49:5672";
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "app.direct";
 
 let connection = null;

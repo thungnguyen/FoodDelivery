@@ -3,7 +3,7 @@ import emitEvent from "../utils/eventBus.js";
 import buildOrderRooms from "../utils/realtimeRooms.js";
 import { normalizeBaseUrl } from "../utils/url.js";
 
-const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://localhost:5003");
+const DELIVERY_SERVICE_URL = normalizeBaseUrl(process.env.DELIVERY_SERVICE_URL, "http://26.32.188.49:5003");
 
 const MAX_DRONE_GAP_FACTOR = 1.1;
 

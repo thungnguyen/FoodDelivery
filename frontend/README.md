@@ -81,7 +81,7 @@ frontend/
 The frontend requires the following environment variables to be set in a `.env` file:
 
 ```
-REACT_APP_BACKEND_URL=http://localhost:5005
+REACT_APP_BACKEND_URL=http://26.32.188.49:5005
 REACT_APP_STRIPE_PUBLISHABLE_KEY=<your_stripe_publishable_key>
 ```
 
@@ -169,5 +169,5 @@ REACT_APP_STRIPE_PUBLISHABLE_KEY=<your_stripe_publishable_key>
 
 ## Notes
 
-- Ensure the backend services are running on `http://localhost:5005`.
+- Ensure the backend services are running on `http://26.32.188.49:5005`.
 - Replace sensitive information like `REACT_APP_BACKEND_URL` and `REACT_APP_STRIPE_PUBLISHABLE_KEY` with your own values.

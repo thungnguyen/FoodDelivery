@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:5003");
+const socket = io("http://26.32.188.49:5003");
 
 export default function DriverSimulator() {
   const [isMoving, setIsMoving] = useState(false);

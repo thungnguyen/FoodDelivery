@@ -225,7 +225,7 @@ export const approveRestaurant = async (req, res) => {
 
     await restaurant.save();
 
-    const activationUrl = process.env.RESTAURANT_ONBOARDING_URL || 'http://localhost:3000/restaurant/activate';
+    const activationUrl = process.env.RESTAURANT_ONBOARDING_URL || 'http://26.32.188.49:3000/restaurant/activate';
     const expiryMinutes = Math.max(1, Math.round(OTP_TTL_MS / 60000));
     const activationBundle = {
       email: restaurant.admin.email,

@@ -97,7 +97,7 @@ TWILIO_AUTH_TOKEN=<...>
 TWILIO_PHONE_NUMBER=<+...>
 RESEND_API_KEY=<re_...>
 And in frontend/.env:
-REACT_APP_BACKEND_URL=http://localhost:4000
+REACT_APP_BACKEND_URL=http://26.32.188.49:4000
 REACT_APP_STRIPE_PUBLISHABLE_KEY=<pk_test_...>
 
 6. Running Locally with Docker Compose
@@ -105,7 +105,7 @@ From repo root:
 docker-compose up --build
 MongoDB container → mongodb://mongo:27017
 Services available on ports 4000, 5002, 5003, 5004, 5005
-Frontend → http://localhost:3000
+Frontend → http://26.32.188.49:3000
 
 7. Running on Kubernetes
 Ensure your local cluster is running (e.g., Docker Desktop).
@@ -119,7 +119,7 @@ kubectl get svc
 
 8. Microservices & Endpoints
 
-8.1 Auth Service (http://localhost:4000)
+8.1 Auth Service (http://26.32.188.49:4000)
 POST /api/auth/register/customer
 POST /api/auth/login
 GET /api/auth/customer/me (JWT protect)
@@ -151,13 +151,13 @@ WebSocket event: location-update
 POST /api/payment/process
 GET /api/payment/status/:orderId
 POST /api/payment/webhook (Stripe webhook)
-Swagger UI: http://localhost:5004/api-docs
+Swagger UI: http://26.32.188.49:5004/api-docs
 
 9. Frontend Setup
 cd frontend
 npm install
 npm start
-Visit http://localhost:3000.
+Visit http://26.32.188.49:3000.
 Login/Register pages under /auth/login and /auth/register.
 
 10. Testing & Linting
@@ -170,10 +170,10 @@ npm test
 
 11. Troubleshooting Tips
 CORS errors: Ensure each service uses:
-app.use(cors({ origin: "http://localhost:3000" }));
+app.use(cors({ origin: "http://26.32.188.49:3000" }));
 MongoDB connectivity: Whitelist 0.0.0.0/0 in Atlas for development.
 Stripe webhooks (local):
-stripe listen --forward-to localhost:5004/api/payment/webhook
+stripe listen --forward-to 26.32.188.49:5004/api/payment/webhook
 12. Demo & Submission
 GitHub Repo: https://github.com/R-Tharanka/Food-Delivery-Microservices.git
 Demo Video: https://youtu.be/YourDemoLink

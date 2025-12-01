@@ -112,7 +112,7 @@ export const createDelivery = async (req, res) => {
       try {
         const restaurantServiceUrl =
           process.env.RESTAURANT_SERVICE_URL ||
-          "http://localhost:5002/api/restaurants";
+          "http://26.32.188.49:5002/api/restaurants";
         const restaurantResponse = await axios.get(
           `${restaurantServiceUrl}/${restaurantId}`
         );
@@ -330,7 +330,7 @@ export const getAvailableDeliveries = async (req, res) => {
 
       const restaurantServiceUrl =
         process.env.RESTAURANT_SERVICE_URL ||
-        "http://localhost:5002/api/restaurants";
+        "http://26.32.188.49:5002/api/restaurants";
 
       const restaurantMap = {};
       await Promise.all(

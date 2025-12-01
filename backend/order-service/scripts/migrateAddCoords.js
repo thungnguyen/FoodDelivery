@@ -3,7 +3,7 @@ import "dotenv/config.js";
 import Order from "../models/orderModel.js";
 import { geocode } from "../utils/geocode.js";
 
-const MONGO_URI = process.env.MONGO_URI || process.env.ORDER_MONGO_URI || "mongodb://localhost:27017/order-service";
+const MONGO_URI = process.env.MONGO_URI || process.env.ORDER_MONGO_URI || "mongodb://26.32.188.49:27017/order-service";
 
 const run = async () => {
     await mongoose.connect(MONGO_URI, {});

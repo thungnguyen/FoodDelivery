@@ -81,7 +81,7 @@ const DRONE_API_BASE_URL =
   process.env.REACT_APP_DRONE_API_URL ||
   process.env.REACT_APP_DELIVERY_URL ||
   process.env.REACT_APP_BACKEND_URL ||
-  'http://localhost:5010';
+  'http://26.32.188.49:5010';
 
 const REALTIME_URL = process.env.REACT_APP_DRONE_REALTIME_URL || REALTIME_SERVICE_URL;
 

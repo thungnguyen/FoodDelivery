@@ -14,7 +14,7 @@ import autoRoute from './routes/autoRoute.js';
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://192.168.31.10:3000')
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://26.32.188.49:3000')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -48,7 +48,7 @@ mongoose
   .connect(MONGO_URI, { dbName: process.env.DELIVERY_DB_NAME })
   .then(() => {
     console.log('✅ Delivery service connected to MongoDB', process.env.DELIVERY_DB_NAME || '');
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`🚚 Delivery service + drone socket listening on port ${PORT}`);
     });
   })

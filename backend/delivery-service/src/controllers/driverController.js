@@ -33,7 +33,7 @@ const notifyAdminsAboutNewDriver = async (driver) => {
   }
 
   const dashboardUrl =
-    process.env.SUPER_ADMIN_PORTAL_URL || 'http://localhost:3000/super-admin/dashboard';
+    process.env.SUPER_ADMIN_PORTAL_URL || 'http://26.32.188.49:3000/super-admin/dashboard';
 
   const html = `
     <h2>Hồ sơ tài xế mới đang chờ duyệt</h2>

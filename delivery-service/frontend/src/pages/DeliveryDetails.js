@@ -14,7 +14,7 @@ export default function DeliveryDetails() {
   const fetchDelivery = useCallback(async () => {
     try {
       const token = getDriverToken();
-      const res = await axios.get(`http://localhost:5003/api/delivery/${id}`, {
+      const res = await axios.get(`http://26.32.188.49:5003/api/delivery/${id}`, {
         headers: { Authorization: token }
       });
       setDelivery(res.data.delivery);
@@ -53,7 +53,7 @@ export default function DeliveryDetails() {
       }
 
       const res = await axios.put(
-        `http://localhost:5003/api/delivery/${id}/status`,
+        `http://26.32.188.49:5003/api/delivery/${id}/status`,
         payload,
         { headers: { Authorization: token } }
       );

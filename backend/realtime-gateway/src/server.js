@@ -140,6 +140,6 @@ app.post('/internal/events', (req, res) => {
   return res.status(202).json({ message: 'Event queued' });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`[realtime-gateway] Listening on port ${PORT}`);
 });

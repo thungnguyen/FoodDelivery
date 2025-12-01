@@ -8,7 +8,7 @@ stripe login
 Run the following command to start listening for events:
 
 ```sh
-stripe listen --forward-to http://localhost:5004/api/payment/webhook
+stripe listen --forward-to http://26.32.188.49:5004/api/payment/webhook
 ```
 ## Trigger a Test Webhook
 To test if your webhook is working, trigger a test event. For example, to simulate a successful payment:

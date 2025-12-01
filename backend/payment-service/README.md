@@ -72,7 +72,7 @@ The Payment Service is a microservice for handling payment processing, notificat
 
 2. Access the service at:
   ```
-  http://localhost:5004
+  http://26.32.188.49:5004
   ```
 
 ### Kubernetes
@@ -155,7 +155,7 @@ The `PaymentModel.js` defines the schema for storing payment details in MongoDB:
 ## API Documentation
 - Swagger documentation is available at:
   ```
-  http://localhost:5004/api-docs
+  http://26.32.188.49:5004/api-docs
   ```
 
 ---

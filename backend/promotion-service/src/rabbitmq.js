@@ -1,6 +1,6 @@
 import amqp from "amqplib";
 
-const RABBIT_URL = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+const RABBIT_URL = process.env.RABBITMQ_URL || "amqp://26.32.188.49:5672";
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "app.direct";
 
 let channel = null;

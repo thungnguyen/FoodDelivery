@@ -128,14 +128,14 @@ PAY_PORT=5004
 ORDER_PORT=5005
 REALTIME_PORT=5050
 
-REALTIME_URL=http://localhost:5050
-REDIS_URL=redis://localhost:6379
+REALTIME_URL=http://26.32.188.49:5050
+REDIS_URL=redis://26.32.188.49:6379
 SERVICE_INTERNAL_KEY=super-admin-internal-key
 
-AUTH_SERVICE_URL=http://localhost:4000
-RESTAURANT_SERVICE_URL=http://localhost:5002
-DELIVERY_SERVICE_URL=http://localhost:5003
-ORDER_SERVICE_URL=http://localhost:5005
+AUTH_SERVICE_URL=http://26.32.188.49:4000
+RESTAURANT_SERVICE_URL=http://26.32.188.49:5002
+DELIVERY_SERVICE_URL=http://26.32.188.49:5003
+ORDER_SERVICE_URL=http://26.32.188.49:5005
 
 EMAIL_PREFER_SMTP=true
 SMTP_HOST=smtp.gmail.com
@@ -144,8 +144,8 @@ SMTP_SECURE=true
 SMTP_USER=your_gmail@example.com
 SMTP_PASS=your_gmail_app_password
 NOTIFY_FROM_EMAIL="Food Delivery <your_gmail@example.com>"
-SUPER_ADMIN_PORTAL_URL=http://192.168.xx.xx:3000/super-admin/dashboard
-RESTAURANT_ONBOARDING_URL=http://192.168.xx.xx:3000/restaurant/activate
+SUPER_ADMIN_PORTAL_URL=http://26.32.188.49:3000/super-admin/dashboard
+RESTAURANT_ONBOARDING_URL=http://26.32.188.49:3000/restaurant/activate
 ```
 
 ### 6.2 Biến đặc thù dịch vụ
@@ -188,7 +188,7 @@ Lặp lại cho từng dịch vụ; nhớ cung cấp `.env` riêng (có thể d�
 
 ## 8. Microservices & endpoint
 
-### 8.1 Auth Service (`http://localhost:4000`)
+### 8.1 Auth Service (`http://26.32.188.49:4000`)
 
 - `POST /api/auth/register/customer` – đăng ký khách.  
 - `POST /api/auth/login` – đăng nhập đa vai trò.  
@@ -197,7 +197,7 @@ Lặp lại cho từng dịch vụ; nhớ cung cấp `.env` riêng (có thể d�
 - `GET /api/auth/admin/customers` – liệt kê khách (Admin JWT).  
 - `PATCH /api/auth/admin/customers/:id/status` – khóa/mở khách (Admin JWT).
 
-### 8.2 Restaurant Service (`http://localhost:5002`)
+### 8.2 Restaurant Service (`http://26.32.188.49:5002`)
 
 Nhà hàng:
 - `POST /api/restaurants/register`  
@@ -227,7 +227,7 @@ Super Admin:
 - `DELETE /api/superadmin/restaurant/:id`  
 - Proxy: `/api/superadmin/customers|drivers|orders`
 
-### 8.3 Order Service (`http://localhost:5005`)
+### 8.3 Order Service (`http://26.32.188.49:5005`)
 
 - `POST /api/orders` (Customer)  
 - `GET /api/orders` (Customer/Restaurant/Driver/Admin/SuperAdmin)  
@@ -238,7 +238,7 @@ Super Admin:
 - `POST /api/orders/:id/feedback` (Customer)  
 - `GET /api/orders/feedback/restaurant` (Restaurant/Admin/SuperAdmin)
 
-### 8.4 Delivery Service (`http://localhost:5003`)
+### 8.4 Delivery Service (`http://26.32.188.49:5003`)
 
 Auth tài xế:
 - `POST /api/auth/register`  
@@ -260,18 +260,18 @@ Quản trị tài xế:
 - `PATCH /api/admin/drivers/:id/status`  
 - `PATCH /api/admin/drivers/:id/activity`
 
-### 8.5 Payment Service (`http://localhost:5004`)
+### 8.5 Payment Service (`http://26.32.188.49:5004`)
 
 - `POST /api/payment/process` – tạo thanh toán.  
 - `POST /api/payment/webhook` – Stripe webhook (raw body).  
-- Swagger UI: `http://localhost:5004/api-docs`.  
+- Swagger UI: `http://26.32.188.49:5004/api-docs`.  
 > Mỗi `orderId` là duy nhất trong Payment Service; webhook cập nhật trạng thái Paid/Failed và có thể kích hoạt SMS/Email.
 
 ---
 
 ## 9. Realtime Gateway
 
-- Base URL: `http://localhost:5050`.  
+- Base URL: `http://26.32.188.49:5050`.  
 - `GET /health` – kiểm tra sẵn sàng.  
 - `POST /internal/events` – dịch vụ nội bộ phát sự kiện.  
   - Header: `x-service-key: ${SERVICE_INTERNAL_KEY}`  
@@ -291,7 +291,7 @@ npm install
 npm start
 ```
 
-Truy cập `http://localhost:3000`. Các trang quan trọng:
+Truy cập `http://26.32.188.49:3000`. Các trang quan trọng:
 - `/auth/login`, `/auth/register`  
 - `/restaurant/*` cho quản trị nhà hàng  
 - `/super-admin/dashboard` dành cho Super Admin
@@ -304,7 +304,7 @@ npm install
 npm start
 ```
 
-Truy cập `http://localhost:3001`. Đảm bảo cấu hình `VITE_API_BASE_URL` trỏ về Delivery Service.
+Truy cập `http://26.32.188.49:3001`. Đảm bảo cấu hình `VITE_API_BASE_URL` trỏ về Delivery Service.
 
 ---
 
@@ -328,9 +328,9 @@ Delivery frontend/backend sử dụng lệnh tương tự trong thư mục riên
 
 ## 12. Troubleshooting
 
-- **CORS lỗi:** đảm bảo mỗi service `app.use(cors({ origin: "http://localhost:3000", credentials: true }))`.  
+- **CORS lỗi:** đảm bảo mỗi service `app.use(cors({ origin: "http://26.32.188.49:3000", credentials: true }))`.  
 - **Mongo không kết nối:** whitelist IP (Atlas) hoặc dùng `0.0.0.0/0` cho dev.  
-- **Stripe webhook:** chạy `stripe listen --forward-to localhost:5004/api/payment/webhook`.  
+- **Stripe webhook:** chạy `stripe listen --forward-to 26.32.188.49:5004/api/payment/webhook`.  
 - **Realtime không push:** kiểm tra `REDIS_URL` và `SERVICE_INTERNAL_KEY` đồng nhất giữa gateway và dịch vụ phát sự kiện.  
 - **Email không gửi:** bật `EMAIL_PREFER_SMTP=true`, dùng Gmail App Password, kiểm tra log `activation.deliveryStatus`.  
 - **Link email mở không được trên mobile:** đặt `SUPER_ADMIN_PORTAL_URL` và `RESTAURANT_ONBOARDING_URL` bằng IP nội bộ máy dev và đảm bảo cùng mạng Wi-Fi.  
