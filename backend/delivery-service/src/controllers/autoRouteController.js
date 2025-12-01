@@ -71,7 +71,7 @@ const normalisePoint = (point, fallbackType) => {
     lng = tmp;
   }
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng, type: point.type || fallbackType };
+  return { lat, lng, type: point.type || fallbackType, label: point.label || point.name };
 };
 
 const simulateFlight = async ({ droneId, orderId, hubId, waypoints }) => {
@@ -159,6 +159,10 @@ export const generateAutoRoute = async (req, res) => {
     );
     let hubPoint = normalisePoint(toPoint(hub?.location?.lat, hub?.location?.lng, 'hub'), 'hub');
 
+    if (hubPoint) hubPoint.label = hub?.name || hub?.code || 'Hub';
+    if (restaurantPoint) restaurantPoint.label = restaurant?.name || restaurant?.restaurantName || 'Nhà hàng';
+    if (customerPoint) customerPoint.label = order?.customerName || order?.deliveryAddress || 'Khách hàng';
+
     // Nếu vẫn chưa có toạ độ hợp lệ, thử geocode lại bằng địa chỉ (đảm bảo không bị đảo lat/lng)
     if ((!customerPoint || !isLatLngInVietnam(customerPoint.lat, customerPoint.lng)) && order?.deliveryAddress) {
       const geo = await fetchJson(`${ORDER_SERVICE_URL}/api/geocode?q=${encodeURIComponent(order.deliveryAddress)}`);
@@ -242,6 +246,8 @@ export const generateAutoRoute = async (req, res) => {
               type:
                 wp.type ||
                 (idx === 0 || idx === waypoints.length - 1 ? 'HUB' : idx === 1 ? 'RESTAURANT' : 'CUSTOMER'),
+              label: wp.label,
+              name: wp.name,
             },
             idx === 0 || idx === waypoints.length - 1 ? 'HUB' : idx === 1 ? 'RESTAURANT' : 'CUSTOMER'
           )
@@ -251,6 +257,7 @@ export const generateAutoRoute = async (req, res) => {
           lat: pt.lat,
           lng: pt.lng,
           type: pt.type?.toString().toUpperCase(),
+          label: pt.label || pt.name,
         }));
 
       const update = {

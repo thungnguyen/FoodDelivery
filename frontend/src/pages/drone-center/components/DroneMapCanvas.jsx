@@ -237,7 +237,8 @@ const DroneMapCanvas = ({ drones = [], hubs = [], focusDroneId, height = 420, ro
     });
 
     routePoints.forEach((pt, idx) => {
-      const type = pt.type || (idx === 0 ? 'hub' : idx === routePoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer');
+      const rawType = pt.type || (idx === 0 ? 'hub' : idx === routePoints.length - 1 ? 'hub' : idx === 1 ? 'restaurant' : 'customer');
+      const type = typeof rawType === 'string' ? rawType.toLowerCase() : rawType;
       upsertMarker(
         `route-${idx}`,
         [pt.lng, pt.lat],

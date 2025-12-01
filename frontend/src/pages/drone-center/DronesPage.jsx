@@ -61,19 +61,20 @@ const normalizeRoutePoints = (waypoints = []) =>
       const lat = Number(pt.lat);
       const lng = Number(pt.lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-      return {
-        lat,
-        lng,
-        type: pt.type || (idx === 0 ? 'hub' : idx === waypoints.length - 1 ? 'hub' : 'waypoint'),
-        label:
-          pt.type === 'restaurant'
-            ? 'Nhà hàng'
-            : pt.type === 'customer'
-            ? 'Khách hàng'
-            : pt.type === 'hub'
-            ? 'Hub'
-            : `Điểm ${idx + 1}`,
-      };
+      const rawType = (pt.type || '').toString().toLowerCase();
+      const type =
+        ['hub', 'restaurant', 'customer'].includes(rawType)
+          ? rawType
+          : idx === 0 || idx === waypoints.length - 1
+          ? 'hub'
+          : idx === 1
+          ? 'restaurant'
+          : 'customer';
+      const label =
+        pt.label ||
+        pt.name ||
+        (type === 'restaurant' ? 'Nhà hàng' : type === 'customer' ? 'Khách hàng' : type === 'hub' ? 'Hub' : `Điểm ${idx + 1}`);
+      return { lat, lng, type, label };
     })
     .filter(Boolean);
 

@@ -154,7 +154,7 @@ const normalizeWaypoint = (wp = {}, index = 0, total = 0) => {
     lat,
     lng,
     type: fallbackType.toString().toLowerCase(),
-    label: wp.label || wp.type || fallbackType,
+    label: wp.label || wp.name || wp.type || fallbackType,
   };
 };
 
