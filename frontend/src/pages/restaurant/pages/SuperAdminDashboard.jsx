@@ -435,6 +435,13 @@ const normalizeRestaurants = (raw = []) => {
     .filter(Boolean)
     .map((item) => {
       const id = item._id || item.id;
+      const statusRaw = typeof item.status === 'string' ? item.status.toLowerCase() : '';
+      const availability =
+        typeof item.availability === 'boolean'
+          ? item.availability
+          : statusRaw
+          ? statusRaw === 'active'
+          : true;
       const approval =
         item.approvalStatus ||
         item.status ||
@@ -446,7 +453,8 @@ const normalizeRestaurants = (raw = []) => {
         location: item.location || item.address || '—',
         contactNumber: item.contactNumber || item.phoneNumber || '—',
         adminEmail: item.admin?.email || item.email || '—',
-        status: item.availability === false ? 'inactive' : 'active',
+        status: availability ? 'active' : 'inactive',
+        availability,
         approvalStatus: approval,
         approvalNotes: item.approvalNotes || '',
         approvedAt: item.approvedAt,
@@ -812,6 +820,7 @@ function SuperAdminDashboard() {
     items: [],
     error: '',
   });
+  const [restaurantDeletingId, setRestaurantDeletingId] = useState(null);
 
   const [drivers, setDrivers] = useState([]);
   const [driverFilter, setDriverFilter] = useState('all');
@@ -1302,6 +1311,27 @@ function SuperAdminDashboard() {
       };
     });
   }, [orders, customerLookup, restaurantLookup, driverLookup]);
+
+  const restaurantOrderCounts = useMemo(() => {
+    if (!ordersHydrated.length) return {};
+    return ordersHydrated.reduce((acc, order) => {
+      const restaurantId = order.restaurantId;
+      if (!restaurantId) {
+        return acc;
+      }
+      const key = String(restaurantId);
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+  }, [ordersHydrated]);
+
+  const getRestaurantOrderCount = useCallback(
+    (restaurantId) => {
+      if (!restaurantId) return 0;
+      return restaurantOrderCounts[String(restaurantId)] || 0;
+    },
+    [restaurantOrderCounts]
+  );
 
   const filteredCustomers = useMemo(() => {
     const query = customerSearch.trim().toLowerCase();
@@ -1873,6 +1903,69 @@ function SuperAdminDashboard() {
     } catch (error) {
       alert(`Không thể cập nhật trạng thái nhà hàng: ${error.message}`);
       setRestaurants(snapshot);
+    }
+  };
+
+  const handleDeleteRestaurant = async (restaurant) => {
+    if (!restaurant?.id) return;
+    const orderCount = getRestaurantOrderCount(restaurant.id);
+    const hasOrders = orderCount > 0;
+    const confirmMessage = hasOrders
+      ? 'Nhà hàng đã có đơn hàng. Hệ thống sẽ ẩn nhà hàng thay vì xóa hoàn toàn. Tiếp tục?'
+      : 'Bạn chắc chắn muốn xóa nhà hàng này? Thao tác này không thể hoàn tác.';
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    const snapshot = restaurants;
+    setRestaurantDeletingId(restaurant.id);
+
+    if (hasOrders) {
+      setRestaurants((prev) =>
+        prev.map((item) =>
+          item.id === restaurant.id ? { ...item, status: 'inactive', availability: false } : item
+        )
+      );
+    } else {
+      setRestaurants((prev) => prev.filter((item) => item.id !== restaurant.id));
+    }
+
+    try {
+      const response = await fetchJSON(
+        `${SUPER_ADMIN_API_URL}/api/superadmin/restaurant/${restaurant.id}`,
+        {
+          method: 'DELETE',
+        }
+      );
+      if (response?.action === 'deleted') {
+        setRestaurants((prev) => prev.filter((item) => item.id !== restaurant.id));
+        return;
+      }
+      if (response?.action === 'hidden') {
+        const normalizedList = response?.restaurant ? normalizeRestaurants([response.restaurant]) : [];
+        const normalized =
+          (normalizedList && normalizedList.length && normalizedList[0]) ||
+          { ...restaurant, status: 'inactive', availability: false };
+        setRestaurants((prev) => {
+          const without = prev.filter((item) => item.id !== restaurant.id);
+          const existingIndex = without.findIndex((item) => item.id === normalized.id);
+          if (existingIndex >= 0) {
+            const clone = [...without];
+            clone[existingIndex] = { ...clone[existingIndex], ...normalized };
+            return clone;
+          }
+          return [...without, normalized];
+        });
+        setRestaurantAlert({
+          type: 'info',
+          message: 'Nhà hàng đã được chuyển sang trạng thái ẩn vì đã có đơn hàng.',
+        });
+      }
+    } catch (error) {
+      alert(`Không thể xóa/ẩn nhà hàng: ${error.message}`);
+      setRestaurants(snapshot);
+    } finally {
+      setRestaurantDeletingId(null);
     }
   };
 
@@ -2499,14 +2592,19 @@ function SuperAdminDashboard() {
                   <th>Liên hệ</th>
                   <th>Danh mục</th>
                   <th>Món</th>
+                  <th>Đơn</th>
                   <th>Trạng thái</th>
                   <th>Duyệt</th>
                   <th>Thao tác</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredRestaurants.map((restaurant) => (
-                  <tr key={restaurant.id}>
+                {filteredRestaurants.map((restaurant) => {
+                  const orderCount = getRestaurantOrderCount(restaurant.id);
+                  const hasOrders = orderCount > 0;
+                  const deleting = restaurantDeletingId === restaurant.id;
+                  return (
+                    <tr key={restaurant.id}>
                     <td>
                       <div className="sa-stack">
                         <strong>{restaurant.name}</strong>
@@ -2528,6 +2626,7 @@ function SuperAdminDashboard() {
                     </td>
                     <td>{restaurant.categories.join(', ') || '—'}</td>
                     <td className="sa-number">{restaurant.totalMenus}</td>
+                    <td className="sa-number">{orderCount}</td>
                     <td>
                       <span className={`sa-status ${restaurant.status}`}>
                         {restaurant.status === 'active' ? 'Đang mở' : 'Tạm dừng'}
@@ -2604,9 +2703,18 @@ function SuperAdminDashboard() {
                           </button>
                         </>
                       )}
+                      <button
+                        className={`sa-button ${hasOrders ? 'warning' : 'danger'}`}
+                        onClick={() => handleDeleteRestaurant(restaurant)}
+                        disabled={deleting}
+                        title={hasOrders ? 'Đã có đơn - chỉ có thể ẩn tạm thời' : 'Xóa hoàn toàn nhà hàng'}
+                      >
+                        {deleting ? 'Đang xử lý...' : hasOrders ? 'Ẩn tạm thời' : 'Xóa'}
+                      </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

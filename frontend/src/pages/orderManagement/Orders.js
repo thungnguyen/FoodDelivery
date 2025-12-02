@@ -54,6 +54,63 @@ const extractPoint = (raw = {}) => {
   return null;
 };
 
+const DRONE_SPEED_KMH = 30;
+const TO_RESTAURANT_STATUSES = new Set(['drone_assigned', 'drone_enroute_to_restaurant', 'drone_arriving_restaurant']);
+const TO_CUSTOMER_STATUSES = new Set(['drone_picked_food', 'drone_delivering', 'drone_arriving_customer']);
+
+const haversineKm = (a, b) => {
+  if (!a || !b) return Infinity;
+  const lat1 = Number(a.lat);
+  const lat2 = Number(b.lat);
+  const lng1 = Number(a.lng);
+  const lng2 = Number(b.lng);
+  if (![lat1, lat2, lng1, lng2].every(Number.isFinite)) return Infinity;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(toRad(lat1)) * Math.cos(toRad(lat2));
+  return 2 * 6371 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+const computeFlightEta = (order, tracking) => {
+  const lat = Number(tracking?.lat);
+  const lng = Number(tracking?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const status = (order?.droneStatus || order?.status || '').toLowerCase();
+  let target = null;
+  let legLabel = '';
+
+  if (TO_RESTAURANT_STATUSES.has(status)) {
+    target = extractPoint(order.restaurantLocation || order.restaurantAddress || order.restaurant);
+    legLabel = 'tới nhà hàng';
+  } else if (TO_CUSTOMER_STATUSES.has(status)) {
+    target =
+      extractPoint({ lat: order.deliveryLat, lng: order.deliveryLng }) ||
+      extractPoint(order.deliveryLocation) ||
+      extractPoint(order.customerLocation);
+    legLabel = 'tới khách hàng';
+  } else {
+    return null;
+  }
+
+  if (!target) return null;
+  const distanceKm = haversineKm({ lat, lng }, target);
+  if (!Number.isFinite(distanceKm) || distanceKm === Infinity) return null;
+  const etaSeconds = Math.max(0, Math.round((distanceKm / DRONE_SPEED_KMH) * 3600));
+  return { etaSeconds, distanceKm, legLabel };
+};
+
+const formatEtaLabel = (eta) => {
+  if (!eta) return '';
+  const minutes = eta.etaSeconds / 60;
+  const minutesText = minutes < 1 ? '<1 phút' : `${Math.max(1, Math.round(minutes))} phút`;
+  const distanceText = eta.distanceKm >= 1 ? `${eta.distanceKm.toFixed(1)} km` : `${Math.round(eta.distanceKm * 1000)} m`;
+  return `Ước tính còn ~${minutesText} (${distanceText}) để ${eta.legLabel}`;
+};
+
 function Orders() {
   const [orders, setOrders] = useState([]);
   const [restaurantNames, setRestaurantNames] = useState({});
@@ -1041,6 +1098,8 @@ function Orders() {
               : cachedRoute && cachedRoute.length
               ? cachedRoute.map((wp) => ({ lat: wp.lat, lng: wp.lng, type: wp.type?.toLowerCase(), label: wp.type }))
               : fallbackRoute;
+            const flightEta = computeFlightEta(order, tracking);
+            const etaLabel = formatEtaLabel(flightEta);
             const trackingOpen = Boolean(trackingVisible[orderKey]);
             return (
               <div className="alert alert-info mt-3 mb-0">
@@ -1053,6 +1112,7 @@ function Orders() {
                     {stageText || "Đang theo dõi trạng thái giao hàng"}
                     {tracking?.status ? ` • ${tracking.status}` : ""}
                   </span>
+                  {etaLabel && <span className="text-primary fw-semibold">{etaLabel}</span>}
                   <Button
                     size="sm"
                     variant={trackingOpen ? "outline-light" : "light"}
