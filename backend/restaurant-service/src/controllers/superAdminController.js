@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import fetch from 'node-fetch';
 import Restaurant from '../models/Restaurant.js';
 import { sendEmail } from '../utils/emailService.js';
 
@@ -10,6 +11,39 @@ const PASSWORD_NUMBERS = '23456789';
 const PASSWORD_SPECIALS = '@$!%*?&';
 const PASSWORD_ALL = PASSWORD_LETTERS + PASSWORD_NUMBERS + PASSWORD_SPECIALS;
 const DEFAULT_ADMIN_NOTIFICATION_EMAILS = ['thanhhungnguyen8204@gmail.com', 'thanhhunggpt@gmail.com'];
+const stripTrailingSlash = (value = '') => value.replace(/\/+$/, '');
+const stripPathSuffix = (value, suffix) => {
+  if (!value || !suffix) return stripTrailingSlash(value);
+  const normalizedValue = stripTrailingSlash(value);
+  const normalizedSuffix = stripTrailingSlash(suffix);
+  if (!normalizedSuffix.length) return normalizedValue;
+  if (normalizedValue.endsWith(normalizedSuffix)) {
+    return normalizedValue.slice(0, normalizedValue.length - normalizedSuffix.length);
+  }
+  return normalizedValue;
+};
+const normalizeBaseUrl = (rawValue, fallback, suffixes = []) => {
+  let base = stripTrailingSlash(rawValue || fallback);
+  suffixes.forEach((suffix) => {
+    base = stripPathSuffix(base, suffix);
+  });
+  return stripTrailingSlash(base);
+};
+const joinUrl = (base, path) => {
+  const normalizedBase = stripTrailingSlash(base || '');
+  if (!path) return normalizedBase;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
+};
+
+const ORDER_SERVICE_BASE = normalizeBaseUrl(
+  process.env.ORDER_SERVICE_URL || process.env.ORDER_SERVICE_BASE_URL,
+  'http://26.32.188.49:5005',
+  ['/api/orders', '/api']
+);
+const ORDER_ORDERS_URL = joinUrl(ORDER_SERVICE_BASE, '/api/orders');
+const SERVICE_INTERNAL_KEY = process.env.SERVICE_INTERNAL_KEY || 'super-admin-internal-key';
+
 const computeFullAddress = (address = {}) => {
   const parts = [address.street, address.ward, address.district, address.city]
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
@@ -68,6 +102,44 @@ const generateOtpCode = () => {
   return numeric.toString().padStart(6, '0');
 };
 
+const parseJsonSafe = (text, fallback) => {
+  try {
+    return text ? JSON.parse(text) : fallback;
+  } catch (_err) {
+    return fallback;
+  }
+};
+
+const fetchRestaurantOrderCount = async (restaurantId, authHeader) => {
+  if (!restaurantId) return 0;
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+  if (authHeader) {
+    headers.Authorization = authHeader;
+  }
+  if (SERVICE_INTERNAL_KEY) {
+    headers['x-service-key'] = SERVICE_INTERNAL_KEY;
+  }
+  const url = `${ORDER_ORDERS_URL}?restaurantId=${encodeURIComponent(restaurantId)}&countOnly=true`;
+  const response = await fetch(url, { headers });
+  const text = await response.text();
+  const payload = parseJsonSafe(text, {});
+  if (!response.ok) {
+    const error = new Error(payload?.message || 'Unable to verify restaurant orders');
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  if (typeof payload?.count === 'number') {
+    return payload.count;
+  }
+  if (Array.isArray(payload)) {
+    return payload.length;
+  }
+  return 0;
+};
+
 // Get all restaurants (Super Admin only)
 export const getAllRestaurants = async (req, res) => {
   try {
@@ -107,21 +179,37 @@ export const deleteRestaurant = async (req, res) => {
   try {
     if (req.user.role !== 'superAdmin') {
       return res.status(403).json({ message: 'Access denied, only Super Admin can access this resource' });
-    } else {
-      activationBundle.deliveryStatus = 'skipped';
-      activationBundle.deliveryError = 'Restaurant admin email is missing.';
     }
 
-    const restaurant = await Restaurant.findById(req.params.id);
+    const restaurantId = req.params.id;
+    const restaurant = await Restaurant.findById(restaurantId);
     if (!restaurant) {
       return res.status(404).json({ message: 'Restaurant not found' });
     }
 
-    // Delete associated food items here (if needed)
-    // await FoodItem.deleteMany({ restaurant: restaurant._id });
+    let orderCount;
+    try {
+      orderCount = await fetchRestaurantOrderCount(restaurantId, req.headers.authorization);
+    } catch (orderErr) {
+      console.error('deleteRestaurant order check failed:', orderErr);
+      return res
+        .status(orderErr.status || 502)
+        .json({ message: orderErr.message || 'Không thể kiểm tra đơn hàng của nhà hàng' });
+    }
+
+    if (orderCount > 0) {
+      restaurant.availability = false;
+      await restaurant.save();
+      return res.status(200).json({
+        message: 'Restaurant has existing orders. Marked as inactive instead of deletion.',
+        action: 'hidden',
+        orderCount,
+        restaurant,
+      });
+    }
 
     await restaurant.deleteOne();
-    res.status(200).json({ message: 'Restaurant deleted successfully' });
+    res.status(200).json({ message: 'Restaurant deleted successfully', action: 'deleted' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server Error' });

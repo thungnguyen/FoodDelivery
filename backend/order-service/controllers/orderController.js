@@ -446,24 +446,50 @@ export const createOrder = async (req, res) => {
 export const getOrders = async (req, res) => {
     try {
         const query = {};
+        const role = req.user?.role;
 
-        if (req.user?.role === "restaurant") {
+        if (role === "restaurant") {
             const restaurantId = req.user.restaurantId || req.user.id;
             if (restaurantId) {
                 query.restaurantId = restaurantId;
             }
-        } else if (req.user?.role === "customer") {
+        } else if (role === "customer") {
             const customerId = req.user.customerId || req.user.id;
             if (customerId) {
                 query.customerId = customerId;
             }
+        } else if (role === "admin" || role === "superAdmin") {
+            const { restaurantId, customerId, driverId } = req.query || {};
+            if (restaurantId) {
+                query.restaurantId = restaurantId;
+            }
+            if (customerId) {
+                query.customerId = customerId;
+            }
+            if (driverId) {
+                query.driverId = driverId;
+            }
         }
+
         const requestedStatus = canonicalizeStatus(req.query?.status);
         if (requestedStatus) {
             query.status = requestedStatus;
         }
 
-        const orders = await Order.find(query);
+        const countOnly = String(req.query?.countOnly || "").toLowerCase() === "true";
+        const limitValue = Number(req.query?.limit);
+        const limit = Number.isFinite(limitValue) && limitValue > 0 ? Math.min(limitValue, 500) : null;
+
+        if (countOnly) {
+            const count = await Order.countDocuments(query);
+            return res.status(200).json({ count });
+        }
+
+        let cursor = Order.find(query);
+        if (limit) {
+            cursor = cursor.limit(limit);
+        }
+        const orders = await cursor;
         const response = orders.map(toOrderResponse);
         res.status(200).json(response);
     } catch (error) {
